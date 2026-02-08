@@ -27,7 +27,6 @@ Version: 2.0.0 (Rules Migration December 2025)
 
 import asyncio
 import logging
-import threading
 import uuid
 import time
 import itertools
@@ -359,13 +358,14 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
         self.is_initialized = False
         self.is_operational = False
         self.emergency_mode = False
+        self.trading_mode = 'backtest'  # 'backtest', 'paper', or 'live'
 
         # Orchestrator integration
         self.component_id: Optional[str] = None
         self.orchestrator: Optional[Any] = None  # HierarchicalSystemOrchestrator reference
 
         # Threading
-        self.authorization_lock = threading.Lock()
+        self.authorization_lock = asyncio.Lock()
         self.monitoring_task: Optional[asyncio.Task] = None
 
         logger.info("Central Risk Manager initialized - Governance Hub Ready (using centralized RiskConfig)")
@@ -411,23 +411,23 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
 
     @property
     def strategy_allocation_limit(self) -> float:
-        """Strategy allocation limit (default 33%)"""
-        return 0.33  # Not in RiskConfig, using default
+        """Strategy allocation limit from centralized config"""
+        return self.config.strategy_allocation_limit
 
     @property
     def real_time_monitoring(self) -> bool:
-        """Real-time monitoring flag (default True)"""
-        return True  # Always enabled
+        """Real-time monitoring flag from centralized config"""
+        return self.config.real_time_monitoring
 
     @property
     def monitoring_frequency(self) -> int:
-        """Monitoring frequency in seconds (default 1)"""
-        return 1  # 1 second monitoring
+        """Monitoring frequency in seconds from centralized config"""
+        return self.config.monitoring_frequency_seconds
 
     @property
     def max_execution_time(self) -> int:
-        """Max execution time in seconds (default 3600)"""
-        return 3600  # 1 hour
+        """Max execution time in seconds from centralized config"""
+        return self.config.max_execution_time_seconds
 
     def get_execution_algorithm(self, execution_params: Optional[Dict[str, Any]] = None) -> ExecutionAlgorithm:
         """Get execution algorithm from parameters or raise exception"""
@@ -437,13 +437,13 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
 
     @property
     def high_confidence_threshold(self) -> float:
-        """High confidence threshold (default 0.8)"""
-        return 0.8
+        """High confidence threshold from centralized config"""
+        return self.config.high_confidence_threshold
 
     @property
     def extreme_confidence_threshold(self) -> float:
-        """Extreme confidence threshold (default 0.9)"""
-        return 0.9
+        """Extreme confidence threshold from centralized config"""
+        return self.config.extreme_confidence_threshold
 
     @property
     def regime_risk_multipliers(self) -> Dict[str, float]:
@@ -1283,8 +1283,18 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
                             authorization_level=AuthorizationLevel.REJECTED,
                             rejection_reason=f"CIRCUIT BREAKER: {breaker_status.halt_reason}"
                         )
-                except Exception:
-                    pass # Fail-open for performance
+                except Exception as e:
+                    # Fail-closed in live/paper mode, fail-open only in backtest
+                    trading_mode = getattr(self, 'trading_mode', 'backtest')
+                    if trading_mode in ('live', 'paper'):
+                        logger.error(f"Circuit breaker check failed (fail-closed): {e}")
+                        return TradingAuthorization(
+                            request_id=request.request_id,
+                            authorization_level=AuthorizationLevel.REJECTED,
+                            rejection_reason=f"CIRCUIT_BREAKER_ERROR: {e}"
+                        )
+                    else:
+                        logger.warning(f"Circuit breaker check failed (fail-open in backtest): {e}")
 
             # Check emergency mode
             if self.emergency_mode:
@@ -1295,7 +1305,7 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
                 )
 
             # Store pending request (Safe locking - GAP 4-5)
-            with self.authorization_lock:
+            async with self.authorization_lock:
                 self.pending_requests[request.request_id] = request
 
             # Perform comprehensive risk assessment (OUTSIDE lock to prevent loop blockage)
@@ -1303,11 +1313,11 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
                 authorization = await self._assess_trading_request(request)
             finally:
                 # Ensure we clean up even if assessment fails
-                with self.authorization_lock:
+                async with self.authorization_lock:
                     self.pending_requests.pop(request.request_id, None)
 
             # Store result (Safe locking)
-            with self.authorization_lock:
+            async with self.authorization_lock:
                 if authorization.authorization_level != AuthorizationLevel.REJECTED:
                     self.active_authorizations[authorization.authorization_id] = authorization
 
@@ -1364,9 +1374,14 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
                     logger.info(f"✅ Compliance checks passed: {len(compliance_result.compliance_checks_performed)} checks")
 
                 except Exception as e:
-                    # Log compliance check error but don't block trade
-                    # (fail-open for backtest, fail-closed for live trading)
-                    logger.warning(f"⚠️  Compliance check failed: {e} - Proceeding with caution")
+                    trading_mode = getattr(self, 'trading_mode', 'backtest')
+                    if trading_mode in ('live', 'paper'):
+                        logger.error(f"Compliance check failed (fail-closed): {e}")
+                        authorization.authorization_level = AuthorizationLevel.REJECTED
+                        authorization.rejection_reason = f"COMPLIANCE_ERROR: {e}"
+                        return authorization
+                    else:
+                        logger.warning(f"⚠️ Compliance check failed (fail-open in backtest): {e}")
 
             # Input validation - reject invalid requests early
             validation_error = self._validate_request_inputs(request)
@@ -1459,6 +1474,20 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
 
             # Risk impact assessment
             risk_impact = self._calculate_risk_impact(request)
+
+            # CHECK 6 (Rule 3): Daily VaR hard gate
+            try:
+                current_var = self.risk_metrics.get('var_utilization', 0.0)
+                max_daily_var = self.max_daily_var  # From RiskConfig
+                if current_var > max_daily_var:
+                    authorization.authorization_level = AuthorizationLevel.REJECTED
+                    authorization.rejection_reason = (
+                        f"Daily VaR limit exceeded: {current_var:.2%} > {max_daily_var:.2%}"
+                    )
+                    logger.warning(f"🚫 VaR gate: {authorization.rejection_reason}")
+                    return authorization
+            except Exception as e:
+                logger.debug(f"VaR gate check skipped (data unavailable): {e}")
 
             # Position limit check
             position_check = self._check_position_limits(request)
@@ -2777,7 +2806,7 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
             current_time = datetime.now()
             expired_authorizations = []
 
-            with self.authorization_lock:
+            async with self.authorization_lock:
                 for auth_id, authorization in self.active_authorizations.items():
                     if current_time > authorization.expires_at:
                         expired_authorizations.append(auth_id)
@@ -2919,10 +2948,9 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
             self.is_operational = False
 
             # Cancel all active authorizations
-            with self.authorization_lock:
-                cancelled_count = len(self.active_authorizations)
-                self.active_authorizations.clear()
-                logger.warning(f"Cancelled {cancelled_count} active authorizations")
+            cancelled_count = len(self.active_authorizations)
+            self.active_authorizations.clear()
+            logger.warning(f"Cancelled {cancelled_count} active authorizations")
 
             # Stop monitoring
             if self.monitoring_task:
@@ -2945,8 +2973,7 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
             self.is_operational = True
 
             # Reset authorization state
-            with self.authorization_lock:
-                self.active_authorizations.clear()
+            self.active_authorizations.clear()
 
             # Log successful resume
             logger.info("✅ OPERATIONS RESUMED")

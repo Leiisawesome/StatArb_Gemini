@@ -362,6 +362,30 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
             return self.regime_engine.current_regime
         return None
 
+    def get_regime_adjusted_lookback(self, base_lookback_days: int = 252) -> int:
+        """
+        Get regime-adjusted lookback window for data loading (Rule 1: Regime-First).
+
+        In high-volatility regimes, uses a shorter lookback to weight recent data.
+        In low-volatility regimes, uses a longer lookback for stability.
+        """
+        regime = self.get_current_regime()
+        if regime is None:
+            return base_lookback_days
+
+        regime_str = str(regime.value) if hasattr(regime, 'value') else str(regime)
+        lookback_multipliers = {
+            'extreme_volatility': 0.5,
+            'high_volatility': 0.7,
+            'normal_volatility': 1.0,
+            'low_volatility': 1.2,
+            'crisis': 0.4,
+        }
+        multiplier = lookback_multipliers.get(regime_str, 1.0)
+        adjusted = max(30, int(base_lookback_days * multiplier))
+        self.logger.debug(f"Regime-adjusted lookback: {base_lookback_days} → {adjusted} (regime={regime_str})")
+        return adjusted
+
     # ========================================
     # ISystemComponent Interface Implementation
     # ========================================
@@ -866,6 +890,25 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors='coerce')
 
+        # P3-22 Fix: Handle NaNs introduced by coercion
+        # Forward-fill then backward-fill for OHLC continuity; drop rows still NaN
+        price_cols = [c for c in ['open', 'high', 'low', 'close'] if c in df.columns]
+        if price_cols:
+            nan_count = df[price_cols].isna().sum().sum()
+            if nan_count > 0:
+                self.logger.warning(
+                    f"Found {nan_count} NaN values in price columns after numeric coercion — forward-filling"
+                )
+                df[price_cols] = df[price_cols].ffill().bfill()
+                # Drop any rows that are still NaN (e.g., leading NaNs with no data)
+                remaining_nans = df[price_cols].isna().any(axis=1)
+                if remaining_nans.any():
+                    df = df[~remaining_nans].copy()
+                    self.logger.warning(f"Dropped {remaining_nans.sum()} rows with unfillable NaN prices")
+        # Volume: fill NaN with 0 (missing volume is semantically zero)
+        if 'volume' in df.columns:
+            df['volume'] = df['volume'].fillna(0)
+
         # Sort by symbol and timestamp
         # In bulk replay/backtest, ClickHouse already returns ORDER BY ticker, window_start/timestamp_ns,
         # so we can skip sorting unless data is out-of-order.
@@ -1222,12 +1265,19 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
         """Standardized method for processing market data (alias for get_market_data)"""
         return await self.get_market_data(symbol, **kwargs)
 
-    async def fetch_data(self, symbols: List[str], **kwargs) -> Dict[str, pd.DataFrame]:
-        """Standardized method for fetching data (alias for load_data)"""
+    async def fetch_data(self, symbols: List[str], **kwargs) -> pd.DataFrame:
+        """Standardized method for fetching data (alias for load_data).
+
+        Returns a single DataFrame (same as load_data/load_market_data).
+        Callers needing Dict[str, pd.DataFrame] should group by 'symbol' column.
+        """
         return await self.load_data(symbols, **kwargs)
 
-    async def process_data(self, symbols: List[str], **kwargs) -> Dict[str, pd.DataFrame]:
-        """Standardized method for data processing (alias for load_market_data)"""
+    async def process_data(self, symbols: List[str], **kwargs) -> pd.DataFrame:
+        """Standardized method for data processing (alias for load_market_data).
+
+        Returns a single DataFrame (same as load_market_data).
+        """
         return await self.load_market_data(symbols, **kwargs)
 
     # ========================================

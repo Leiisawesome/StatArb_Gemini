@@ -232,7 +232,9 @@ class DataFeed(ABC):
         self._error_handlers = []
         self._status_handlers = []
 
-        # Threading
+        # NOTE: threading.Lock is intentional. WebSocketFeed runs _ws.run_forever()
+        # in a separate thread, and callbacks (_on_message) call _handle_message which
+        # acquires this lock. Cross-thread safety requires threading.Lock, not asyncio.Lock.
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
 
@@ -688,7 +690,10 @@ class FeedManager(ISystemComponent):
         self._feed_configs = {}
         self._subscriptions = defaultdict(set)  # symbol -> set of feed_ids
 
-        # Threading
+        # NOTE: threading.Lock is intentional. This lock is used in both sync methods
+        # (register_feed, get_feed_status, etc.) and async methods (subscribe_symbol,
+        # unsubscribe_symbol). Additionally, feeds may operate on separate threads
+        # (websocket connections), requiring cross-thread safety.
         self._lock = threading.Lock()
 
         # Message routing

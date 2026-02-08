@@ -31,7 +31,6 @@ Version: 2.0.0 (Rules Migration December 2025)
 
 import asyncio
 import logging
-import threading
 import uuid
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Tuple, Callable
@@ -556,16 +555,18 @@ class MarketAlgorithm(IExecutionAlgorithm):
                 # - Very large orders (>$100k): 90-95% fill rate
 
                 import random
-                random.seed(int(request.authorization.authorized_at.timestamp() * 1000))  # Deterministic based on authorized_at
+                # Use a local Random instance for deterministic fill simulation
+                # without corrupting the global random state
+                _sim_rng = random.Random(int(request.authorization.authorized_at.timestamp() * 1000))
 
                 if order_value < 10000:
-                    fill_rate = random.uniform(0.99, 1.0)
+                    fill_rate = _sim_rng.uniform(0.99, 1.0)
                 elif order_value < 50000:
-                    fill_rate = random.uniform(0.97, 0.99)
+                    fill_rate = _sim_rng.uniform(0.97, 0.99)
                 elif order_value < 100000:
-                    fill_rate = random.uniform(0.95, 0.97)
+                    fill_rate = _sim_rng.uniform(0.95, 0.97)
                 else:
-                    fill_rate = random.uniform(0.90, 0.95)
+                    fill_rate = _sim_rng.uniform(0.90, 0.95)
 
                 filled_quantity = quantity * fill_rate
 
@@ -1200,7 +1201,7 @@ class UnifiedExecutionEngine(ISystemComponent):
         }
 
         # Threading
-        self.execution_lock = threading.Lock()
+        self.execution_lock = asyncio.Lock()
 
         # ISystemComponent state management
         self.is_initialized = False
@@ -1336,7 +1337,7 @@ class UnifiedExecutionEngine(ISystemComponent):
             logger.info("🔄 Stopping UnifiedExecutionEngine...")
 
             # Cancel all active executions
-            with self.execution_lock:
+            async with self.execution_lock:
                 active_count = len(self.active_executions)
                 self.active_executions.clear()
 
@@ -1422,7 +1423,7 @@ class UnifiedExecutionEngine(ISystemComponent):
         """
 
         try:
-            with self.execution_lock:
+            async with self.execution_lock:
                 # Validate authorization and request
                 is_valid, errors = self.validator.validate_request(request)
 
@@ -1459,7 +1460,7 @@ class UnifiedExecutionEngine(ISystemComponent):
             result = await algorithm.execute(request)
 
             # Post-execution processing (Safe locking - GAP 4-5)
-            with self.execution_lock:
+            async with self.execution_lock:
                 # Remove from active executions
                 self.active_executions.pop(request.request_id, None)
 
@@ -1480,7 +1481,7 @@ class UnifiedExecutionEngine(ISystemComponent):
             logger.error(f"Execution engine error: {e}")
 
             # Clean up and return error result
-            with self.execution_lock:
+            async with self.execution_lock:
                 self.active_executions.pop(request.request_id, None)
 
             return ExecutionResult(
@@ -1494,60 +1495,57 @@ class UnifiedExecutionEngine(ISystemComponent):
     def get_execution_status(self, request_id: str) -> Optional[ExecutionStatus]:
         """Get current execution status"""
 
-        with self.execution_lock:
-            # Check active executions
-            if request_id in self.active_executions:
-                return ExecutionStatus.EXECUTING
+        # Check active executions
+        if request_id in self.active_executions:
+            return ExecutionStatus.EXECUTING
 
-            # Check execution history
-            for result in reversed(self.execution_history):
-                if result.request_id == request_id:
-                    return result.status
+        # Check execution history
+        for result in reversed(self.execution_history):
+            if result.request_id == request_id:
+                return result.status
 
-            return None
+        return None
 
     def get_execution_result(self, request_id: str) -> Optional[ExecutionResult]:
         """Get execution result"""
 
-        with self.execution_lock:
-            for result in reversed(self.execution_history):
-                if result.request_id == request_id:
-                    return result
+        for result in reversed(self.execution_history):
+            if result.request_id == request_id:
+                return result
 
-            return None
+        return None
 
     def cancel_execution(self, request_id: str, authorization_id: str) -> bool:
         """Cancel active execution (requires authorization)"""
 
         try:
-            with self.execution_lock:
-                if request_id not in self.active_executions:
-                    logger.warning(f"Execution {request_id} not found for cancellation")
-                    return False
+            if request_id not in self.active_executions:
+                logger.warning(f"Execution {request_id} not found for cancellation")
+                return False
 
-                request = self.active_executions[request_id]
+            request = self.active_executions[request_id]
 
-                # Verify authorization
-                if request.authorization.authorization_id != authorization_id:
-                    logger.error(f"Authorization mismatch for cancellation: {request_id}")
-                    return False
+            # Verify authorization
+            if request.authorization.authorization_id != authorization_id:
+                logger.error(f"Authorization mismatch for cancellation: {request_id}")
+                return False
 
-                # Remove from active executions
-                self.active_executions.pop(request_id)
+            # Remove from active executions
+            self.active_executions.pop(request_id)
 
-                # Create cancelled result for history
-                cancelled_result = ExecutionResult(
-                    request_id=request_id,
-                    authorization_id=authorization_id,
-                    status=ExecutionStatus.CANCELLED,
-                    algorithm_used=request.algorithm,
-                    completed_at=datetime.now()
-                )
-                cancelled_result.execution_log.append(f"Cancelled at {datetime.now()}")
-                self.execution_history.append(cancelled_result)
+            # Create cancelled result for history
+            cancelled_result = ExecutionResult(
+                request_id=request_id,
+                authorization_id=authorization_id,
+                status=ExecutionStatus.CANCELLED,
+                algorithm_used=request.algorithm,
+                completed_at=datetime.now()
+            )
+            cancelled_result.execution_log.append(f"Cancelled at {datetime.now()}")
+            self.execution_history.append(cancelled_result)
 
-                logger.info(f"Execution {request_id} cancelled successfully")
-                return True
+            logger.info(f"Execution {request_id} cancelled successfully")
+            return True
 
         except Exception as e:
             logger.error(f"Error cancelling execution: {e}")
@@ -1556,14 +1554,12 @@ class UnifiedExecutionEngine(ISystemComponent):
     def get_active_executions(self) -> List[str]:
         """Get list of active execution IDs"""
 
-        with self.execution_lock:
-            return list(self.active_executions.keys())
+        return list(self.active_executions.keys())
 
     def get_execution_metrics(self) -> Dict[str, Any]:
         """Get execution performance metrics"""
 
-        with self.execution_lock:
-            return self.execution_metrics.copy()
+        return self.execution_metrics.copy()
 
     async def estimate_execution_cost(self, request: ExecutionRequest) -> Dict[str, float]:
         """Estimate execution costs before execution"""
@@ -1643,54 +1639,53 @@ class UnifiedExecutionEngine(ISystemComponent):
         """Generate execution performance report"""
 
         try:
-            with self.execution_lock:
-                # Filter executions by date if provided
-                filtered_executions = self.execution_history
+            # Filter executions by date if provided
+            filtered_executions = self.execution_history
 
-                if start_date or end_date:
-                    filtered_executions = []
-                    for result in self.execution_history:
-                        exec_date = result.completed_at or result.started_at
-                        if exec_date:
-                            if start_date and exec_date < start_date:
-                                continue
-                            if end_date and exec_date > end_date:
-                                continue
-                            filtered_executions.append(result)
+            if start_date or end_date:
+                filtered_executions = []
+                for result in self.execution_history:
+                    exec_date = result.completed_at or result.started_at
+                    if exec_date:
+                        if start_date and exec_date < start_date:
+                            continue
+                        if end_date and exec_date > end_date:
+                            continue
+                        filtered_executions.append(result)
 
-                if not filtered_executions:
-                    return {'message': 'No executions found in date range'}
+            if not filtered_executions:
+                return {'message': 'No executions found in date range'}
 
-                # Calculate report metrics
-                total_executions = len(filtered_executions)
-                successful = sum(1 for r in filtered_executions if r.status == ExecutionStatus.FILLED)
-                failed = total_executions - successful
+            # Calculate report metrics
+            total_executions = len(filtered_executions)
+            successful = sum(1 for r in filtered_executions if r.status == ExecutionStatus.FILLED)
+            failed = total_executions - successful
 
-                execution_times = [r.execution_time for r in filtered_executions if r.execution_time > 0]
-                market_impacts = [r.market_impact for r in filtered_executions if r.market_impact > 0]
-                volumes = [r.filled_quantity for r in filtered_executions]
+            execution_times = [r.execution_time for r in filtered_executions if r.execution_time > 0]
+            market_impacts = [r.market_impact for r in filtered_executions if r.market_impact > 0]
+            volumes = [r.filled_quantity for r in filtered_executions]
 
-                report = {
-                    'period': {
-                        'start_date': start_date.isoformat() if start_date else 'N/A',
-                        'end_date': end_date.isoformat() if end_date else 'N/A'
-                    },
-                    'execution_summary': {
-                        'total_executions': total_executions,
-                        'successful_executions': successful,
-                        'failed_executions': failed,
-                        'success_rate': successful / total_executions if total_executions > 0 else 0
-                    },
-                    'performance_metrics': {
-                        'avg_execution_time': np.mean(execution_times) if execution_times else 0,
-                        'avg_market_impact': np.mean(market_impacts) if market_impacts else 0,
-                        'total_volume': sum(volumes),
-                        'avg_volume_per_execution': np.mean(volumes) if volumes else 0
-                    },
-                    'algorithm_breakdown': self._get_algorithm_breakdown(filtered_executions)
-                }
+            report = {
+                'period': {
+                    'start_date': start_date.isoformat() if start_date else 'N/A',
+                    'end_date': end_date.isoformat() if end_date else 'N/A'
+                },
+                'execution_summary': {
+                    'total_executions': total_executions,
+                    'successful_executions': successful,
+                    'failed_executions': failed,
+                    'success_rate': successful / total_executions if total_executions > 0 else 0
+                },
+                'performance_metrics': {
+                    'avg_execution_time': np.mean(execution_times) if execution_times else 0,
+                    'avg_market_impact': np.mean(market_impacts) if market_impacts else 0,
+                    'total_volume': sum(volumes),
+                    'avg_volume_per_execution': np.mean(volumes) if volumes else 0
+                },
+                'algorithm_breakdown': self._get_algorithm_breakdown(filtered_executions)
+            }
 
-                return report
+            return report
 
         except Exception as e:
             logger.error(f"Error generating execution report: {e}")
@@ -1802,12 +1797,11 @@ class UnifiedExecutionEngine(ISystemComponent):
             logger.info("Shutting down Unified Execution Engine")
 
             # Cancel all active executions
-            with self.execution_lock:
-                active_count = len(self.active_executions)
-                self.active_executions.clear()
+            active_count = len(self.active_executions)
+            self.active_executions.clear()
 
-                if active_count > 0:
-                    logger.warning(f"Cancelled {active_count} active executions during shutdown")
+            if active_count > 0:
+                logger.warning(f"Cancelled {active_count} active executions during shutdown")
 
             logger.info("Unified Execution Engine shutdown completed")
 

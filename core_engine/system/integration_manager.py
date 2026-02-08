@@ -26,7 +26,6 @@ Version: 1.0.0 (Production Ready)
 
 import asyncio
 import logging
-import threading
 import uuid
 from datetime import datetime
 from typing import Dict, List, Optional, Any
@@ -282,8 +281,8 @@ class SystemIntegrationManager(ISystemComponent):
         # Orchestrator
         self.orchestrator: Optional[HierarchicalSystemOrchestrator] = None
 
-        # Threading
-        self._lock = threading.Lock()
+        # Async locking
+        self._lock = asyncio.Lock()
         self._health_monitor_task: Optional[asyncio.Task] = None
         self._performance_monitor_task: Optional[asyncio.Task] = None
         self._shutdown_event = asyncio.Event()

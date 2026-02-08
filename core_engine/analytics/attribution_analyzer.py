@@ -184,7 +184,6 @@ class FactorModelAnalyzer:
         self.config = config
         self.factor_models = {}
         self.factor_data = {}
-        self._lock = threading.Lock()
 
     def build_factor_model(
         self,
@@ -564,7 +563,9 @@ class AttributionAnalyzer:
         self._factor_data = {}
         self._sector_mappings = {}
 
-        # Threading
+        # NOTE: threading.Lock is intentional here. This lock is used exclusively
+        # in synchronous methods (get_attribution_statistics, cache_factor_model,
+        # get_cached_factor_model). asyncio.Lock does not support non-async `with`.
         self._lock = threading.Lock()
 
         logger.info("Attribution Analyzer initialized")

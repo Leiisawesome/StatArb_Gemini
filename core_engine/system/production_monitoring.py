@@ -15,7 +15,6 @@ Version: 1.0.0 (Production Ready)
 
 import asyncio
 import logging
-import threading
 import uuid
 import hashlib
 import json
@@ -117,8 +116,8 @@ class ProductionHealthMonitor(ISystemComponent):
         self.health_history = deque(maxlen=1000)
         self.alert_callbacks = []
 
-        # Threading
-        self._lock = threading.Lock()
+        # Async locking
+        self._lock = asyncio.Lock()
         self._monitoring_task: Optional[asyncio.Task] = None
         self._shutdown_event = asyncio.Event()
 
@@ -236,7 +235,7 @@ class ProductionHealthMonitor(ISystemComponent):
             health_results['performance'] = await self._check_performance_metrics()
 
             # Store in history
-            with self._lock:
+            async with self._lock:
                 self.health_history.append({
                     'timestamp': datetime.now(),
                     'results': health_results
@@ -691,8 +690,8 @@ class AuditTrailManager(ISystemComponent):
         self.audit_buffer = []
         self.audit_file = None
 
-        # Threading
-        self._lock = threading.Lock()
+        # Async locking
+        self._lock = asyncio.Lock()
 
         self.logger.info(f"📋 AuditTrailManager initialized: {self.component_id}")
 
@@ -814,7 +813,7 @@ class AuditTrailManager(ISystemComponent):
     async def _store_audit_event(self, audit_event: AuditEvent):
         """Store audit event"""
         should_flush = False
-        with self._lock:
+        async with self._lock:
             self.audit_buffer.append(audit_event)
 
             # Flush buffer if full

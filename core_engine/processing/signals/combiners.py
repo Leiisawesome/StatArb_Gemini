@@ -3,6 +3,7 @@ Signals Engine - Signal Combiner
 Advanced signal combination and ensemble methods for enhanced signal quality
 """
 
+import asyncio
 import logging
 import threading
 import numpy as np
@@ -179,7 +180,6 @@ class SignalWeightCalculator:
     def __init__(self):
         self.performance_history = defaultdict(list)
         self.weight_cache = {}
-        self._lock = threading.Lock()
 
     def calculate_weights(
         self,
@@ -328,7 +328,10 @@ class EnsembleEngine:
         self.config = config
         self.models = {}
         self.training_data = defaultdict(list)
-        self._lock = threading.Lock()
+        # asyncio.Lock for async methods (future use)
+        self._lock = asyncio.Lock()
+        # threading.Lock for sync methods (train_ensemble_model, predict_combination)
+        self._sync_lock = threading.Lock()
 
     def train_ensemble_model(
         self,
@@ -398,7 +401,7 @@ class EnsembleEngine:
             )
 
             # Store model
-            with self._lock:
+            with self._sync_lock:
                 self.models[symbol] = ensemble_model
 
             logger.info(f"Trained ensemble model for {symbol}: train_score={train_score:.3f}, val_score={val_score:.3f}")
@@ -459,7 +462,7 @@ class EnsembleEngine:
     ) -> Tuple[float, float]:
         """Predict optimal combination using ensemble model"""
 
-        with self._lock:
+        with self._sync_lock:
             model = self.models.get(symbol)
 
         if not model:
@@ -618,8 +621,12 @@ class SignalCombiner:
         self.combination_cache: Dict[str, Any] = {}
         self.market_context: Optional[Dict[str, Any]] = None
 
-        # Threading
-        self._lock = threading.Lock()
+        # asyncio.Lock for async methods (_combine_signals_async, _dynamic_weighting_combination)
+        self._lock = asyncio.Lock()
+        # threading.Lock for sync methods (_update_performance_metrics, get_performance_metrics,
+        # clear_cache, _learn_from_performance, update_performance, get_combination_statistics,
+        # get_recent_combinations)
+        self._sync_lock = threading.Lock()
 
         # Log initialization
         internal_config = getattr(self, '_internal_config', self.config)
@@ -745,7 +752,7 @@ class SignalCombiner:
 
                 # Store in cache
                 cache_key = self._get_combination_key([single_signal])
-                with self._lock:
+                async with self._lock:
                     self.combination_cache[cache_key] = {
                         'combination': combination,
                         'timestamp': time.time()
@@ -797,7 +804,7 @@ class SignalCombiner:
                 combination.diversification_score = float(diversification) if isinstance(diversification, (int, float)) else 0.0
 
                 # Store combination
-                with self._lock:
+                async with self._lock:
                     self._combination_history.append(combination)
                     self._symbol_combinations[symbol].append(combination)
                     # Keep only recent combinations
@@ -1502,7 +1509,7 @@ class SignalCombiner:
 
     def _update_performance_metrics(self, combination_time: float, cache_hit: bool):
         """Update performance metrics after combination"""
-        with self._lock:
+        with self._sync_lock:
             self.performance_metrics['combinations_performed'] += 1
             self.performance_metrics['total_combination_time'] += combination_time
             self.performance_metrics['avg_combination_time'] = (
@@ -1517,12 +1524,12 @@ class SignalCombiner:
 
     def get_performance_metrics(self) -> Dict[str, Any]:
         """Get current performance metrics"""
-        with self._lock:
+        with self._sync_lock:
             return self.performance_metrics.copy()
 
     def clear_cache(self) -> int:
         """Clear the combination cache and return number of entries cleared"""
-        with self._lock:
+        with self._sync_lock:
             count = len(self.combination_cache)
             self.combination_cache.clear()
             return count
@@ -1856,7 +1863,7 @@ class SignalCombiner:
         """Dynamic weighting based on recent performance"""
 
         # Get recent performance data
-        with self._lock:
+        async with self._lock:
             recent_combinations = self._symbol_combinations.get(symbol, [])
 
         if not recent_combinations:
@@ -2049,7 +2056,7 @@ class SignalCombiner:
         if not feedback:
             return
 
-        with self._lock:
+        with self._sync_lock:
             for strategy_id, perf_data in feedback.items():
                 # Update performance history
                 if strategy_id not in self.performance_history:
@@ -2135,7 +2142,7 @@ class SignalCombiner:
     def update_performance(self, combination_id: str, realized_return: float) -> None:
         """Update performance tracking for a combination"""
 
-        with self._lock:
+        with self._sync_lock:
             # Find the combination
             for combination in self._combination_history:
                 if combination.combined_signal_id == combination_id:
@@ -2156,7 +2163,7 @@ class SignalCombiner:
     def get_combination_statistics(self) -> Dict[str, Any]:
         """Get combination statistics"""
 
-        with self._lock:
+        with self._sync_lock:
             method_stats = {}
 
             for method, returns in self._method_performance.items():
@@ -2179,7 +2186,7 @@ class SignalCombiner:
     def get_recent_combinations(self, symbol: Optional[str] = None, limit: int = 100) -> List[SignalCombination]:
         """Get recent combinations"""
 
-        with self._lock:
+        with self._sync_lock:
             if symbol:
                 return list(self._symbol_combinations.get(symbol, []))[-limit:]
             else:

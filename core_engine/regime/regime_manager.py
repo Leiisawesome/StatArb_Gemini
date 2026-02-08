@@ -14,7 +14,6 @@ from enum import Enum
 import warnings
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
-import threading
 import json
 
 # Import ISystemComponent for orchestrator integration (Rule 1)
@@ -203,7 +202,7 @@ class RegimeManager(ISystemComponent, IRegimePolicy):
         # Status and control
         self.status = RegimeManagerStatus.INITIALIZING
         self.last_update = datetime.now()
-        self.update_lock = threading.Lock()
+        self.update_lock = asyncio.Lock()
 
         # Regime-First Notification System (Rule 1, Section 7)
         self.subscribers: List[IRegimeAware] = []
@@ -273,7 +272,7 @@ class RegimeManager(ISystemComponent, IRegimePolicy):
         """Update comprehensive regime analysis"""
 
         try:
-            with self.update_lock:
+            async with self.update_lock:
                 self.status = RegimeManagerStatus.ANALYZING
                 logger.info("Updating regime analysis")
 

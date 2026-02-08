@@ -3,6 +3,7 @@ Signals Engine - Signal Generator
 Advanced signal generation with multiple signal types, factor analysis, and research capabilities
 """
 
+import asyncio
 import logging
 import threading
 import numpy as np
@@ -750,8 +751,11 @@ class SignalGenerator:
         self._strategies = {}
         self._strategy_weights = {}
 
-        # Threading
-        self._lock = threading.Lock()
+        # asyncio.Lock for async methods (generate_signal, _age_signals)
+        self._lock = asyncio.Lock()
+        # threading.Lock for sync methods (register_strategy, unregister_strategy,
+        # get_active_signals, get_performance_metrics, clear_expired_signals)
+        self._sync_lock = threading.Lock()
 
         # Signal tracking
         self._active_signals = {}
@@ -804,7 +808,7 @@ class SignalGenerator:
     def register_strategy(self, strategy: SignalStrategy, weight: float = 1.0) -> None:
         """Register a signal strategy"""
 
-        with self._lock:
+        with self._sync_lock:
             self._strategies[strategy.name] = strategy
             self._strategy_weights[strategy.name] = weight
 
@@ -814,7 +818,7 @@ class SignalGenerator:
         """Unregister a signal strategy"""
 
         try:
-            with self._lock:
+            with self._sync_lock:
                 self._strategies.pop(strategy_name, None)
                 self._strategy_weights.pop(strategy_name, None)
 
@@ -871,7 +875,7 @@ class SignalGenerator:
                         signals.append(signal)
 
                         # Track active signals
-                        with self._lock:
+                        async with self._lock:
                             if symbol not in self._active_signals:
                                 self._active_signals[symbol] = []
                             self._active_signals[symbol].append(signal)
@@ -902,7 +906,7 @@ class SignalGenerator:
     async def _age_signals(self, symbol: str) -> None:
         """Age signals and apply decay"""
 
-        with self._lock:
+        async with self._lock:
             if symbol not in self._active_signals:
                 return
 
@@ -928,7 +932,7 @@ class SignalGenerator:
     def get_active_signals(self, symbol: Optional[str] = None) -> Dict[str, List[SignalResult]]:
         """Get active signals"""
 
-        with self._lock:
+        with self._sync_lock:
             if symbol:
                 return {symbol: self._active_signals.get(symbol, [])}
             else:
@@ -942,7 +946,7 @@ class SignalGenerator:
     def get_performance_metrics(self) -> Dict[str, Any]:
         """Get performance metrics"""
 
-        with self._lock:
+        with self._sync_lock:
             total_signals = len(self._signal_history)
             avg_generation_time = np.mean(self._generation_times) if self._generation_times else 0
 
@@ -970,7 +974,7 @@ class SignalGenerator:
         cutoff_time = datetime.now() - timedelta(hours=max_age_hours)
         removed_count = 0
 
-        with self._lock:
+        with self._sync_lock:
             for symbol in list(self._active_signals.keys()):
                 original_count = len(self._active_signals[symbol])
                 self._active_signals[symbol] = [

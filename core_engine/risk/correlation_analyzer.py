@@ -3,6 +3,7 @@ Risk Management - Correlation Analyzer
 Advanced correlation analysis with dynamic correlation estimation, regime detection, and tail dependence
 """
 
+import asyncio
 import logging
 import threading
 import pandas as pd
@@ -96,7 +97,10 @@ class CorrelationAnalyzer:
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         """Initialize correlation analyzer"""
         self.config = config or {}
-        self._lock = threading.Lock()
+        # asyncio.Lock for async methods (future use)
+        self._lock = asyncio.Lock()
+        # threading.Lock for sync methods (get_calculation_history, get_regime_history, clear_cache)
+        self._sync_lock = threading.Lock()
         self._correlation_cache = {}
         self._regime_history = deque(maxlen=1000)
         self._calculation_history = deque(maxlen=1000)
@@ -217,11 +221,19 @@ class CorrelationAnalyzer:
         ewma_cov = returns.ewm(alpha=1-self.ewma_lambda, min_periods=self.min_observations).cov()
 
         # Get the most recent covariance matrix
-        latest_cov = ewma_cov.iloc[-len(returns.columns):, :]
+        # ewm().cov() returns MultiIndex (date, asset) x asset
+        # Extract the last block corresponding to the last timestamp
+        n_assets = len(returns.columns)
+        latest_cov = ewma_cov.iloc[-n_assets:].droplevel(0)
 
         # Convert covariance to correlation
-        std_matrix = np.sqrt(np.diag(latest_cov))
-        corr_matrix = latest_cov / np.outer(std_matrix, std_matrix)
+        std_vec = np.sqrt(np.diag(latest_cov.values))
+        # Prevent division by zero
+        std_vec = np.where(std_vec < 1e-12, 1e-12, std_vec)
+        corr_matrix = latest_cov.values / np.outer(std_vec, std_vec)
+
+        # Ensure diagonal is exactly 1.0
+        np.fill_diagonal(corr_matrix, 1.0)
 
         return pd.DataFrame(corr_matrix, index=returns.columns, columns=returns.columns)
 
@@ -626,17 +638,17 @@ class CorrelationAnalyzer:
 
     def get_calculation_history(self) -> List[Dict[str, Any]]:
         """Get correlation calculation history"""
-        with self._lock:
+        with self._sync_lock:
             return list(self._calculation_history)
 
     def get_regime_history(self) -> List[Tuple[datetime, CorrelationRegime]]:
         """Get correlation regime history"""
-        with self._lock:
+        with self._sync_lock:
             return list(self._regime_history)
 
     def clear_cache(self) -> None:
         """Clear correlation calculation cache"""
-        with self._lock:
+        with self._sync_lock:
             self._correlation_cache.clear()
 
         logger.info("Correlation calculation cache cleared")

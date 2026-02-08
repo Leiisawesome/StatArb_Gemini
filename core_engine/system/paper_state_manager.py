@@ -25,6 +25,7 @@ Author: StatArb_Gemini Core Engine
 Version: 1.0.0 (Paper Trading Evolution - Phase 5)
 """
 
+import asyncio
 import json
 import logging
 import shutil
@@ -32,7 +33,6 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-import threading
 
 logger = logging.getLogger(__name__)
 
@@ -141,8 +141,8 @@ class PaperSessionStateManager:
         # Replay positions per symbol
         self._replay_positions: Dict[str, ReplayPosition] = {}
 
-        # Thread safety
-        self._lock = threading.Lock()
+        # Async locking
+        self._lock = asyncio.Lock()
 
         # Stats
         self._stats = {
@@ -171,12 +171,11 @@ class PaperSessionStateManager:
         row_index: int,
     ) -> None:
         """Update replay position for a symbol."""
-        with self._lock:
-            self._replay_positions[symbol] = ReplayPosition(
-                symbol=symbol,
-                timestamp=timestamp,
-                row_index=row_index,
-            )
+        self._replay_positions[symbol] = ReplayPosition(
+            symbol=symbol,
+            timestamp=timestamp,
+            row_index=row_index,
+        )
 
     def update_event_tracking(
         self,
@@ -184,9 +183,8 @@ class PaperSessionStateManager:
         sequence: int,
     ) -> None:
         """Update last processed event info."""
-        with self._lock:
-            self._last_event_id = event_id
-            self._last_event_sequence = sequence
+        self._last_event_id = event_id
+        self._last_event_sequence = sequence
 
     def increment_bars(self, count: int = 1) -> bool:
         """
@@ -195,9 +193,8 @@ class PaperSessionStateManager:
         Returns:
             True if checkpoint should be triggered
         """
-        with self._lock:
-            self._bars_processed += count
-            return self._bars_processed % self._interval_bars == 0
+        self._bars_processed += count
+        return self._bars_processed % self._interval_bars == 0
 
     def _next_checkpoint_id(self) -> str:
         """Generate next checkpoint ID."""
@@ -222,61 +219,60 @@ class PaperSessionStateManager:
         Returns:
             Checkpoint ID if successful, None otherwise
         """
-        with self._lock:
-            checkpoint_id = self._next_checkpoint_id()
+        checkpoint_id = self._next_checkpoint_id()
 
-            try:
-                # Gather component states
-                component_states = {}
-                for name, component in self._components.items():
-                    if hasattr(component, 'get_state_for_checkpoint'):
-                        try:
-                            component_states[name] = component.get_state_for_checkpoint()
-                        except Exception as e:
-                            logger.error(f"Error getting state from {name}: {e}")
-                            component_states[name] = {'error': str(e)}
+        try:
+            # Gather component states
+            component_states = {}
+            for name, component in self._components.items():
+                if hasattr(component, 'get_state_for_checkpoint'):
+                    try:
+                        component_states[name] = component.get_state_for_checkpoint()
+                    except Exception as e:
+                        logger.error(f"Error getting state from {name}: {e}")
+                        component_states[name] = {'error': str(e)}
 
-                # Build checkpoint data
-                checkpoint_data = {
-                    'metadata': CheckpointMetadata(
-                        checkpoint_id=checkpoint_id,
-                        session_id=self._session_id,
-                        created_at=datetime.now(timezone.utc),
-                        trigger=trigger,
-                        last_event_id=self._last_event_id,
-                        last_event_sequence=self._last_event_sequence,
-                        bars_processed=self._bars_processed,
-                    ).to_dict(),
-                    'replay_positions': {
-                        sym: pos.to_dict()
-                        for sym, pos in self._replay_positions.items()
-                    },
-                    'components': component_states,
-                }
+            # Build checkpoint data
+            checkpoint_data = {
+                'metadata': CheckpointMetadata(
+                    checkpoint_id=checkpoint_id,
+                    session_id=self._session_id,
+                    created_at=datetime.now(timezone.utc),
+                    trigger=trigger,
+                    last_event_id=self._last_event_id,
+                    last_event_sequence=self._last_event_sequence,
+                    bars_processed=self._bars_processed,
+                ).to_dict(),
+                'replay_positions': {
+                    sym: pos.to_dict()
+                    for sym, pos in self._replay_positions.items()
+                },
+                'components': component_states,
+            }
 
-                # Atomic write: write to temp, then rename
-                checkpoint_path = self._checkpoint_path(checkpoint_id)
-                temp_path = checkpoint_path.with_suffix('.tmp')
+            # Atomic write: write to temp, then rename
+            checkpoint_path = self._checkpoint_path(checkpoint_id)
+            temp_path = checkpoint_path.with_suffix('.tmp')
 
-                with open(temp_path, 'w', encoding='utf-8') as f:
-                    json.dump(checkpoint_data, f, indent=2, default=str)
+            with open(temp_path, 'w', encoding='utf-8') as f:
+                json.dump(checkpoint_data, f, indent=2, default=str)
 
-                # Atomic rename
-                shutil.move(str(temp_path), str(checkpoint_path))
+            # Atomic rename
+            shutil.move(str(temp_path), str(checkpoint_path))
 
-                self._stats['checkpoints_created'] += 1
-                self._stats['bytes_written'] += checkpoint_path.stat().st_size
+            self._stats['checkpoints_created'] += 1
+            self._stats['bytes_written'] += checkpoint_path.stat().st_size
 
-                logger.info(f"📸 Checkpoint created: {checkpoint_id} ({trigger})")
+            logger.info(f"📸 Checkpoint created: {checkpoint_id} ({trigger})")
 
-                # Cleanup old checkpoints
-                self._cleanup_old_checkpoints()
+            # Cleanup old checkpoints
+            self._cleanup_old_checkpoints()
 
-                return checkpoint_id
+            return checkpoint_id
 
-            except Exception as e:
-                logger.error(f"Checkpoint creation failed: {e}")
-                return None
+        except Exception as e:
+            logger.error(f"Checkpoint creation failed: {e}")
+            return None
 
     def _cleanup_old_checkpoints(self) -> None:
         """Remove old checkpoints beyond max_checkpoints."""
@@ -332,76 +328,73 @@ class PaperSessionStateManager:
         Returns:
             True if restored successfully
         """
-        with self._lock:
-            try:
-                # Find checkpoint
-                if checkpoint_id:
-                    checkpoint_path = self._checkpoint_path(checkpoint_id)
-                else:
-                    latest = self.get_latest_checkpoint()
-                    if not latest:
-                        logger.warning("No checkpoints available for restore")
-                        return False
-                    checkpoint_id = latest.checkpoint_id
-                    checkpoint_path = self._checkpoint_path(checkpoint_id)
-
-                if not checkpoint_path.exists():
-                    logger.error(f"Checkpoint not found: {checkpoint_path}")
+        try:
+            # Find checkpoint
+            if checkpoint_id:
+                checkpoint_path = self._checkpoint_path(checkpoint_id)
+            else:
+                latest = self.get_latest_checkpoint()
+                if not latest:
+                    logger.warning("No checkpoints available for restore")
                     return False
+                checkpoint_id = latest.checkpoint_id
+                checkpoint_path = self._checkpoint_path(checkpoint_id)
 
-                # Load checkpoint
-                with open(checkpoint_path, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-
-                metadata = CheckpointMetadata.from_dict(data['metadata'])
-
-                # Restore replay positions
-                self._replay_positions = {
-                    sym: ReplayPosition.from_dict(pos_data)
-                    for sym, pos_data in data.get('replay_positions', {}).items()
-                }
-
-                # Restore tracking state
-                self._last_event_id = metadata.last_event_id
-                self._last_event_sequence = metadata.last_event_sequence
-                self._bars_processed = metadata.bars_processed
-
-                # Restore component states
-                component_states = data.get('components', {})
-                for name, component in self._components.items():
-                    if name in component_states and hasattr(component, 'restore_from_checkpoint'):
-                        try:
-                            component.restore_from_checkpoint(component_states[name])
-                            logger.debug(f"Restored state for component: {name}")
-                        except Exception as e:
-                            logger.error(f"Error restoring {name}: {e}")
-
-                self._stats['checkpoints_restored'] += 1
-
-                logger.info(
-                    f"📸 Checkpoint restored: {checkpoint_id} "
-                    f"(bars: {metadata.bars_processed}, last_event: {metadata.last_event_id})"
-                )
-
-                return True
-
-            except Exception as e:
-                logger.error(f"Checkpoint restore failed: {e}")
+            if not checkpoint_path.exists():
+                logger.error(f"Checkpoint not found: {checkpoint_path}")
                 return False
+
+            # Load checkpoint
+            with open(checkpoint_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+
+            metadata = CheckpointMetadata.from_dict(data['metadata'])
+
+            # Restore replay positions
+            self._replay_positions = {
+                sym: ReplayPosition.from_dict(pos_data)
+                for sym, pos_data in data.get('replay_positions', {}).items()
+            }
+
+            # Restore tracking state
+            self._last_event_id = metadata.last_event_id
+            self._last_event_sequence = metadata.last_event_sequence
+            self._bars_processed = metadata.bars_processed
+
+            # Restore component states
+            component_states = data.get('components', {})
+            for name, component in self._components.items():
+                if name in component_states and hasattr(component, 'restore_from_checkpoint'):
+                    try:
+                        component.restore_from_checkpoint(component_states[name])
+                        logger.debug(f"Restored state for component: {name}")
+                    except Exception as e:
+                        logger.error(f"Error restoring {name}: {e}")
+
+            self._stats['checkpoints_restored'] += 1
+
+            logger.info(
+                f"📸 Checkpoint restored: {checkpoint_id} "
+                f"(bars: {metadata.bars_processed}, last_event: {metadata.last_event_id})"
+            )
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Checkpoint restore failed: {e}")
+            return False
 
     def get_last_event_info(self) -> Dict[str, Any]:
         """Get info about last processed event."""
-        with self._lock:
-            return {
-                'last_event_id': self._last_event_id,
-                'last_event_sequence': self._last_event_sequence,
-                'bars_processed': self._bars_processed,
-            }
+        return {
+            'last_event_id': self._last_event_id,
+            'last_event_sequence': self._last_event_sequence,
+            'bars_processed': self._bars_processed,
+        }
 
     def get_replay_positions(self) -> Dict[str, ReplayPosition]:
         """Get all replay positions."""
-        with self._lock:
-            return dict(self._replay_positions)
+        return dict(self._replay_positions)
 
     def get_stats(self) -> Dict[str, Any]:
         """Get state manager statistics."""

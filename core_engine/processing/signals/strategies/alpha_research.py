@@ -3,6 +3,7 @@ Signals Engine - Alpha Research
 Advanced alpha research framework with strategy development, backtesting, and alpha decay analysis
 """
 
+import asyncio
 import logging
 import threading
 import numpy as np
@@ -569,8 +570,11 @@ class AlphaResearcher:
         self._backtest_results = {}
         self._decay_analyses = {}
 
-        # Threading
-        self._lock = threading.Lock()
+        # asyncio.Lock for async methods (research_alpha, backtest_alpha, analyze_alpha_decay)
+        self._lock = asyncio.Lock()
+        # threading.Lock for sync methods (register_alpha_strategy, get_research_results,
+        # get_backtest_results, get_decay_analyses, get_performance_metrics)
+        self._sync_lock = threading.Lock()
 
         # Performance tracking
         self._research_times = deque(maxlen=1000)
@@ -624,7 +628,7 @@ class AlphaResearcher:
 
         strategy = strategy_class(parameters)
 
-        with self._lock:
+        with self._sync_lock:
             self._strategies[parameters.alpha_id] = strategy
             self._strategy_parameters[parameters.alpha_id] = parameters
 
@@ -700,7 +704,7 @@ class AlphaResearcher:
             }
 
             # Store results
-            with self._lock:
+            async with self._lock:
                 self._research_results[alpha_id] = research_result
 
             # Record research time
@@ -913,7 +917,7 @@ class AlphaResearcher:
         )
 
         # Store result
-        with self._lock:
+        async with self._lock:
             self._backtest_results[alpha_id] = backtest_result
 
         logger.info(f"Backtest completed for {alpha_id}: Sharpe = {sharpe_ratio:.3f}, Return = {annualized_return:.1%}")
@@ -1015,7 +1019,7 @@ class AlphaResearcher:
             )
 
             # Store analysis
-            with self._lock:
+            async with self._lock:
                 self._decay_analyses[alpha_id] = decay_analysis
 
             logger.info(f"Alpha decay analysis completed for {alpha_id}: half-life = {decay_half_life:.1f} days")
@@ -1099,7 +1103,7 @@ class AlphaResearcher:
 
     def get_research_results(self, alpha_id: Optional[str] = None) -> Dict[str, Any]:
         """Get research results"""
-        with self._lock:
+        with self._sync_lock:
             if alpha_id:
                 return self._research_results.get(alpha_id, {})
             else:
@@ -1107,7 +1111,7 @@ class AlphaResearcher:
 
     def get_backtest_results(self, alpha_id: Optional[str] = None) -> Dict[str, BacktestResult]:
         """Get backtest results"""
-        with self._lock:
+        with self._sync_lock:
             if alpha_id:
                 result = self._backtest_results.get(alpha_id)
                 return {alpha_id: result} if result else {}
@@ -1116,7 +1120,7 @@ class AlphaResearcher:
 
     def get_decay_analyses(self, alpha_id: Optional[str] = None) -> Dict[str, AlphaDecayAnalysis]:
         """Get decay analyses"""
-        with self._lock:
+        with self._sync_lock:
             if alpha_id:
                 analysis = self._decay_analyses.get(alpha_id)
                 return {alpha_id: analysis} if analysis else {}
@@ -1126,7 +1130,7 @@ class AlphaResearcher:
     def get_performance_metrics(self) -> Dict[str, Any]:
         """Get performance metrics"""
 
-        with self._lock:
+        with self._sync_lock:
             avg_research_time = np.mean(self._research_times) if self._research_times else 0
 
             return {

@@ -18,9 +18,9 @@ Author: StatArb_Gemini Core Engine
 Version: 1.0.0 (Paper Trading Evolution - Phase 5)
 """
 
+import asyncio
 import json
 import logging
-import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum, auto
@@ -144,8 +144,8 @@ class EventJournal:
         self._file = None
         self._open_file()
 
-        # Thread safety
-        self._lock = threading.Lock()
+        # Async locking
+        self._lock = asyncio.Lock()
 
         # Stats
         self._stats = {
@@ -221,16 +221,14 @@ class EventJournal:
 
     def flush(self) -> None:
         """Force flush of buffered events."""
-        with self._lock:
-            self._flush_buffer()
+        self._flush_buffer()
 
     def close(self) -> None:
         """Close the journal file."""
-        with self._lock:
-            self._flush_buffer()
-            if self._file:
-                self._file.close()
-                self._file = None
+        self._flush_buffer()
+        if self._file:
+            self._file.close()
+            self._file = None
 
         logger.info(
             f"📓 EventJournal closed: {self._stats['events_logged']} events, "
@@ -252,15 +250,14 @@ class EventJournal:
         event_id: Optional[str] = None,
     ) -> None:
         """Log a market data bar."""
-        with self._lock:
-            event = self._create_event(
-                category=EventCategory.MARKET_DATA,
-                event_type='bar',
-                symbol=symbol,
-                data=bar,
-                event_id=event_id,
-            )
-            self._append_event(event)
+        event = self._create_event(
+            category=EventCategory.MARKET_DATA,
+            event_type='bar',
+            symbol=symbol,
+            data=bar,
+            event_id=event_id,
+        )
+        self._append_event(event)
 
     def log_quote(
         self,
@@ -268,14 +265,13 @@ class EventJournal:
         quote: Dict[str, Any],
     ) -> None:
         """Log a quote update."""
-        with self._lock:
-            event = self._create_event(
-                category=EventCategory.MARKET_DATA,
-                event_type='quote',
-                symbol=symbol,
-                data=quote,
-            )
-            self._append_event(event)
+        event = self._create_event(
+            category=EventCategory.MARKET_DATA,
+            event_type='quote',
+            symbol=symbol,
+            data=quote,
+        )
+        self._append_event(event)
 
     def log_features(
         self,
@@ -284,15 +280,14 @@ class EventJournal:
         bar_timestamp: Optional[datetime] = None,
     ) -> None:
         """Log computed features."""
-        with self._lock:
-            event = self._create_event(
-                category=EventCategory.DERIVED_STATE,
-                event_type='features',
-                symbol=symbol,
-                data=features,
-                metadata={'bar_timestamp': bar_timestamp.isoformat() if bar_timestamp else None},
-            )
-            self._append_event(event)
+        event = self._create_event(
+            category=EventCategory.DERIVED_STATE,
+            event_type='features',
+            symbol=symbol,
+            data=features,
+            metadata={'bar_timestamp': bar_timestamp.isoformat() if bar_timestamp else None},
+        )
+        self._append_event(event)
 
     def log_regime(
         self,
@@ -302,18 +297,17 @@ class EventJournal:
         details: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Log regime detection."""
-        with self._lock:
-            event = self._create_event(
-                category=EventCategory.DERIVED_STATE,
-                event_type='regime',
-                data={
-                    'regime': regime,
-                    'confidence': confidence,
-                    'volatility_regime': volatility_regime,
-                    **(details or {}),
-                },
-            )
-            self._append_event(event)
+        event = self._create_event(
+            category=EventCategory.DERIVED_STATE,
+            event_type='regime',
+            data={
+                'regime': regime,
+                'confidence': confidence,
+                'volatility_regime': volatility_regime,
+                **(details or {}),
+            },
+        )
+        self._append_event(event)
 
     def log_signal(
         self,
@@ -322,15 +316,14 @@ class EventJournal:
         signal_id: Optional[str] = None,
     ) -> None:
         """Log a trading signal."""
-        with self._lock:
-            event = self._create_event(
-                category=EventCategory.SIGNAL,
-                event_type='signal_generated',
-                symbol=symbol,
-                data=signal,
-                event_id=signal_id,
-            )
-            self._append_event(event)
+        event = self._create_event(
+            category=EventCategory.SIGNAL,
+            event_type='signal_generated',
+            symbol=symbol,
+            data=signal,
+            event_id=signal_id,
+        )
+        self._append_event(event)
 
     def log_risk_decision(
         self,
@@ -340,18 +333,17 @@ class EventJournal:
         reasons: Optional[List[str]] = None,
     ) -> None:
         """Log a risk authorization decision."""
-        with self._lock:
-            event = self._create_event(
-                category=EventCategory.RISK_DECISION,
-                event_type=f'authorization_{decision}',
-                symbol=symbol,
-                data={
-                    'decision': decision,
-                    'authorization': authorization,
-                    'reasons': reasons or [],
-                },
-            )
-            self._append_event(event)
+        event = self._create_event(
+            category=EventCategory.RISK_DECISION,
+            event_type=f'authorization_{decision}',
+            symbol=symbol,
+            data={
+                'decision': decision,
+                'authorization': authorization,
+                'reasons': reasons or [],
+            },
+        )
+        self._append_event(event)
 
     def log_order(
         self,
@@ -361,14 +353,13 @@ class EventJournal:
         order: Dict[str, Any],
     ) -> None:
         """Log an order lifecycle event."""
-        with self._lock:
-            event = self._create_event(
-                category=EventCategory.ORDER,
-                event_type=f'order_{action}',
-                symbol=symbol,
-                data={'order_id': order_id, **order},
-            )
-            self._append_event(event)
+        event = self._create_event(
+            category=EventCategory.ORDER,
+            event_type=f'order_{action}',
+            symbol=symbol,
+            data={'order_id': order_id, **order},
+        )
+        self._append_event(event)
 
     def log_fill(
         self,
@@ -383,25 +374,24 @@ class EventJournal:
         extra: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Log an execution fill."""
-        with self._lock:
-            event = self._create_event(
-                category=EventCategory.FILL,
-                event_type='fill',
-                symbol=symbol,
-                data={
-                    'order_id': order_id,
-                    'fill_id': fill_id,
-                    'quantity': quantity,
-                    'price': price,
-                    'commission': commission,
-                    **({'side': side} if side is not None else {}),
-                    **({'fill_timestamp': fill_timestamp.isoformat() if fill_timestamp else None}),
-                    **(extra or {}),
-                },
-                event_id=fill_id,
-                timestamp=fill_timestamp,
-            )
-            self._append_event(event)
+        event = self._create_event(
+            category=EventCategory.FILL,
+            event_type='fill',
+            symbol=symbol,
+            data={
+                'order_id': order_id,
+                'fill_id': fill_id,
+                'quantity': quantity,
+                'price': price,
+                'commission': commission,
+                **({'side': side} if side is not None else {}),
+                **({'fill_timestamp': fill_timestamp.isoformat() if fill_timestamp else None}),
+                **(extra or {}),
+            },
+            event_id=fill_id,
+            timestamp=fill_timestamp,
+        )
+        self._append_event(event)
 
     def log_position(
         self,
@@ -410,14 +400,13 @@ class EventJournal:
         position: Dict[str, Any],
     ) -> None:
         """Log a position update."""
-        with self._lock:
-            event = self._create_event(
-                category=EventCategory.POSITION,
-                event_type=f'position_{action}',
-                symbol=symbol,
-                data=position,
-            )
-            self._append_event(event)
+        event = self._create_event(
+            category=EventCategory.POSITION,
+            event_type=f'position_{action}',
+            symbol=symbol,
+            data=position,
+        )
+        self._append_event(event)
 
     def log_system(
         self,
@@ -425,13 +414,12 @@ class EventJournal:
         data: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Log a system event."""
-        with self._lock:
-            event = self._create_event(
-                category=EventCategory.SYSTEM,
-                event_type=event_type,
-                data=data or {},
-            )
-            self._append_event(event)
+        event = self._create_event(
+            category=EventCategory.SYSTEM,
+            event_type=event_type,
+            data=data or {},
+        )
+        self._append_event(event)
 
     # ==================== Replay Support ====================
 

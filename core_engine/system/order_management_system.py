@@ -204,6 +204,7 @@ class OrderManagementSystem(ISystemComponent):
 
         self._initialized = False
         self._running = False
+        self._orders_lock = asyncio.Lock()
 
         logger.info("OrderManagementSystem initialized (Rule 5, Phase 12)")
 
@@ -321,18 +322,19 @@ class OrderManagementSystem(ISystemComponent):
             metadata=metadata or {}
         )
 
-        # Store order in indices
-        self.orders[order.order_id] = order
-        self.orders_by_authorization[authorization_id].append(order.order_id)
-        self.orders_by_symbol[symbol].append(order.order_id)
-        if strategy_id:
-            self.orders_by_strategy[strategy_id].append(order.order_id)
+        async with self._orders_lock:
+            # Store order in indices
+            self.orders[order.order_id] = order
+            self.orders_by_authorization[authorization_id].append(order.order_id)
+            self.orders_by_symbol[symbol].append(order.order_id)
+            if strategy_id:
+                self.orders_by_strategy[strategy_id].append(order.order_id)
 
-        # Record state change
-        self._record_state_change(order, None, OrderState.PENDING_NEW, 'order_created')
+            # Record state change
+            self._record_state_change(order, None, OrderState.PENDING_NEW, 'order_created')
 
-        # Update stats
-        self.stats['orders_created'] += 1
+            # Update stats
+            self.stats['orders_created'] += 1
 
         # Persist if enabled
         if self.persistence_enabled:
@@ -398,51 +400,52 @@ class OrderManagementSystem(ISystemComponent):
         Returns:
             Updated Order object
         """
-        order = self.orders.get(order_id)
-        if not order:
-            raise ValueError(f"Order not found: {order_id}")
+        async with self._orders_lock:
+            order = self.orders.get(order_id)
+            if not order:
+                raise ValueError(f"Order not found: {order_id}")
 
-        # Create fill record
-        fill = Fill(
-            fill_id=str(uuid.uuid4()),
-            timestamp=datetime.now(),
-            quantity=fill_quantity,
-            price=fill_price,
-            venue=venue,
-            commission=commission,
-            fees=fees
-        )
-        order.fills.append(fill)
+            # Create fill record
+            fill = Fill(
+                fill_id=str(uuid.uuid4()),
+                timestamp=datetime.now(),
+                quantity=fill_quantity,
+                price=fill_price,
+                venue=venue,
+                commission=commission,
+                fees=fees
+            )
+            order.fills.append(fill)
 
-        # Update quantities
-        prev_filled = order.filled_quantity
-        order.filled_quantity += fill_quantity
-        order.remaining_quantity = order.quantity - order.filled_quantity
+            # Update quantities
+            prev_filled = order.filled_quantity
+            order.filled_quantity += fill_quantity
+            order.remaining_quantity = order.quantity - order.filled_quantity
 
-        # Update average price (weighted average)
-        if prev_filled == 0:
-            order.avg_fill_price = fill_price
-        else:
-            total_value = (order.avg_fill_price * prev_filled) + (fill_price * fill_quantity)
-            order.avg_fill_price = total_value / order.filled_quantity
+            # Update average price (weighted average)
+            if prev_filled == 0:
+                order.avg_fill_price = fill_price
+            else:
+                total_value = (order.avg_fill_price * prev_filled) + (fill_price * fill_quantity)
+                order.avg_fill_price = total_value / order.filled_quantity
 
-        order.last_updated_at = datetime.now()
+            order.last_updated_at = datetime.now()
 
-        # Update stats
-        self.stats['total_volume'] += fill_quantity
-        self.stats['total_value'] += fill_quantity * fill_price
+            # Update stats
+            self.stats['total_volume'] += fill_quantity
+            self.stats['total_value'] += fill_quantity * fill_price
 
-        # Determine new state
-        if order.remaining_quantity <= 0:
-            await self._transition_state(order, OrderState.FILLED, 'completely_filled')
-            order.filled_at = datetime.now()
-            self.stats['orders_filled'] += 1
+            # Determine new state
+            if order.remaining_quantity <= 0:
+                await self._transition_state(order, OrderState.FILLED, 'completely_filled')
+                order.filled_at = datetime.now()
+                self.stats['orders_filled'] += 1
+            else:
+                await self._transition_state(order, OrderState.PARTIALLY_FILLED, 'partial_fill')
 
-            # Notify settlement (Rule 6)
-            if self._settlement_callback:
-                await self._settlement_callback(order)
-        else:
-            await self._transition_state(order, OrderState.PARTIALLY_FILLED, 'partial_fill')
+        # Notify settlement outside the lock (Rule 6)
+        if order.remaining_quantity <= 0 and self._settlement_callback:
+            await self._settlement_callback(order)
 
         logger.info(
             f"✅ Fill recorded: {order.order_id[:8]} "
@@ -463,15 +466,16 @@ class OrderManagementSystem(ISystemComponent):
         Returns:
             Updated Order object
         """
-        order = self.orders.get(order_id)
-        if not order:
-            raise ValueError(f"Order not found: {order_id}")
+        async with self._orders_lock:
+            order = self.orders.get(order_id)
+            if not order:
+                raise ValueError(f"Order not found: {order_id}")
 
-        terminal_states = [OrderState.FILLED, OrderState.CANCELLED, OrderState.REJECTED]
-        if order.state in terminal_states:
-            raise ValueError(f"Cannot cancel order in state: {order.state.value}")
+            terminal_states = [OrderState.FILLED, OrderState.CANCELLED, OrderState.REJECTED]
+            if order.state in terminal_states:
+                raise ValueError(f"Cannot cancel order in state: {order.state.value}")
 
-        await self._transition_state(order, OrderState.PENDING_CANCEL, reason or 'cancel_requested')
+            await self._transition_state(order, OrderState.PENDING_CANCEL, reason or 'cancel_requested')
 
         logger.info(f"🚫 Cancel requested: {order.order_id[:8]} - {reason}")
 
@@ -585,7 +589,8 @@ class OrderManagementSystem(ISystemComponent):
             OrderState.PENDING_CANCEL,
             OrderState.PENDING_REPLACE
         ]
-        return [o for o in self.orders.values() if o.state in working_states]
+        async with self._orders_lock:
+            return [o for o in self.orders.values() if o.state in working_states]
 
     async def get_orders_by_authorization(self, authorization_id: str) -> List[Order]:
         """Get all orders for an authorization"""
@@ -638,19 +643,70 @@ class OrderManagementSystem(ISystemComponent):
         if self.persistence_enabled:
             await self._persist_order(order)
 
-    async def _persist_order(self, order: Order):
-        """Persist order to storage (placeholder for actual implementation)"""
-        # TODO: Implement actual persistence (database, file, etc.)
+    async def _persist_order(self, order: Order) -> None:
+        """Persist order state for disaster recovery (Rule 6)."""
+        if not self.persistence_enabled:
+            return
+        try:
+            import json
+            import os
+            os.makedirs(self.state_persistence_path, exist_ok=True)
+            filepath = os.path.join(self.state_persistence_path, f"{order.order_id}.json")
+            order_data = {
+                'order_id': order.order_id,
+                'client_order_id': order.client_order_id,
+                'authorization_id': order.authorization_id,
+                'symbol': order.symbol,
+                'side': order.side,
+                'order_type': order.order_type.value if hasattr(order.order_type, 'value') else str(order.order_type),
+                'quantity': order.quantity,
+                'filled_quantity': order.filled_quantity,
+                'avg_fill_price': order.avg_fill_price,
+                'state': order.state.value if hasattr(order.state, 'value') else str(order.state),
+                'created_at': order.created_at.isoformat() if hasattr(order, 'created_at') and order.created_at else None,
+                'updated_at': datetime.now().isoformat(),
+            }
+            with open(filepath, 'w') as f:
+                json.dump(order_data, f, indent=2)
+        except Exception as e:
+            logger.error(f"Failed to persist order {order.order_id}: {e}")
 
     async def _persist_all_orders(self):
         """Persist all orders"""
         for order in self.orders.values():
             await self._persist_order(order)
 
-    async def _recover_orders(self):
-        """Recover orders from persistence after restart"""
-        # TODO: Implement recovery logic
-        logger.info("Order recovery check complete")
+    async def _recover_orders(self) -> None:
+        """Recover order state from persistence (Rule 6)."""
+        if not self.persistence_enabled:
+            return
+        try:
+            import json
+            import os
+            if not os.path.exists(self.state_persistence_path):
+                logger.info("No persisted order state found")
+                return
+            recovered = 0
+            for filename in os.listdir(self.state_persistence_path):
+                if not filename.endswith('.json'):
+                    continue
+                filepath = os.path.join(self.state_persistence_path, filename)
+                try:
+                    with open(filepath, 'r') as f:
+                        order_data = json.load(f)
+                    # Only recover active orders (not filled/cancelled/rejected)
+                    state = order_data.get('state', '')
+                    if state in ('filled', 'cancelled', 'rejected', 'expired'):
+                        # Clean up completed order files
+                        os.remove(filepath)
+                        continue
+                    logger.info(f"Recovered order: {order_data.get('order_id')} (state: {state})")
+                    recovered += 1
+                except Exception as e:
+                    logger.warning(f"Failed to recover order from {filename}: {e}")
+            logger.info(f"Order recovery complete: {recovered} orders recovered")
+        except Exception as e:
+            logger.error(f"Order recovery failed: {e}")
 
     async def _order_expiry_monitor(self):
         """Monitor and expire old orders"""

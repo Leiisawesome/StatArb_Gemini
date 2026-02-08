@@ -17,7 +17,6 @@ Version: 1.0.0 (TradeDesk Architecture)
 
 import asyncio
 import logging
-import threading
 import uuid
 from datetime import datetime
 from typing import Dict, List, Optional, Any, Set
@@ -93,7 +92,10 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
 
         # Audit trail for institutional compliance
         self.audit_trail: List[Dict[str, Any]] = []
-        self.audit_lock = threading.Lock()
+        self.audit_lock = asyncio.Lock()
+
+        # Monitoring task reference (managed by SystemMonitor, kept for emergency_stop)
+        self._monitoring_task: Optional[asyncio.Task] = None
 
         # Authorization audit trail for governance compliance
         self._authorization_audit: List[Dict[str, Any]] = []
@@ -396,30 +398,6 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
         except Exception as e:
             logger.error(f"❌ Failed to start system monitoring: {e}")
 
-    async def _monitoring_loop(self) -> None:
-        """Continuous system monitoring loop"""
-
-        logger.info("📊 System monitoring loop started")
-
-        try:
-            while self.system_status not in [SystemStatus.SHUTDOWN, SystemStatus.EMERGENCY]:
-                # Health check all components
-                await self._health_check_components()
-
-                # Update system metrics
-                self._update_system_metrics()
-
-                # Check for emergency conditions
-                await self._check_emergency_conditions()
-
-                # Sleep until next monitoring cycle
-                await asyncio.sleep(self.config.health_check_interval)
-
-        except Exception as e:
-            logger.error(f"❌ System monitoring error: {e}")
-
-        logger.info("📊 System monitoring stopped")
-
     async def _health_check_components(self) -> None:
         """Perform health checks on all components"""
 
@@ -643,22 +621,6 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
         except Exception as e:
             logger.error(f"❌ RiskManager routing failed: {e}")
             return False
-
-    def _get_allowed_operations(self, authority_level: AuthorityLevel) -> Set[str]:
-        """Get allowed operations for authority level"""
-
-        operations = {"health_check", "status_report", "metrics_report"}
-
-        if authority_level == AuthorityLevel.OPERATIONAL:
-            operations.update({"data_request", "signal_generation", "analytics_compute"})
-
-        if authority_level == AuthorityLevel.GOVERNANCE_CONTROL:
-            operations.update({"trade_authorization", "risk_assessment", "position_management"})
-
-        if authority_level == AuthorityLevel.SYSTEM_CONTROL:
-            operations.update({"system_shutdown", "emergency_stop", "component_restart"})
-
-        return operations
 
     def get_system_status(self) -> Dict[str, Any]:
         """Get comprehensive system status"""
@@ -1171,21 +1133,20 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
             component_id: ID of the component involved
             details: Additional event details
         """
-        with self.audit_lock:
-            audit_entry = {
-                'timestamp': datetime.now().isoformat(),
-                'event_type': event_type,
-                'component_id': component_id,
-                'system_status': self.system_status.value,
-                'emergency_mode': self.emergency_mode,
-                'details': details
-            }
+        audit_entry = {
+            'timestamp': datetime.now().isoformat(),
+            'event_type': event_type,
+            'component_id': component_id,
+            'system_status': self.system_status.value,
+            'emergency_mode': self.emergency_mode,
+            'details': details
+        }
 
-            self.audit_trail.append(audit_entry)
+        self.audit_trail.append(audit_entry)
 
-            # Keep only last 2000 entries to prevent memory issues
-            if len(self.audit_trail) > 2000:
-                self.audit_trail = self.audit_trail[-2000:]
+        # Keep only last 2000 entries to prevent memory issues
+        if len(self.audit_trail) > 2000:
+            self.audit_trail = self.audit_trail[-2000:]
 
     def get_audit_trail(self, limit: int = 100, event_type: Optional[str] = None) -> List[Dict[str, Any]]:
         """
@@ -1198,40 +1159,38 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
         Returns:
             List of audit entries
         """
-        with self.audit_lock:
-            if event_type:
-                filtered_trail = [entry for entry in self.audit_trail if entry['event_type'] == event_type]
-            else:
-                filtered_trail = self.audit_trail
+        if event_type:
+            filtered_trail = [entry for entry in self.audit_trail if entry['event_type'] == event_type]
+        else:
+            filtered_trail = self.audit_trail
 
-            return filtered_trail[-limit:] if limit > 0 else filtered_trail
+        return filtered_trail[-limit:] if limit > 0 else filtered_trail
 
     def get_audit_summary(self) -> Dict[str, Any]:
         """Get audit trail summary statistics"""
-        with self.audit_lock:
-            total_events = len(self.audit_trail)
+        total_events = len(self.audit_trail)
 
-            if total_events == 0:
-                return {'total_events': 0, 'event_types': {}, 'time_range': None}
+        if total_events == 0:
+            return {'total_events': 0, 'event_types': {}, 'time_range': None}
 
-            # Count events by type
-            event_counts = {}
-            for entry in self.audit_trail:
-                event_type = entry['event_type']
-                event_counts[event_type] = event_counts.get(event_type, 0) + 1
+        # Count events by type
+        event_counts = {}
+        for entry in self.audit_trail:
+            event_type = entry['event_type']
+            event_counts[event_type] = event_counts.get(event_type, 0) + 1
 
-            # Get time range
-            timestamps = [entry['timestamp'] for entry in self.audit_trail]
-            time_range = {
-                'oldest': min(timestamps),
-                'newest': max(timestamps)
-            }
+        # Get time range
+        timestamps = [entry['timestamp'] for entry in self.audit_trail]
+        time_range = {
+            'oldest': min(timestamps),
+            'newest': max(timestamps)
+        }
 
-            return {
-                'total_events': total_events,
-                'event_types': event_counts,
-                'time_range': time_range
-            }
+        return {
+            'total_events': total_events,
+            'event_types': event_counts,
+            'time_range': time_range
+        }
 
     # ========================================
     # GOVERNANCE AND RISK AUTHORIZATION METHODS
@@ -1306,72 +1265,6 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
                 'timestamp': datetime.now().isoformat()
             }
 
-    def _escalate_authorization(self, escalation_request: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Escalate authorization requests to higher authority levels
-
-        Args:
-            escalation_request: Escalation details with:
-                - operation: Operation requiring escalation
-                - risk_severity: Risk severity level
-                - current_authority: Current authority level
-                - required_authority: Required authority level
-                - reason: Reason for escalation
-
-        Returns:
-            Escalation result
-        """
-        try:
-            operation = escalation_request.get('operation')
-            risk_severity = escalation_request.get('risk_severity', 'high')
-            current_authority = escalation_request.get('current_authority', AuthorityLevel.OPERATIONAL)
-            required_authority = escalation_request.get('required_authority', AuthorityLevel.GOVERNANCE_CONTROL)
-            reason = escalation_request.get('reason', 'unspecified')
-
-            # Determine escalation path
-            escalation_levels = {
-                'high': AuthorityLevel.GOVERNANCE_CONTROL,
-                'critical': AuthorityLevel.SYSTEM_CONTROL
-            }
-
-            target_level = escalation_levels.get(risk_severity, required_authority)
-
-            # Check if escalation is possible
-            if current_authority.value >= target_level.value:
-                # Already at sufficient level
-                escalation_result = {
-                    'escalated': False,
-                    'reason': 'already_sufficient_authority',
-                    'current_level': current_authority.value,
-                    'target_level': target_level.value,
-                    'timestamp': datetime.now().isoformat()
-                }
-            else:
-                # Perform escalation
-                escalation_result = {
-                    'escalated': True,
-                    'from_level': current_authority.value,
-                    'to_level': target_level.value,
-                    'risk_severity': risk_severity,
-                    'reason': reason,
-                    'approved': True,  # Assume approval for simulation
-                    'timestamp': datetime.now().isoformat(),
-                    'escalation_id': f"esc_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-                }
-
-                # Log escalation
-                self.log_audit_event('authorization_escalation', operation, escalation_result)
-
-            return escalation_result
-
-        except Exception as e:
-            logger.error(f"Authorization escalation failed: {e}")
-            return {
-                'escalated': False,
-                'error': str(e),
-                'timestamp': datetime.now().isoformat()
-            }
-
     # ========================================
     # SYSTEM ORCHESTRATION METHODS
     # ========================================
@@ -1409,38 +1302,6 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
                 'error': str(e),
                 'execution_type': execution_type,
                 'orchestrated': False
-            }
-
-    async def delegate_authority(self, authority_request: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Delegate authority through hierarchical layers
-
-        Args:
-            authority_request: Authority delegation request
-
-        Returns:
-            Delegation result
-        """
-        try:
-            # Perform hierarchical authority delegation
-            delegation_result = {
-                'delegated': True,
-                'authority_request': authority_request,
-                'delegation_level': 'hierarchical_system',
-                'timestamp': datetime.now().isoformat(),
-                'approval_chain': ['system_control', 'governance_control', 'operational']
-            }
-
-            # Log delegation
-            logger.info(f"Authority delegated at hierarchical level: {authority_request}")
-
-            return delegation_result
-
-        except Exception as e:
-            logger.error(f"Hierarchical authority delegation failed: {e}")
-            return {
-                'error': str(e),
-                'delegated': False
             }
 
     # ========================================
@@ -1528,47 +1389,6 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
         except Exception as e:
             logger.error(f"Permission delegation failed: {e}")
             return False
-
-    def _get_allowed_operations(self, authority_level: AuthorityLevel) -> List[str]:
-        """
-        Get operations allowed for given authority level
-
-        Args:
-            authority_level: Authority level to check
-
-        Returns:
-            List of allowed operations
-        """
-        try:
-            # Define operations by authority level
-            operations_by_level = {
-                AuthorityLevel.SYSTEM_CONTROL: [
-                    'system_operation', 'governance_operation', 'strategic_operation',
-                    'tactical_operation', 'operational_task', 'read_operation'
-                ],
-                AuthorityLevel.GOVERNANCE_CONTROL: [
-                    'governance_operation', 'strategic_operation', 'tactical_operation',
-                    'operational_task', 'read_operation'
-                ],
-                AuthorityLevel.STRATEGIC: [
-                    'strategic_operation', 'tactical_operation', 'operational_task', 'read_operation'
-                ],
-                AuthorityLevel.TACTICAL: [
-                    'tactical_operation', 'operational_task', 'read_operation'
-                ],
-                AuthorityLevel.OPERATIONAL: [
-                    'operational_task', 'read_operation'
-                ],
-                AuthorityLevel.READ_ONLY: [
-                    'read_operation'
-                ]
-            }
-
-            return operations_by_level.get(authority_level, [])
-
-        except Exception as e:
-            logger.error(f"Allowed operations lookup failed: {e}")
-            return []
 
     def _check_authorization_flow(self, operation: str, requester_authority: AuthorityLevel,
                                  required_authority: AuthorityLevel) -> bool:
@@ -1729,70 +1549,8 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
             return {'coordinated': False, 'error': str(e)}
 
     # ========================================
-    # CAPITAL ALLOCATION METHODS
+    # INTEGRATION METHODS
     # ========================================
-
-    def _distribute_capital(self, capital_distribution: Dict[str, Any]) -> Dict[str, float]:
-        """Distribute capital across hierarchical layers
-
-        Args:
-            capital_distribution: Capital distribution parameters
-
-        Returns:
-            Dict mapping layers to allocated capital amounts
-        """
-        try:
-            total_capital = capital_distribution.get('total_capital', 2000000.0)
-            layer_allocation = capital_distribution.get('layer_allocation', {
-                'ORCHESTRATION': 0.2,
-                'GOVERNANCE': 0.3,
-                'EXECUTION': 0.4,
-                'SUPPORT': 0.1
-            })
-
-            # Validate allocation percentages sum to 1.0
-            total_percentage = sum(layer_allocation.values())
-            if abs(total_percentage - 1.0) > 0.01:  # Allow small rounding differences
-                # Normalize if doesn't sum to 1.0
-                for layer in layer_allocation:
-                    layer_allocation[layer] /= total_percentage
-
-            # Calculate actual capital amounts
-            distributed_capital = {}
-            for layer, percentage in layer_allocation.items():
-                distributed_capital[layer] = total_capital * percentage
-
-            # Update capital utilization tracking
-            self.capital_utilization = {
-                'total_capital': total_capital,
-                'distributed_capital': distributed_capital,
-                'utilization_rate': sum(distributed_capital.values()) / total_capital,
-                'timestamp': datetime.now().isoformat()
-            }
-
-            logger.info(f"Capital distributed across layers: {distributed_capital}")
-            return distributed_capital
-
-        except Exception as e:
-            logger.error(f"Capital distribution failed: {e}")
-            return {}
-
-    def capital_utilization(self) -> Dict[str, Any]:
-        """Get current capital utilization across the system
-
-        Returns:
-            Capital utilization data
-        """
-        return getattr(self, 'capital_utilization', {
-            'total_capital': 0.0,
-            'distributed_capital': {},
-            'utilization_rate': 0.0,
-            'timestamp': datetime.now().isoformat()
-        })
-
-# ========================================
-# INTEGRATION METHODS
-# ========================================
 
     def delegate_authority(self, authority_request: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -1965,7 +1723,7 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
             Component execution result
         """
         try:
-            component = self.registered_components.get(component_id)
+            component = self.component_registry.get(component_id)
             if not component:
                 return {
                     'component': component_id,
@@ -2089,64 +1847,6 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
             check_result['error'] = str(e)
 
         return check_result
-
-    def _distribute_capital(self, capital_distribution: Dict[str, Any]) -> Dict[str, float]:
-        """Distribute capital across hierarchical layers
-
-        Args:
-            capital_distribution: Capital distribution parameters
-
-        Returns:
-            Dict mapping layers to allocated capital amounts
-        """
-        try:
-            total_capital = capital_distribution.get('total_capital', 2000000.0)
-            layer_allocation = capital_distribution.get('layer_allocation', {
-                'ORCHESTRATION': 0.2,
-                'GOVERNANCE': 0.3,
-                'EXECUTION': 0.4,
-                'SUPPORT': 0.1
-            })
-
-            # Validate allocation percentages sum to 1.0
-            total_percentage = sum(layer_allocation.values())
-            if abs(total_percentage - 1.0) > 0.01:  # Allow small rounding differences
-                # Normalize if doesn't sum to 1.0
-                for layer in layer_allocation:
-                    layer_allocation[layer] /= total_percentage
-
-            # Calculate actual capital amounts
-            distributed_capital = {}
-            for layer, percentage in layer_allocation.items():
-                distributed_capital[layer] = total_capital * percentage
-
-            # Update capital utilization tracking
-            self.capital_utilization = {
-                'total_capital': total_capital,
-                'distributed_capital': distributed_capital,
-                'utilization_rate': sum(distributed_capital.values()) / total_capital,
-                'timestamp': datetime.now().isoformat()
-            }
-
-            logger.info(f"Capital distributed across layers: {distributed_capital}")
-            return distributed_capital
-
-        except Exception as e:
-            logger.error(f"Capital distribution failed: {e}")
-            return {}
-
-    def capital_utilization(self) -> Dict[str, Any]:
-        """Get current capital utilization across the system
-
-        Returns:
-            Capital utilization data
-        """
-        return getattr(self, 'capital_utilization', {
-            'total_capital': 0.0,
-            'distributed_capital': {},
-            'utilization_rate': 0.0,
-            'timestamp': datetime.now().isoformat()
-        })
 
     @property
     def authorization_audit(self) -> List[Dict[str, Any]]:

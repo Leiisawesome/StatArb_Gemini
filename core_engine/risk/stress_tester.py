@@ -3,6 +3,7 @@ Risk Management - Stress Tester
 Advanced stress testing framework with scenario analysis and portfolio impact assessment
 """
 
+import asyncio
 import logging
 import threading
 import numpy as np
@@ -89,7 +90,10 @@ class StressTester:
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         """Initialize stress tester"""
         self.config = config or {}
-        self._lock = threading.Lock()
+        # asyncio.Lock for async methods (future use)
+        self._lock = asyncio.Lock()
+        # threading.Lock for sync methods (get_test_history)
+        self._sync_lock = threading.Lock()
         self._scenarios = {}
         self._historical_scenarios = {}
         self._test_results = deque(maxlen=1000)
@@ -669,7 +673,7 @@ class StressTester:
 
     def get_test_history(self) -> List[Dict[str, Any]]:
         """Get stress test history"""
-        with self._lock:
+        with self._sync_lock:
             return list(self._test_results)
 
     async def run_reverse_stress_test(

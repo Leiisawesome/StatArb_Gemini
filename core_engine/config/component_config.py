@@ -289,6 +289,36 @@ class RiskConfig:
     kelly_dd_gamma: float = 2.0
     """Drawdown penalty gamma. Default: 2.0"""
 
+    # --- Governance parameters (formerly hardcoded in CentralRiskManager) ---
+    # Field names use _cfg suffix to avoid conflict with backward-compat @property names
+    strategy_allocation_limit_cfg: float = 0.33
+    """Max allocation per strategy as fraction of portfolio. Default: 33%"""
+
+    monitoring_frequency_seconds: int = 1
+    """Risk monitoring frequency in seconds. Default: 1"""
+
+    max_execution_time_seconds: int = 3600
+    """Max execution time before timeout in seconds. Default: 3600 (1 hour)"""
+
+    high_confidence_threshold_cfg: float = 0.8
+    """High confidence threshold for authorization. Default: 0.8"""
+
+    extreme_confidence_threshold_cfg: float = 0.9
+    """Extreme confidence threshold for authorization. Default: 0.9"""
+
+    # --- Market hours configuration ---
+    market_open_hour: int = 9
+    """Market open hour (local exchange time). Default: 9"""
+
+    market_open_minute: int = 30
+    """Market open minute. Default: 30"""
+
+    market_close_hour: int = 16
+    """Market close hour (local exchange time). Default: 16"""
+
+    market_close_minute: int = 0
+    """Market close minute. Default: 0"""
+
     # Backward compatibility properties
     @property
     def max_position_size(self) -> float:
@@ -337,8 +367,8 @@ class RiskConfig:
 
     @property
     def monitoring_frequency(self) -> int:
-        """Backward compatibility: monitoring frequency in seconds. Default: 60"""
-        return 60  # Default monitoring frequency
+        """Monitoring frequency in seconds (reads from monitoring_frequency_seconds field)."""
+        return self.monitoring_frequency_seconds
 
     @property
     def regime_risk_multipliers(self) -> dict:
@@ -352,8 +382,18 @@ class RiskConfig:
 
     @property
     def strategy_allocation_limit(self) -> float:
-        """Backward compatibility: strategy allocation limit. Default: 0.33 (33%)"""
-        return 0.33
+        """Strategy allocation limit (reads from strategy_allocation_limit_cfg field)."""
+        return self.strategy_allocation_limit_cfg
+
+    @property
+    def high_confidence_threshold(self) -> float:
+        """High confidence threshold (reads from high_confidence_threshold_cfg field)."""
+        return self.high_confidence_threshold_cfg
+
+    @property
+    def extreme_confidence_threshold(self) -> float:
+        """Extreme confidence threshold (reads from extreme_confidence_threshold_cfg field)."""
+        return self.extreme_confidence_threshold_cfg
 
 @dataclass
 class ExposureConfig:

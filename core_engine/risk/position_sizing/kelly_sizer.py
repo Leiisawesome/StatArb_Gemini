@@ -42,6 +42,9 @@ class KellyParams:
     # Drawdown gamma
     dd_gamma: float = 2.0
 
+    # Conservatism penalty when below min_trades
+    pre_min_trades_penalty: float = 0.5
+
 
 def estimate_win_prob(pnls: Sequence[float], *, prior_a: float, prior_b: float) -> Tuple[float, float]:
     """
@@ -151,7 +154,7 @@ def compute_fractional_kelly_fraction_of_capital(
         k = raw_kelly(p_hat, b_hat, kelly_min=params.kelly_min, kelly_max=params.kelly_max)
         u = uncertainty_adjustment(p=p_hat, p_std=p_std, b=b_hat, b_std_proxy=b_std, floor=params.uncertainty_floor)
         dd_f = drawdown_factor(current_dd, max_dd, gamma=params.dd_gamma)
-        frac = s * params.kelly_frac * k * u * lf * dd_f * rf * 0.5  # extra conservatism pre-min_trades
+        frac = s * params.kelly_frac * k * u * lf * dd_f * rf * params.pre_min_trades_penalty  # extra conservatism pre-min_trades
         return KellySizingResult(
             target_fraction_of_capital=_clip(frac, 0.0, 1.0),
             diagnostics={
@@ -164,7 +167,7 @@ def compute_fractional_kelly_fraction_of_capital(
                 "drawdown_factor": float(dd_f),
                 "regime_factor": float(rf),
                 "signal_strength": float(s),
-                "conservative_penalty": 0.5,
+                "conservative_penalty": float(params.pre_min_trades_penalty),
             },
         )
 

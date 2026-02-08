@@ -168,7 +168,7 @@ class TradingCircuitBreakers(IRegimeSubscriber):
         self.kill_switch_active = False
         self.kill_switch_timestamp: Optional[datetime] = None
         self.kill_switch_user: Optional[str] = None
-        self.authorization_code = "EMERGENCY_OVERRIDE_2025"  # Would be secure in production
+        self.authorization_code = os.environ.get("CIRCUIT_BREAKER_OVERRIDE_CODE", "")  # Must be set via environment variable
 
         # Order Rate Limiting
         self.orders_last_second = deque(maxlen=self.config.max_orders_per_second * 2)

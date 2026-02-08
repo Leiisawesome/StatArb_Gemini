@@ -79,7 +79,11 @@ class EnhancedRiskManager(ISystemComponent, IRegimeAware):
             # Assume it's a dataclass with sub-configs
             self.config = asdict(config) if hasattr(config, '__dataclass_fields__') else config
 
-        self._lock = threading.Lock()
+        # asyncio.Lock for async methods (_send_risk_alert)
+        self._lock = asyncio.Lock()
+        # threading.Lock for sync methods (get_latest_risk_snapshot, get_risk_snapshots,
+        # get_recent_alerts, _store_risk_snapshot)
+        self._sync_lock = threading.Lock()
 
         # Extract or create sub-configs for risk components
         # Use centralized dataclass configs
@@ -447,13 +451,13 @@ class EnhancedRiskManager(ISystemComponent, IRegimeAware):
 
     def _store_risk_snapshot(self, snapshot: RiskSnapshot) -> None:
         """Store risk snapshot and clean up old ones"""
-        with self._lock:
+        with self._sync_lock:
             self._risk_snapshots.append(snapshot)
 
         # Clean up old snapshots
         cutoff_time = datetime.now() - timedelta(days=self.snapshot_retention_days)
 
-        with self._lock:
+        with self._sync_lock:
             self._risk_snapshots = deque(
                 [s for s in self._risk_snapshots if s.timestamp >= cutoff_time],
                 maxlen=1000
@@ -522,7 +526,7 @@ class EnhancedRiskManager(ISystemComponent, IRegimeAware):
         """Send risk alert to registered handlers"""
 
         # Store alert
-        with self._lock:
+        async with self._lock:
             self._risk_alerts.append(alert)
 
         # Send to handlers
@@ -545,21 +549,21 @@ class EnhancedRiskManager(ISystemComponent, IRegimeAware):
 
     def get_latest_risk_snapshot(self) -> Optional[RiskSnapshot]:
         """Get most recent risk snapshot"""
-        with self._lock:
+        with self._sync_lock:
             return self._risk_snapshots[-1] if self._risk_snapshots else None
 
     def get_risk_snapshots(self, hours: int = 24) -> List[RiskSnapshot]:
         """Get risk snapshots from specified time period"""
         cutoff_time = datetime.now() - timedelta(hours=hours)
 
-        with self._lock:
+        with self._sync_lock:
             return [s for s in self._risk_snapshots if s.timestamp >= cutoff_time]
 
     def get_recent_alerts(self, hours: int = 24) -> List[RiskAlert]:
         """Get recent risk alerts"""
         cutoff_time = datetime.now() - timedelta(hours=hours)
 
-        with self._lock:
+        with self._sync_lock:
             return [a for a in self._risk_alerts if a.timestamp >= cutoff_time]
 
     async def add_risk_limit(self, limit: RiskLimit) -> None:

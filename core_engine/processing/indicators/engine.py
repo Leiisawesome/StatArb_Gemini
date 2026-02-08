@@ -24,7 +24,6 @@ from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
 import warnings
-import threading
 import uuid
 from datetime import datetime
 warnings.filterwarnings('ignore')
@@ -172,9 +171,6 @@ class EnhancedTechnicalIndicators(IIndicatorProcessor, ISystemComponent, IRegime
 
         # Supported indicators registry (core_engine pattern)
         self._supported_indicators = self._initialize_indicator_registry()
-
-        # Threading
-        self._lock = threading.Lock()
 
         self.logger.info(f"🚀 Enhanced Technical Indicators initialized with component ID: {self.component_id}")
         self.logger.info(f"📊 Loaded {len(self._supported_indicators)} indicators")

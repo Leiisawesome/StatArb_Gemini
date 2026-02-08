@@ -21,7 +21,6 @@ from collections import deque
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.preprocessing import StandardScaler
 from dataclasses import dataclass
-import threading
 import uuid
 import asyncio
 import math
@@ -126,9 +125,6 @@ class RealTimeRegimeSensor(ISystemComponent, IRegimePolicy):
             "1D": 1440,     # 1440 minutes (24 hours)
             "1W": 10080     # 10080 minutes (7 days)
         }
-
-        # Threading
-        self._lock = threading.Lock()
 
         # ------------------------------------------------------------------
         # Per-bar fast regime state (single-symbol incremental evaluator)

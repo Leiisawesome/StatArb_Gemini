@@ -127,7 +127,12 @@ class LimitMonitor:
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         """Initialize limit monitor"""
         self.config = config or {}
-        self._lock = threading.Lock()
+        # asyncio.Lock for async methods (check_limits)
+        self._lock = asyncio.Lock()
+        # threading.Lock for sync methods (add_limit, update_limit, remove_limit,
+        # get_limit, get_all_limits, _store_breach, get_current_breaches,
+        # acknowledge_breach, get_monitoring_metrics)
+        self._sync_lock = threading.Lock()
         self._limits = {}
         self._breaches = deque(maxlen=10000)
         self._alert_handlers = []
@@ -152,14 +157,14 @@ class LimitMonitor:
 
     def add_limit(self, limit: RiskLimit) -> None:
         """Add a new risk limit"""
-        with self._lock:
+        with self._sync_lock:
             self._limits[limit.limit_id] = limit
 
         logger.info(f"Added risk limit: {limit.name} ({limit.limit_id})")
 
     def update_limit(self, limit_id: str, updates: Dict[str, Any]) -> None:
         """Update existing risk limit"""
-        with self._lock:
+        with self._sync_lock:
             if limit_id not in self._limits:
                 raise ValueError(f"Limit not found: {limit_id}")
 
@@ -176,19 +181,19 @@ class LimitMonitor:
 
     def remove_limit(self, limit_id: str) -> None:
         """Remove risk limit"""
-        with self._lock:
+        with self._sync_lock:
             if limit_id in self._limits:
                 del self._limits[limit_id]
                 logger.info(f"Removed risk limit: {limit_id}")
 
     def get_limit(self, limit_id: str) -> Optional[RiskLimit]:
         """Get risk limit by ID"""
-        with self._lock:
+        with self._sync_lock:
             return self._limits.get(limit_id)
 
     def get_all_limits(self, scope: Optional[LimitScope] = None) -> List[RiskLimit]:
         """Get all risk limits, optionally filtered by scope"""
-        with self._lock:
+        with self._sync_lock:
             limits = list(self._limits.values())
 
         if scope:
@@ -208,7 +213,7 @@ class LimitMonitor:
         breaches = []
 
         try:
-            with self._lock:
+            async with self._lock:
                 active_limits = [limit for limit in self._limits.values() if limit.is_active]
 
             # Check each active limit
@@ -496,13 +501,13 @@ class LimitMonitor:
 
     def _store_breach(self, breach: LimitBreach) -> None:
         """Store breach in memory and clean up old breaches"""
-        with self._lock:
+        with self._sync_lock:
             self._breaches.append(breach)
 
         # Clean up old breaches
         cutoff_time = datetime.now() - timedelta(days=self.breach_retention_days)
 
-        with self._lock:
+        with self._sync_lock:
             # Remove old breaches
             self._breaches = deque(
                 [b for b in self._breaches if b.timestamp >= cutoff_time],
@@ -545,7 +550,7 @@ class LimitMonitor:
 
     def get_current_breaches(self, severity: Optional[AlertSeverity] = None) -> List[LimitBreach]:
         """Get current limit breaches"""
-        with self._lock:
+        with self._sync_lock:
             breaches = list(self._breaches)
 
         if severity:
@@ -559,7 +564,7 @@ class LimitMonitor:
 
     def acknowledge_breach(self, breach_id: str, acknowledged_by: str) -> None:
         """Acknowledge a limit breach"""
-        with self._lock:
+        with self._sync_lock:
             for breach in self._breaches:
                 if (breach.limit_id == breach_id and
                     not breach.acknowledged and
@@ -572,7 +577,7 @@ class LimitMonitor:
 
     def get_monitoring_metrics(self) -> MonitoringMetrics:
         """Get monitoring system metrics"""
-        with self._lock:
+        with self._sync_lock:
             total_limits = len(self._limits)
             active_limits = len([l for l in self._limits.values() if l.is_active])
 

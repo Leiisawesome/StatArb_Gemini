@@ -113,7 +113,7 @@ class PaperTradingWatchdog:
         self._running = False
         self._monitor_task: Optional[asyncio.Task] = None
 
-        # Thread safety
+        # Thread-safe locking (all methods using this lock are sync)
         self._lock = threading.Lock()
 
         # Stats

@@ -50,6 +50,7 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
         
         self.positions: Dict[str, Position] = {}
         self.orders: Dict[str, Order] = {}
+        self.current_prices: Dict[str, float] = {}
         self._connected = False
         self._time_source = None
         self._fill_callback = None
@@ -126,10 +127,13 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
         # In a real implementation with use_historical_execution_simulator=True, 
         # we would call self.simulator.simulate_fill here.
         
-        fill_price = 100.0  # Default mock price
-        # Better: if we have next_order_context with decision_price, use it
+        fill_price = 100.0  # Last resort default
         if "decision_price" in self._next_order_context:
             fill_price = self._next_order_context["decision_price"]
+        elif symbol in self.positions:
+            fill_price = self.positions[symbol].average_price
+        else:
+            logger.warning(f"No price context for {symbol}, using default mock price $100.0")
         
         # Apply slippage
         slippage = random.uniform(0, self.slippage_bps_max) / 10000.0
@@ -201,9 +205,21 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
         else:
             self.positions[symbol] = Position(symbol=symbol, quantity=q_change, average_price=price)
         
-        # Update equity (simplified)
-        self.equity = self.cash + sum(p.quantity * 100.0 for p in self.positions.values()) # 100 is mock current price
+        # Update equity using best available prices
+        self._recalculate_equity()
 
+    def update_market_prices(self, prices: Dict[str, float]) -> None:
+        """Update current market prices for accurate equity calculation."""
+        self.current_prices.update(prices)
+        self._recalculate_equity()
+
+    def _recalculate_equity(self) -> None:
+        """Recalculate equity using best available prices."""
+        position_value = 0.0
+        for symbol, pos in self.positions.items():
+            price = self.current_prices.get(symbol, pos.average_price)
+            position_value += pos.quantity * price
+        self.equity = self.cash + position_value
 
     async def submit_limit_order(self, symbol: str, quantity: float, side: OrderSide, limit_price: float) -> Order:
         order_id = str(uuid.uuid4())

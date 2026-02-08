@@ -3,6 +3,7 @@ Analytics Engine - Report Generator
 Advanced report generation with customizable layouts and export formats
 """
 
+import asyncio
 import logging
 import threading
 import json
@@ -877,8 +878,10 @@ class ReportGenerator:
         # Generated reports cache
         self._reports_cache = {}
 
-        # Threading
-        self._lock = threading.Lock()
+        # Dual-lock pattern: asyncio.Lock for async methods (generate_report),
+        # threading.Lock for sync methods (get_report_list, clear_reports_cache, etc.).
+        self._async_lock = asyncio.Lock()
+        self._sync_lock = threading.Lock()
 
         logger.info("Report Generator initialized")
 
@@ -924,7 +927,7 @@ class ReportGenerator:
                 f.write(report_content)
 
             # Cache report
-            with self._lock:
+            async with self._async_lock:
                 self._reports_cache[report_name] = {
                     'path': str(output_path),
                     'timestamp': datetime.now(),
@@ -1125,7 +1128,7 @@ class ReportGenerator:
     def get_report_list(self) -> List[Dict[str, Any]]:
         """Get list of generated reports"""
 
-        with self._lock:
+        with self._sync_lock:
             return [
                 {
                     'name': name,
@@ -1150,14 +1153,14 @@ class ReportGenerator:
     def clear_reports_cache(self) -> None:
         """Clear reports cache"""
 
-        with self._lock:
+        with self._sync_lock:
             self._reports_cache.clear()
             logger.info("Reports cache cleared")
 
     def get_generator_statistics(self) -> Dict[str, Any]:
         """Get generator statistics"""
 
-        with self._lock:
+        with self._sync_lock:
             total_reports = len(self._reports_cache)
             total_size = sum(info['size'] for info in self._reports_cache.values())
 

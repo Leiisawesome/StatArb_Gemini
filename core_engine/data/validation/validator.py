@@ -524,7 +524,14 @@ class DataValidator(ISystemComponent):
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         """Initialize data validator"""
         self.config = config or {}
-        self._lock = threading.Lock()
+        # NOTE: threading.Lock is intentional. This lock is used in both sync methods
+        # (_store_cross_validation_data, register_validation_config, get_validation_results,
+        # etc.) and async methods (validate_data, _monitor_validation_performance,
+        # Dual-lock pattern: asyncio.Lock for async methods (validate_data,
+        # _monitor_validation_performance, _cleanup_old_results, cleanup),
+        # threading.Lock for sync methods (_store_cross_validation_data, etc.).
+        self._async_lock = asyncio.Lock()
+        self._sync_lock = threading.Lock()
 
         # ISystemComponent state (Rule 1)
         self.is_initialized = False
@@ -690,7 +697,7 @@ class DataValidator(ISystemComponent):
             )
 
             # Store results
-            with self._lock:
+            async with self._async_lock:
                 self._validation_results.append(validation_result)
                 self._quality_metrics.append(quality_metrics)
 
@@ -1195,7 +1202,7 @@ class DataValidator(ISystemComponent):
         storage_data = data.copy()
         storage_data['validation_timestamp'] = datetime.now()
 
-        with self._lock:
+        with self._sync_lock:
             source_data = self._cross_validation_data[symbol][source]
             source_data.append(storage_data)
 
@@ -1256,7 +1263,7 @@ class DataValidator(ISystemComponent):
             try:
                 await asyncio.sleep(DataIntervals.VALIDATION_MONITORING_SECONDS)
 
-                with self._lock:
+                async with self._async_lock:
                     stats = self._validation_stats.copy()
 
                 # Check validation performance
@@ -1283,7 +1290,7 @@ class DataValidator(ISystemComponent):
 
                 cutoff_time = datetime.now() - timedelta(days=DataRetention.VALIDATION_RETENTION_DAYS)
 
-                with self._lock:
+                async with self._async_lock:
                     # Cleanup validation results
                     while (self._validation_results and
                            self._validation_results[0].timestamp < cutoff_time):
@@ -1314,7 +1321,7 @@ class DataValidator(ISystemComponent):
     ) -> None:
         """Register validation configuration for data type"""
 
-        with self._lock:
+        with self._sync_lock:
             self._validation_configs[data_type] = config
 
         logger.info(f"Registered validation config for {data_type}")
@@ -1329,13 +1336,13 @@ class DataValidator(ISystemComponent):
         cutoff_time = datetime.now() - timedelta(hours=hours)
 
         if symbol:
-            with self._lock:
+            with self._sync_lock:
                 results = [
                     result for result in self._validation_by_symbol.get(symbol, [])
                     if result.timestamp >= cutoff_time
                 ]
         else:
-            with self._lock:
+            with self._sync_lock:
                 results = [
                     result for result in self._validation_results
                     if result.timestamp >= cutoff_time
@@ -1352,7 +1359,7 @@ class DataValidator(ISystemComponent):
 
         cutoff_time = datetime.now() - timedelta(hours=hours)
 
-        with self._lock:
+        with self._sync_lock:
             all_metrics = list(self._quality_metrics)
 
         # Filter by time and symbol
@@ -1365,11 +1372,11 @@ class DataValidator(ISystemComponent):
         return filtered_metrics
 
     def get_validation_summary(self, hours: int = 24) -> Dict[str, Any]:
-        """Get validation summary"""
+        """Get validation summary (sync)"""
 
         cutoff_time = datetime.now() - timedelta(hours=hours)
 
-        with self._lock:
+        with self._sync_lock:
             recent_results = [
                 result for result in self._validation_results
                 if result.timestamp >= cutoff_time
@@ -1413,7 +1420,7 @@ class DataValidator(ISystemComponent):
             task.cancel()
 
         # Clear data
-        with self._lock:
+        async with self._async_lock:
             self._validation_results.clear()
             self._quality_metrics.clear()
             self._validation_by_symbol.clear()

@@ -212,6 +212,11 @@ class EnhancedTradingEngine(ISystemComponent):
 
         self.logger.info(f"🚀 Enhanced Trading Engine initialized with component ID: {self.component_id}")
 
+    @property
+    def is_running(self) -> bool:
+        """Alias for is_operational for backward compatibility."""
+        return self.is_operational
+
     # ========================================
     # ORCHESTRATOR INTEGRATION
     # ========================================
@@ -940,20 +945,21 @@ class EnhancedTradingEngine(ISystemComponent):
         async with self._lock:
             if plan_id not in self.execution_slices:
                 return
-        completed = sum(1 for s in slices if s.status in ["executed", "failed"])
+            slices = self.execution_slices[plan_id]
+            completed = sum(1 for s in slices if s.status in ["executed", "failed"])
 
-        if completed == len(slices):
-            # Plan completed
-            plan = self.active_plans[plan_id]
-            self.completed_plans[plan_id] = {
-                'plan': plan,
-                'status': 'completed',
-                'completed_at': datetime.now()
-            }
-            del self.active_plans[plan_id]
-            del self.execution_slices[plan_id]
+            if completed == len(slices):
+                # Plan completed
+                plan = self.active_plans[plan_id]
+                self.completed_plans[plan_id] = {
+                    'plan': plan,
+                    'status': 'completed',
+                    'completed_at': datetime.now()
+                }
+                del self.active_plans[plan_id]
+                del self.execution_slices[plan_id]
 
-            logger.info(f"✅ Plan completed: {plan_id}")
+                logger.info(f"✅ Plan completed: {plan_id}")
 
     async def _initialize_market_monitoring(self):
         """Initialize market condition monitoring"""

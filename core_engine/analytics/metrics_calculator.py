@@ -3,6 +3,7 @@ Analytics Engine - Metrics Calculator
 Advanced metrics calculation with risk-adjusted performance and statistical measures
 """
 
+import asyncio
 import logging
 import threading
 import uuid
@@ -853,8 +854,10 @@ class EnhancedMetricsCalculator(ISystemComponent, IRegimeAware):
         self._metrics_cache = {}
         self._rolling_metrics = defaultdict(dict)
 
-        # Threading
-        self._lock = threading.Lock()
+        # Dual-lock pattern: asyncio.Lock for async methods (calculate_all_metrics),
+        # threading.Lock for sync methods (compare_metrics, get_metrics_summary, etc.).
+        self._async_lock = asyncio.Lock()
+        self._sync_lock = threading.Lock()
 
         logger.info(f"🚀 Enhanced Metrics Calculator initialized with component ID: {self.component_id}")
 
@@ -1240,7 +1243,7 @@ class EnhancedMetricsCalculator(ISystemComponent, IRegimeAware):
                 )
 
             # Cache results
-            with self._lock:
+            async with self._async_lock:
                 self._metrics_cache[symbol] = results
 
             logger.debug(f"Calculated {sum(len(bundle.metrics) for bundle in results.values())} "
@@ -1307,7 +1310,7 @@ class EnhancedMetricsCalculator(ISystemComponent, IRegimeAware):
                     rolling_results[metric_name] = pd.Series(0.0, index=rolling_dates)
 
             # Cache rolling metrics
-            with self._lock:
+            with self._sync_lock:
                 self._rolling_metrics[symbol].update(rolling_results)
 
             logger.debug(f"Calculated optimized rolling metrics for {symbol} with window {window}")
@@ -1326,7 +1329,7 @@ class EnhancedMetricsCalculator(ISystemComponent, IRegimeAware):
     ) -> Dict[str, Dict[str, float]]:
         """Compare metrics between two symbols"""
 
-        with self._lock:
+        with self._sync_lock:
             primary_metrics = self._metrics_cache.get(primary_symbol, {})
             comparison_metrics = self._metrics_cache.get(comparison_symbol, {})
 
@@ -1401,7 +1404,7 @@ class EnhancedMetricsCalculator(ISystemComponent, IRegimeAware):
     def get_metrics_summary(self, symbol: str) -> Dict[str, Any]:
         """Get metrics summary for a symbol"""
 
-        with self._lock:
+        with self._sync_lock:
             metrics_bundles = self._metrics_cache.get(symbol, {})
             rolling_metrics = self._rolling_metrics.get(symbol, {})
 
@@ -1432,13 +1435,13 @@ class EnhancedMetricsCalculator(ISystemComponent, IRegimeAware):
     def get_cached_metrics(self, symbol: str) -> Optional[Dict[MetricCategory, MetricsBundle]]:
         """Get cached metrics for a symbol"""
 
-        with self._lock:
+        with self._sync_lock:
             return self._metrics_cache.get(symbol)
 
     def get_rolling_metrics(self, symbol: str) -> Dict[str, pd.Series]:
         """Get rolling metrics for a symbol"""
 
-        with self._lock:
+        with self._sync_lock:
             return self._rolling_metrics.get(symbol, {})
 
     def calculate_performance_metrics(self, returns: pd.Series) -> Dict[str, Any]:
@@ -1564,7 +1567,7 @@ class EnhancedMetricsCalculator(ISystemComponent, IRegimeAware):
     def clear_cache(self) -> None:
         """Clear metrics cache"""
 
-        with self._lock:
+        with self._sync_lock:
             self._metrics_cache.clear()
             self._rolling_metrics.clear()
 
@@ -1612,7 +1615,7 @@ class EnhancedMetricsCalculator(ISystemComponent, IRegimeAware):
     def get_calculator_statistics(self) -> Dict[str, Any]:
         """Get calculator statistics"""
 
-        with self._lock:
+        with self._sync_lock:
             cached_symbols = len(self._metrics_cache)
             rolling_symbols = len(self._rolling_metrics)
 

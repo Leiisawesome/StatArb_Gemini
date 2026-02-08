@@ -3,6 +3,7 @@ Signals Engine - Factor Analyzer
 Advanced factor analysis with principal component analysis, factor modeling, and risk factor decomposition
 """
 
+import asyncio
 import logging
 import threading
 import numpy as np
@@ -395,8 +396,12 @@ class FactorAnalyzer:
         self._factor_exposures = defaultdict(dict)  # symbol -> factor_id -> exposure
         self._factor_returns = defaultdict(list)  # factor_id -> [returns]
 
-        # Threading
-        self._lock = threading.Lock()
+        # asyncio.Lock for async methods (calculate_factor_exposures, run_factor_analysis)
+        self._lock = asyncio.Lock()
+        # threading.Lock for sync methods (register_factor, register_factor_model,
+        # _calculate_percentile, get_factor_definitions, get_factor_models,
+        # get_factor_exposures, get_performance_metrics)
+        self._sync_lock = threading.Lock()
 
         # Analysis cache
         self._analysis_cache = {}
@@ -477,7 +482,7 @@ class FactorAnalyzer:
     def register_factor(self, factor_definition: FactorDefinition, calculator: FactorCalculator) -> None:
         """Register a factor definition and calculator"""
 
-        with self._lock:
+        with self._sync_lock:
             self._factor_definitions[factor_definition.factor_id] = factor_definition
             self._factor_calculators[factor_definition.factor_id] = calculator
 
@@ -486,7 +491,7 @@ class FactorAnalyzer:
     def register_factor_model(self, model: FactorModel) -> None:
         """Register a factor model"""
 
-        with self._lock:
+        with self._sync_lock:
             self._factor_models[model.model_id] = model
 
         logger.info(f"Registered factor model: {model.model_id}")
@@ -550,7 +555,7 @@ class FactorAnalyzer:
                         exposures[factor_id] = exposure
 
                         # Store in cache
-                        with self._lock:
+                        async with self._lock:
                             if symbol not in self._factor_exposures:
                                 self._factor_exposures[symbol] = {}
                             self._factor_exposures[symbol][factor_id] = exposure
@@ -576,7 +581,7 @@ class FactorAnalyzer:
 
         try:
             # Get historical factor values for percentile calculation
-            with self._lock:
+            with self._sync_lock:
                 historical_values = []
                 for symbol_exposures in self._factor_exposures.values():
                     if factor_id in symbol_exposures:
@@ -606,7 +611,7 @@ class FactorAnalyzer:
             # Get factor exposures
             exposures_data = {}
             for symbol in symbols:
-                with self._lock:
+                async with self._lock:
                     if symbol in self._factor_exposures:
                         exposures_data[symbol] = self._factor_exposures[symbol]
 
@@ -864,17 +869,17 @@ class FactorAnalyzer:
 
     def get_factor_definitions(self) -> Dict[str, FactorDefinition]:
         """Get all factor definitions"""
-        with self._lock:
+        with self._sync_lock:
             return dict(self._factor_definitions)
 
     def get_factor_models(self) -> Dict[str, FactorModel]:
         """Get all factor models"""
-        with self._lock:
+        with self._sync_lock:
             return dict(self._factor_models)
 
     def get_factor_exposures(self, symbol: Optional[str] = None) -> Dict[str, Dict[str, FactorExposure]]:
         """Get factor exposures"""
-        with self._lock:
+        with self._sync_lock:
             if symbol:
                 return {symbol: self._factor_exposures.get(symbol, {})}
             else:
@@ -883,7 +888,7 @@ class FactorAnalyzer:
     def get_performance_metrics(self) -> Dict[str, Any]:
         """Get performance metrics"""
 
-        with self._lock:
+        with self._sync_lock:
             avg_calculation_time = np.mean(self._calculation_times) if self._calculation_times else 0
 
             return {

@@ -3,6 +3,7 @@ Signals Engine - Signal Validator
 Advanced signal validation with quality assessment, consistency checks, and risk validation
 """
 
+import asyncio
 import logging
 import threading
 import numpy as np
@@ -552,8 +553,11 @@ class SignalValidator:
         self._validation_times = deque(maxlen=1000)
         self._validation_stats = defaultdict(int)
 
-        # Threading
-        self._lock = threading.Lock()
+        # asyncio.Lock for async methods (future use)
+        self._lock = asyncio.Lock()
+        # threading.Lock for sync methods (validate_signal internals, get_validation_statistics,
+        # get_recent_validations)
+        self._sync_lock = threading.Lock()
 
         # Configuration
         self.enable_all_rules = self.config.get('enable_all_rules', True)
@@ -614,7 +618,7 @@ class SignalValidator:
         }
 
         # Track validation in history
-        with self._lock:
+        with self._sync_lock:
             self._validation_history.append(result)
             self._validation_stats[overall_status] += 1
 
@@ -788,7 +792,7 @@ class SignalValidator:
     def get_validation_statistics(self) -> Dict[str, Any]:
         """Get validation statistics"""
 
-        with self._lock:
+        with self._sync_lock:
             avg_validation_time = np.mean(self._validation_times) if self._validation_times else 0
 
             return {
@@ -803,7 +807,7 @@ class SignalValidator:
     def get_recent_validations(self, limit: int = 100) -> List[SignalValidationReport]:
         """Get recent validation reports"""
 
-        with self._lock:
+        with self._sync_lock:
             return list(self._validation_history)[-limit:]
 
     def get_validation_rules(self) -> List[ValidationRule]:

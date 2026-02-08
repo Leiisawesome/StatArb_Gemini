@@ -3,6 +3,7 @@ Risk Management - VaR Calculator
 Value at Risk calculation using multiple methodologies with comprehensive risk metrics
 """
 
+import asyncio
 import logging
 import threading
 import pandas as pd
@@ -87,7 +88,10 @@ class VarCalculator:
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         """Initialize VaR calculator"""
         self.config = config or {}
-        self._lock = threading.Lock()
+        # asyncio.Lock for async methods (future use)
+        self._lock = asyncio.Lock()
+        # threading.Lock for sync methods (get_calculation_history)
+        self._sync_lock = threading.Lock()
         self._price_cache = {}
         self._covariance_cache = {}
         self._calculation_history = deque(maxlen=1000)
@@ -323,13 +327,13 @@ class VarCalculator:
             logger.warning(f"Degrees of freedom {df} too low for variance scaling. Defaulting to 7.")
             df = 7
 
-        # Generate random simulations
-        np.random.seed(42)  # For reproducibility
+        # Use a local RNG for reproducibility without polluting global state
+        rng = np.random.default_rng(seed=42)
         
         # Standardized Student-t samples (mean=0, scale=sqrt((df-2)/df))
         # to ensure the resulting distribution has exactly std_return
         scale_adj = np.sqrt((df - 2.0) / df)
-        t_samples = stats.t.rvs(df, loc=0, scale=scale_adj, size=self.mc_simulations)
+        t_samples = stats.t.rvs(df, loc=0, scale=scale_adj, size=self.mc_simulations, random_state=rng)
         
         # Project returns: E[r]*T + sigma*sqrt(T)*t
         simulated_returns = (mean_return * time_horizon) + (t_samples * std_return * np.sqrt(time_horizon))
@@ -535,7 +539,7 @@ class VarCalculator:
 
     def get_calculation_history(self) -> List[Dict[str, Any]]:
         """Get VaR calculation history"""
-        with self._lock:
+        with self._sync_lock:
             return list(self._calculation_history)
 
     async def cleanup(self) -> None:

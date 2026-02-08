@@ -14,7 +14,6 @@ import pandas as pd
 from collections import defaultdict
 import warnings
 
-warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
 
 class FillStatus(Enum):
@@ -158,6 +157,8 @@ class FillValidator:
     def __init__(self):
         self.validation_rules = {}
         self._reference_data = {}
+        # NOTE: threading.Lock intentionally kept - only used in sync methods
+        # (add_custom_rule, remove_rule). No async methods use this lock.
         self._lock = threading.Lock()
 
         # Load default validation rules
@@ -317,9 +318,17 @@ class FillValidator:
         # Simple market hours check (9:30 AM - 4:00 PM ET)
         execution_time = execution.execution_time
 
-        # Convert to market time (assuming ET)
-        market_open = execution_time.replace(hour=9, minute=30, second=0, microsecond=0)
-        market_close = execution_time.replace(hour=16, minute=0, second=0, microsecond=0)
+        # Convert to market time (configurable via RiskConfig)
+        try:
+            from core_engine.config.component_config import RiskConfig
+            _cfg = RiskConfig()
+            _open_h, _open_m = _cfg.market_open_hour, _cfg.market_open_minute
+            _close_h, _close_m = _cfg.market_close_hour, _cfg.market_close_minute
+        except Exception:
+            _open_h, _open_m = 9, 30
+            _close_h, _close_m = 16, 0
+        market_open = execution_time.replace(hour=_open_h, minute=_open_m, second=0, microsecond=0)
+        market_close = execution_time.replace(hour=_close_h, minute=_close_m, second=0, microsecond=0)
 
         # Check if weekend
         if execution_time.weekday() >= 5:  # Saturday = 5, Sunday = 6
@@ -373,6 +382,9 @@ class TradeReconciler:
         self._pending_reconciliation = {}
         self._reconciled_trades = {}
         self._discrepancies = {}
+        # NOTE: threading.Lock intentionally kept - only used in sync methods
+        # (reconcile_execution, get_reconciliation_summary, get_pending_reconciliations,
+        # get_discrepancies). No async methods use this lock.
         self._lock = threading.Lock()
 
     def reconcile_execution(
@@ -547,9 +559,17 @@ class PositionManager:
     """
 
     def __init__(self):
+        warnings.warn(
+            "PositionManager in fill_processor.py is deprecated. "
+            "Use PositionBook (core_engine.trading.position_book) instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
         self._positions = defaultdict(lambda: defaultdict(float))
         self._avg_costs = defaultdict(lambda: defaultdict(float))
         self._position_history = []
+        # NOTE: threading.Lock intentionally kept - only used in sync methods
+        # (process_execution, get_position, get_all_positions). No async methods use this lock.
         self._lock = threading.Lock()
 
     def process_execution(self, execution: TradeExecution) -> PositionUpdate:
@@ -606,7 +626,7 @@ class PositionManager:
                         closing_quantity,
                         execution.price
                     )
-                    quantity_change + closing_quantity
+                    quantity_change = quantity_change + closing_quantity
                     new_avg_cost = execution.price  # New position starts with execution price
 
             # Update positions
@@ -684,6 +704,9 @@ class TradeReporter:
     def __init__(self):
         self._executions = []
         self._reports_cache = {}
+        # NOTE: threading.Lock intentionally kept - only used in sync methods
+        # (add_execution, generate_performance_summary, _filter_executions).
+        # No async methods use this lock.
         self._lock = threading.Lock()
 
     def add_execution(self, execution: TradeExecution) -> None:
@@ -887,14 +910,28 @@ class FillProcessor:
     position management, and sophisticated reporting capabilities.
     """
 
-    def __init__(self):
-        """Initialize fill processor"""
+    def __init__(self, config=None, position_book=None):
+        """Initialize fill processor
+
+        Args:
+            config: Optional configuration dict.
+            position_book: Optional PositionBook instance (SSOT for position state).
+                          If provided, fills are routed to PositionBook.on_fill().
+                          If None, falls back to legacy PositionManager (deprecated).
+        """
 
         # Core components
         self.validator = FillValidator()
         self.reconciler = TradeReconciler()
-        self.position_manager = PositionManager()
         self.reporter = TradeReporter()
+
+        # SSOT for position state
+        self.position_book = position_book  # PositionBook SSOT (preferred)
+        # DEPRECATED: Keep for backward compatibility during migration
+        self._legacy_position_manager = PositionManager() if position_book is None else None
+
+        # Backward-compatible alias (read-only, prefer position_book)
+        self.position_manager = self._legacy_position_manager
 
         # Processing queues
         self._fill_queue = asyncio.Queue()
@@ -906,7 +943,11 @@ class FillProcessor:
         self._position_callbacks = []
 
         # Threading
-        self._lock = threading.Lock()
+        # NOTE: threading.Lock intentionally kept (not asyncio.Lock) because this lock
+        # Dual-lock pattern: asyncio.Lock for async methods (process_fill),
+        # threading.Lock for sync methods (get_fill_status, get_processing_statistics).
+        self._async_lock = asyncio.Lock()
+        self._sync_lock = threading.Lock()
         self._running = False
         self._processing_task = None
 
@@ -950,7 +991,7 @@ class FillProcessor:
                 execution.fill_status = FillStatus.REJECTED
                 execution.processing_notes.extend(validation_errors)
 
-                with self._lock:
+                async with self._async_lock:
                     self._failed_fills[execution.execution_id] = execution
 
                 logger.warning(f"Fill {execution.execution_id} rejected: {validation_errors}")
@@ -964,8 +1005,42 @@ class FillProcessor:
             execution.processing_notes.append(f"Reconciliation status: {reconciliation_status.value}")
 
             # Step 3: Update positions
-            position_update = self.position_manager.process_execution(execution)
-            execution.processing_notes.append(f"Position updated: {position_update.new_position}")
+            if self.position_book is not None:
+                # Use PositionBook SSOT
+                from core_engine.trading.position_book import Fill as BookFill, FillSide
+                from decimal import Decimal
+                book_fill = BookFill(
+                    fill_id=execution.execution_id,
+                    symbol=execution.symbol,
+                    side=FillSide.BUY if execution.side.upper() == 'BUY' else FillSide.SELL,
+                    quantity=Decimal(str(execution.quantity)),
+                    price=Decimal(str(execution.price)),
+                    timestamp=execution.execution_time,
+                    commission=Decimal(str(execution.commission)),
+                    order_id=execution.order_id,
+                )
+                pb_update = self.position_book.on_fill(book_fill)
+                execution.processing_notes.append(
+                    f"Position updated via PositionBook: {pb_update.new_quantity}"
+                )
+                # Wrap as a compatible PositionUpdate for callbacks
+                position_update = PositionUpdate(
+                    symbol=execution.symbol,
+                    account=execution.portfolio_id or "DEFAULT",
+                    quantity_change=float(pb_update.new_quantity - pb_update.previous_quantity),
+                    price=execution.price,
+                    new_position=float(pb_update.new_quantity),
+                    new_avg_cost=float(pb_update.new_avg_price),
+                    realized_pnl=float(pb_update.realized_pnl),
+                    unrealized_pnl_change=0.0,
+                    source_execution_id=execution.execution_id,
+                    commission=execution.commission,
+                    fees=execution.fees,
+                )
+            else:
+                # Legacy path (DEPRECATED)
+                position_update = self._legacy_position_manager.process_execution(execution)
+                execution.processing_notes.append(f"Position updated: {position_update.new_position}")
 
             # Step 4: Mark as processed
             execution.fill_status = FillStatus.PROCESSED
@@ -975,7 +1050,7 @@ class FillProcessor:
             self.reporter.add_execution(execution)
 
             # Step 6: Store processed fill
-            with self._lock:
+            async with self._async_lock:
                 self._processed_fills[execution.execution_id] = execution
 
             # Step 7: Trigger callbacks
@@ -989,7 +1064,7 @@ class FillProcessor:
             execution.fill_status = FillStatus.REJECTED
             execution.processing_notes.append(f"Processing error: {str(e)}")
 
-            with self._lock:
+            async with self._async_lock:
                 self._failed_fills[execution.execution_id] = execution
 
             logger.error(f"Error processing fill {execution.execution_id}: {e}")
@@ -1057,7 +1132,7 @@ class FillProcessor:
     def get_fill_status(self, execution_id: str) -> Optional[Dict[str, Any]]:
         """Get fill processing status"""
 
-        with self._lock:
+        with self._sync_lock:
             # Check processed fills
             if execution_id in self._processed_fills:
                 execution = self._processed_fills[execution_id]
@@ -1081,25 +1156,44 @@ class FillProcessor:
             'updated_at': execution.updated_at.isoformat()
         }
 
-    def get_position_summary(self, account: str) -> Dict[str, Any]:
+    def get_position_summary(self, account: str = "DEFAULT") -> Dict[str, Any]:
         """Get position summary for account"""
 
-        positions = self.position_manager.get_all_positions(account)
-
-        summary = {
-            'account': account,
-            'total_positions': len(positions),
-            'long_positions': len([p for p in positions.values() if p['position'] > 0]),
-            'short_positions': len([p for p in positions.values() if p['position'] < 0]),
-            'positions': positions
-        }
+        if self.position_book is not None:
+            # Use PositionBook SSOT
+            all_positions = self.position_book.get_all_positions()
+            positions = {}
+            for symbol, pos in all_positions.items():
+                positions[symbol] = {
+                    'position': float(pos.quantity) if pos.is_long else -float(pos.quantity),
+                    'avg_cost': float(pos.avg_entry_price),
+                }
+            summary = {
+                'account': account,
+                'total_positions': len(positions),
+                'long_positions': len([p for p in positions.values() if p['position'] > 0]),
+                'short_positions': len([p for p in positions.values() if p['position'] < 0]),
+                'positions': positions,
+                'source': 'PositionBook',
+            }
+        else:
+            # Legacy path (DEPRECATED)
+            positions = self._legacy_position_manager.get_all_positions(account)
+            summary = {
+                'account': account,
+                'total_positions': len(positions),
+                'long_positions': len([p for p in positions.values() if p['position'] > 0]),
+                'short_positions': len([p for p in positions.values() if p['position'] < 0]),
+                'positions': positions,
+                'source': 'PositionManager (DEPRECATED)',
+            }
 
         return summary
 
     def get_processing_statistics(self) -> Dict[str, Any]:
         """Get fill processing statistics"""
 
-        with self._lock:
+        with self._sync_lock:
             total_processed = len(self._processed_fills)
             total_failed = len(self._failed_fills)
             total_fills = total_processed + total_failed

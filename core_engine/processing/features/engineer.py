@@ -16,6 +16,7 @@ import numpy as np
 from typing import Dict, List, Optional, Any, Union
 from sklearn.preprocessing import StandardScaler
 from scipy import stats
+import asyncio
 import warnings
 import threading
 import uuid
@@ -111,8 +112,10 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
         self.feature_columns: List[str] = []
         self.target_columns: List[str] = []
 
-        # Threading
-        self._lock = threading.Lock()
+        # asyncio.Lock for async methods (future use)
+        self._lock = asyncio.Lock()
+        # threading.Lock for sync methods (save_scalers, load_scalers, transform_single)
+        self._sync_lock = threading.Lock()
 
         self.logger.info(f"🚀 Enhanced Feature Engineer initialized with component ID: {self.component_id}")
         self.liquidity_engine: Optional[Any] = None
@@ -1572,7 +1575,7 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
             return
 
         # Fit standard scaler (streaming mode helper; feature pipeline is causal expanding)
-        with self._lock:
+        with self._sync_lock:
             scaler = StandardScaler()
 
             # Extract feature data, drop NaN rows
@@ -1598,7 +1601,7 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
         """
         import pickle
 
-        with self._lock:
+        with self._sync_lock:
             state = {
                 'scalers': self.scalers,
                 'feature_columns': self.feature_columns,
@@ -1618,7 +1621,7 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
         """
         import pickle
 
-        with self._lock:
+        with self._sync_lock:
             with open(path, 'rb') as f:
                 state = pickle.load(f)
 
@@ -1643,7 +1646,7 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
         Raises:
             RuntimeError: If scalers not loaded
         """
-        with self._lock:
+        with self._sync_lock:
             if 'main' not in self.scalers:
                 raise RuntimeError(
                     "Scalers not fitted/loaded. Call fit_scalers() or load_scalers() first."

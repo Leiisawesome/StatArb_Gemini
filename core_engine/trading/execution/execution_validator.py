@@ -376,11 +376,17 @@ class PreTradeValidator:
         """Validate market hours"""
 
         if not self._is_market_hours(context.submission_time):
+            try:
+                from core_engine.config.component_config import RiskConfig
+                cfg = RiskConfig()
+                hours_str = f"{cfg.market_open_hour:02d}:{cfg.market_open_minute:02d}-{cfg.market_close_hour:02d}:{cfg.market_close_minute:02d} ET"
+            except Exception:
+                hours_str = "09:30-16:00 ET"
             result.passed = False
             result.message = f"Order submitted outside market hours: {context.submission_time.strftime('%H:%M:%S')}"
             result.details = {
                 "submission_time": context.submission_time.isoformat(),
-                "market_hours": "09:30-16:00 ET"
+                "market_hours": hours_str
             }
 
         return result
@@ -458,12 +464,24 @@ class PreTradeValidator:
         return result
 
     def _is_market_hours(self, timestamp: datetime) -> bool:
-        """Check if timestamp is during market hours"""
+        """Check if timestamp is during market hours.
 
-        # Simple market hours check (9:30 AM - 4:00 PM ET)
+        Market hours are configurable via RiskConfig fields:
+        market_open_hour/minute and market_close_hour/minute.
+        Defaults: 09:30 - 16:00 ET.
+        """
+        try:
+            from core_engine.config.component_config import RiskConfig
+            cfg = RiskConfig()
+            open_h, open_m = cfg.market_open_hour, cfg.market_open_minute
+            close_h, close_m = cfg.market_close_hour, cfg.market_close_minute
+        except Exception:
+            open_h, open_m = 9, 30
+            close_h, close_m = 16, 0
+
         time_part = timestamp.time()
-        market_open = datetime.min.time().replace(hour=9, minute=30)
-        market_close = datetime.min.time().replace(hour=16, minute=0)
+        market_open = datetime.min.time().replace(hour=open_h, minute=open_m)
+        market_close = datetime.min.time().replace(hour=close_h, minute=close_m)
 
         # Check weekday and time
         return (
@@ -909,6 +927,10 @@ class ExecutionValidator:
         self._validation_callbacks = []
 
         # Threading
+        # NOTE: threading.Lock intentionally kept (not asyncio.Lock) because this lock
+        # is used in sync methods (validate_pre_trade, validate_real_time,
+        # validate_post_trade, get_validation_summary, get_validation_history).
+        # No async methods use this lock, so there is no event loop blocking issue.
         self._lock = threading.Lock()
 
         logger.info("Execution Validator initialized")

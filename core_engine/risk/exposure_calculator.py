@@ -3,6 +3,7 @@ Risk Management - Exposure Calculator
 Comprehensive position exposure analysis with sector, geographic, and factor exposure calculations
 """
 
+import asyncio
 import logging
 import threading
 import numpy as np
@@ -88,7 +89,11 @@ class ExposureCalculator:
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         """Initialize exposure calculator"""
         self.config = config or {}
-        self._lock = threading.Lock()
+        # asyncio.Lock for async methods (calculate_exposures)
+        self._lock = asyncio.Lock()
+        # threading.Lock for sync methods (set_exposure_limit, remove_exposure_limit,
+        # get_exposure_limits, get_exposure_violations, get_calculation_history, clear_cache)
+        self._sync_lock = threading.Lock()
         self._exposure_cache = {}
         self._cache_ttl = self.config.get('cache_ttl_seconds', 300)  # 5 minutes
         self._limits = {}
@@ -184,7 +189,7 @@ class ExposureCalculator:
             if 'quantity' not in df.columns:
                 df['quantity'] = 0.0
 
-            with self._lock:
+            async with self._lock:
                 exposures = {}
 
                 # Calculate each exposure type
@@ -523,17 +528,43 @@ class ExposureCalculator:
         )
 
     def _get_factor_loadings(self, symbol: str) -> Dict[str, float]:
-        """Get factor loadings for a symbol"""
-        # Simplified factor loadings - in production this would come from risk model
-        loadings = {
-            'Value': np.random.uniform(-0.5, 0.5),
-            'Growth': np.random.uniform(-0.5, 0.5),
-            'Momentum': np.random.uniform(-0.5, 0.5),
-            'Quality': np.random.uniform(-0.5, 0.5),
-            'Size': np.random.uniform(-0.5, 0.5),
-            'Volatility': np.random.uniform(-0.5, 0.5)
+        """
+        Get factor loadings for a symbol.
+
+        Uses configured factor loadings if available, otherwise returns
+        neutral (zero) loadings rather than random values.
+        Random loadings produce meaningless risk reports.
+        """
+        # Use pre-configured factor loadings if available
+        if symbol in self._factor_loadings:
+            return self._factor_loadings[symbol]
+
+        # Check config for default factor loadings
+        config_loadings = self.config.get('default_factor_loadings', {})
+        if config_loadings:
+            return {
+                'Value': config_loadings.get('Value', 0.0),
+                'Growth': config_loadings.get('Growth', 0.0),
+                'Momentum': config_loadings.get('Momentum', 0.0),
+                'Quality': config_loadings.get('Quality', 0.0),
+                'Size': config_loadings.get('Size', 0.0),
+                'Volatility': config_loadings.get('Volatility', 0.0),
+            }
+
+        # Return neutral loadings — never random values
+        logger.debug(f"No factor loadings configured for {symbol}, using neutral (zero) loadings")
+        return {
+            'Value': 0.0,
+            'Growth': 0.0,
+            'Momentum': 0.0,
+            'Quality': 0.0,
+            'Size': 0.0,
+            'Volatility': 0.0,
         }
-        return loadings
+
+    def set_factor_loadings(self, symbol: str, loadings: Dict[str, float]) -> None:
+        """Set factor loadings for a symbol (from external risk model)."""
+        self._factor_loadings[symbol] = loadings
 
     def _should_include_position(self, position: Dict[str, Any]) -> bool:
         """Determine if position should be included in exposure calculations"""
@@ -632,7 +663,7 @@ class ExposureCalculator:
         """Set an exposure limit"""
         limit_key = f"{limit.exposure_type.value}_{limit.identifier}"
 
-        with self._lock:
+        with self._sync_lock:
             self._limits[limit_key] = limit
 
         logger.info(f"Set exposure limit: {limit_key} = {limit.max_exposure}")
@@ -641,19 +672,19 @@ class ExposureCalculator:
         """Remove an exposure limit"""
         limit_key = f"{exposure_type.value}_{identifier}"
 
-        with self._lock:
+        with self._sync_lock:
             if limit_key in self._limits:
                 del self._limits[limit_key]
                 logger.info(f"Removed exposure limit: {limit_key}")
 
     def get_exposure_limits(self) -> Dict[str, ExposureLimit]:
         """Get all current exposure limits"""
-        with self._lock:
+        with self._sync_lock:
             return self._limits.copy()
 
     def get_exposure_violations(self, severity: Optional[str] = None) -> List[ExposureViolation]:
         """Get current exposure violations"""
-        with self._lock:
+        with self._sync_lock:
             violations = self._violations.copy()
 
         if severity:
@@ -663,12 +694,12 @@ class ExposureCalculator:
 
     def get_calculation_history(self) -> List[Dict[str, Any]]:
         """Get calculation history"""
-        with self._lock:
+        with self._sync_lock:
             return list(self._calculation_history)
 
     def clear_cache(self) -> None:
         """Clear exposure calculation cache"""
-        with self._lock:
+        with self._sync_lock:
             self._exposure_cache.clear()
 
         logger.info("Exposure calculation cache cleared")

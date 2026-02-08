@@ -84,7 +84,7 @@ class EnhancedPortfolioManager(ISystemComponent, IRegimeAware, IRegimeSubscriber
     - Professional portfolio analytics and reporting
     """
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Dict[str, Any], position_book=None):
         self.config = config
         self.logger = logging.getLogger(self.__class__.__name__)
 
@@ -117,11 +117,25 @@ class EnhancedPortfolioManager(ISystemComponent, IRegimeAware, IRegimeSubscriber
             }
         }
 
+        # SSOT for position state
+        self.position_book = position_book  # PositionBook SSOT (preferred)
+
         # Portfolio configuration
         self.base_currency = config.get('base_currency', 'USD')
 
         # Initialize components
-        self.position_manager = PositionManager(config.get('position_config', {}))
+        # Legacy PositionManager only instantiated when PositionBook is unavailable
+        if position_book is None:
+            import warnings
+            warnings.warn(
+                "EnhancedPortfolioManager: No PositionBook provided — using deprecated "
+                "PositionManager as fallback. Pass position_book= for SSOT compliance.",
+                DeprecationWarning,
+                stacklevel=2
+            )
+            self.position_manager = PositionManager(config.get('position_config', {}))
+        else:
+            self.position_manager = None  # Not needed when PositionBook is SSOT
         self.allocation_engine = AllocationEngine(config.get('allocation_config', {}))
         self.cash_manager = CashManager(config.get('cash_config', {}))
         self.rebalancer = PortfolioRebalancer(
@@ -131,6 +145,11 @@ class EnhancedPortfolioManager(ISystemComponent, IRegimeAware, IRegimeSubscriber
         )
 
         # Threading
+        # NOTE: threading.Lock intentionally kept (not asyncio.Lock) because this lock
+        # protects state in sync methods (open_position, close_position,
+        # update_market_data, execute_rebalance, get_portfolio_summary,
+        # get_portfolio_snapshot). No async methods use this lock directly.
+        # These are complex business-logic methods; converting to async would cascade.
         self._lock = threading.Lock()
 
         # Portfolio snapshots history
@@ -485,8 +504,12 @@ class EnhancedPortfolioManager(ISystemComponent, IRegimeAware, IRegimeSubscriber
         try:
             # Basic health check - verify core functionality
             # Check if components are available
+            has_position_source = (
+                self.position_book is not None or
+                self.position_manager is not None
+            )
             return (
-                self.position_manager is not None and
+                has_position_source and
                 self.cash_manager is not None and
                 self.allocation_engine is not None and
                 self.rebalancer is not None
@@ -496,12 +519,30 @@ class EnhancedPortfolioManager(ISystemComponent, IRegimeAware, IRegimeSubscriber
             self.logger.warning(f"Operations health check failed: {e}")
             return False
 
+    # ========================================
+    # SSOT POSITION ACCESS HELPERS
+    # ========================================
+
+    def _get_all_positions(self) -> list:
+        """Get positions from SSOT (PositionBook) if available, else legacy PositionManager.
+
+        Returns a list of position objects. When using PositionBook, returns
+        BookPosition objects; when using legacy PositionManager, returns Position objects.
+        Both expose compatible properties (.market_value, .position_type / .side, etc.).
+        """
+        if self.position_book is not None:
+            # PositionBook.get_all_positions() returns Dict[str, BookPosition]
+            return list(self.position_book.get_all_positions().values())
+        elif hasattr(self, 'position_manager') and self.position_manager is not None:
+            return self.position_manager.get_all_positions()
+        return []
+
     # Original Portfolio Management Methods
 
     def get_total_value(self) -> Decimal:
         """Get total portfolio value"""
         try:
-            positions_value = sum(pos.market_value for pos in self.position_manager.get_all_positions())
+            positions_value = sum(pos.market_value for pos in self._get_all_positions())
             cash_balance = self.cash_manager.get_balance()
             return Decimal(str(positions_value)) + cash_balance
         except Exception as e:
@@ -845,12 +886,12 @@ class EnhancedPortfolioManager(ISystemComponent, IRegimeAware, IRegimeSubscriber
     def _get_currency_exposure(self) -> Dict[str, Decimal]:
         """Get currency exposure"""
         # For now, assume all positions are in base currency
-        total_value = sum(pos.market_value for pos in self.position_manager.get_all_positions())
+        total_value = sum(pos.market_value for pos in self._get_all_positions())
         return {self.base_currency: total_value}
 
     def _calculate_risk_metrics(self) -> Dict[str, Any]:
         """Calculate portfolio risk metrics"""
-        positions = self.position_manager.get_all_positions()
+        positions = self._get_all_positions()
 
         if not positions:
             return {}
@@ -943,7 +984,7 @@ class EnhancedPortfolioManager(ISystemComponent, IRegimeAware, IRegimeSubscriber
         try:
             self.logger.warning("Initiating emergency liquidation")
 
-            positions = self.position_manager.get_all_positions()
+            positions = self._get_all_positions()
             closed_positions = 0
 
             for position in positions:
@@ -1231,7 +1272,7 @@ class EnhancedPortfolioManager(ISystemComponent, IRegimeAware, IRegimeSubscriber
         """Calculate portfolio analytics metrics"""
         try:
             # Get current portfolio state
-            positions = self.position_manager.get_all_positions()
+            positions = self._get_all_positions()
             total_value = self.cash_manager.total_balance
 
             # Calculate portfolio metrics
@@ -1273,7 +1314,7 @@ class EnhancedPortfolioManager(ISystemComponent, IRegimeAware, IRegimeSubscriber
         """Analyze portfolio performance"""
         try:
             # Get portfolio performance data
-            positions = self.position_manager.get_all_positions()
+            positions = self._get_all_positions()
             total_value = self.cash_manager.total_balance
 
             # Mock performance analysis (in real implementation, would use historical data)
@@ -1398,7 +1439,7 @@ class EnhancedPortfolioManager(ISystemComponent, IRegimeAware, IRegimeSubscriber
     def _assess_portfolio_health(self) -> str:
         """Assess overall portfolio health"""
         try:
-            positions = self.position_manager.get_all_positions()
+            positions = self._get_all_positions()
             total_value = self.cash_manager.total_balance
             cash_pct = (self.cash_manager.get_available_cash() / total_value * 100) if total_value > 0 else 100
 
@@ -1420,7 +1461,7 @@ class EnhancedPortfolioManager(ISystemComponent, IRegimeAware, IRegimeSubscriber
     def _assess_risk_level(self) -> str:
         """Assess portfolio risk level"""
         try:
-            positions = self.position_manager.get_all_positions()
+            positions = self._get_all_positions()
             concentration_risk = self._calculate_concentration_risk(positions)
 
             if concentration_risk > 0.5:
@@ -1436,7 +1477,7 @@ class EnhancedPortfolioManager(ISystemComponent, IRegimeAware, IRegimeSubscriber
     def _calculate_diversification_score(self) -> float:
         """Calculate diversification score (0-100)"""
         try:
-            positions = self.position_manager.get_all_positions()
+            positions = self._get_all_positions()
             active_positions = len([p for p in positions.values() if p != 0])
 
             if active_positions == 0:

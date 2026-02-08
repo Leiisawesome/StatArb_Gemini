@@ -3,6 +3,7 @@ Analytics Engine - Benchmark Analyzer
 Advanced benchmark analysis and comparative performance evaluation
 """
 
+import asyncio
 import logging
 import threading
 import numpy as np
@@ -682,8 +683,12 @@ class BenchmarkAnalyzer:
         # Analysis cache
         self._analysis_cache = {}
 
-        # Threading
-        self._lock = threading.Lock()
+        # NOTE: threading.Lock is intentional. This lock is used in both sync methods
+        # (get_benchmark_summary, get_analysis_summary, clear_cache, etc.) and async
+        # Dual-lock pattern: asyncio.Lock for async methods (analyze_against_benchmark),
+        # threading.Lock for sync methods (get_benchmark_summary, clear_cache, etc.).
+        self._async_lock = asyncio.Lock()
+        self._sync_lock = threading.Lock()
 
         logger.info("Benchmark Analyzer initialized")
 
@@ -756,7 +761,7 @@ class BenchmarkAnalyzer:
 
             # Cache results
             cache_key = f"{portfolio_symbol}_{benchmark_symbol}_{start_date.date()}_{end_date.date()}"
-            with self._lock:
+            async with self._async_lock:
                 self._analysis_cache[cache_key] = results
 
             logger.info(f"Benchmark analysis completed for {portfolio_symbol} vs {benchmark_symbol}")
@@ -859,7 +864,7 @@ class BenchmarkAnalyzer:
         """Get benchmark summary statistics"""
 
         # Look for cached benchmark data
-        with self._lock:
+        with self._sync_lock:
             for cache_key, benchmark_data in self.data_manager._benchmark_cache.items():
                 if benchmark_symbol in cache_key:
                     return {
@@ -884,7 +889,7 @@ class BenchmarkAnalyzer:
     ) -> Dict[str, Any]:
         """Get analysis summary"""
 
-        with self._lock:
+        with self._sync_lock:
             # Find matching analysis in cache
             for cache_key, analysis in self._analysis_cache.items():
                 if portfolio_symbol in cache_key and benchmark_symbol in cache_key:
@@ -916,7 +921,7 @@ class BenchmarkAnalyzer:
     def clear_cache(self) -> None:
         """Clear analysis cache"""
 
-        with self._lock:
+        with self._sync_lock:
             self._analysis_cache.clear()
             self.data_manager._benchmark_cache.clear()
             logger.info("Benchmark analysis cache cleared")
@@ -924,7 +929,7 @@ class BenchmarkAnalyzer:
     def get_analyzer_statistics(self) -> Dict[str, Any]:
         """Get analyzer statistics"""
 
-        with self._lock:
+        with self._sync_lock:
             cached_analyses = len(self._analysis_cache)
             cached_benchmarks = len(self.data_manager._benchmark_cache)
 

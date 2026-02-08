@@ -167,7 +167,10 @@ class TaskScheduler:
         self._task_queue = asyncio.PriorityQueue()
         self._completed_tasks = {}
         self._running_tasks = {}
-        self._lock = threading.Lock()
+        # Dual-lock pattern: asyncio.Lock for async methods (get_next_task),
+        # threading.Lock for sync methods (complete_task, get_task_status).
+        self._async_lock = asyncio.Lock()
+        self._sync_lock = threading.Lock()
 
     async def schedule_task(self, task: AnalyticsTask) -> None:
         """Schedule analytics task"""
@@ -195,7 +198,7 @@ class TaskScheduler:
                 self._task_queue.get(), timeout=1.0
             )
 
-            with self._lock:
+            async with self._async_lock:
                 self._running_tasks[task.task_id] = task
 
             return task
@@ -206,7 +209,7 @@ class TaskScheduler:
     def complete_task(self, task: AnalyticsTask) -> None:
         """Mark task as completed"""
 
-        with self._lock:
+        with self._sync_lock:
             if task.task_id in self._running_tasks:
                 del self._running_tasks[task.task_id]
 
@@ -217,7 +220,7 @@ class TaskScheduler:
     def get_task_status(self, task_id: str) -> Optional[Dict[str, Any]]:
         """Get task status"""
 
-        with self._lock:
+        with self._sync_lock:
             # Check running tasks
             if task_id in self._running_tasks:
                 task = self._running_tasks[task_id]
@@ -546,8 +549,11 @@ class EnhancedAnalyticsManager(ISystemComponent, IRegimeAware):
         self._executor = ThreadPoolExecutor(max_workers=self.config.max_workers)
         self._results_cache = {}
 
-        # Threading
-        self._lock = threading.Lock()
+        # Dual-lock pattern: asyncio.Lock for async methods (_execute_analysis_task),
+        # threading.Lock for sync methods (get_analysis_results, get_system_status, etc.).
+        # threading.Event is also used for shutdown signaling.
+        self._async_lock = asyncio.Lock()
+        self._sync_lock = threading.Lock()
         self._shutdown_event = threading.Event()
 
         logger.info(f"🚀 Enhanced Analytics Manager initialized with component ID: {self.component_id}")
@@ -973,8 +979,9 @@ class EnhancedAnalyticsManager(ISystemComponent, IRegimeAware):
             self._executor = ThreadPoolExecutor(max_workers=self.config.max_workers)
             self._results_cache = {}
 
-            # Threading
-            self._lock = threading.Lock()
+            # Re-initialize dual locks (see __init__ comment for rationale)
+            self._async_lock = asyncio.Lock()
+            self._sync_lock = threading.Lock()
             self._shutdown_event = threading.Event()
 
             logger.info("✅ Monitoring system initialized")
@@ -1256,7 +1263,7 @@ class EnhancedAnalyticsManager(ISystemComponent, IRegimeAware):
             task.progress = 1.0
 
             # Cache results
-            with self._lock:
+            async with self._async_lock:
                 self._results_cache[task.symbol] = results
 
             logger.info(f"Completed analysis for {task.symbol} in {results.execution_time:.2f}s")
@@ -1327,7 +1334,7 @@ class EnhancedAnalyticsManager(ISystemComponent, IRegimeAware):
     def get_analysis_results(self, symbol: str) -> Optional[AnalyticsResults]:
         """Get analysis results for symbol"""
 
-        with self._lock:
+        with self._sync_lock:
             return self._results_cache.get(symbol)
 
     def get_task_status(self, task_id: str) -> Optional[Dict[str, Any]]:
@@ -1338,7 +1345,7 @@ class EnhancedAnalyticsManager(ISystemComponent, IRegimeAware):
     def get_system_status(self) -> Dict[str, Any]:
         """Get system status"""
 
-        with self._lock:
+        with self._sync_lock:
             cached_results = len(self._results_cache)
 
         active_alerts = len(self.alert_system.get_active_alerts())
@@ -1367,7 +1374,7 @@ class EnhancedAnalyticsManager(ISystemComponent, IRegimeAware):
     def get_performance_summary(self) -> Dict[str, Any]:
         """Get system performance summary"""
 
-        with self._lock:
+        with self._sync_lock:
             total_analyses = len(self._results_cache)
 
             if total_analyses == 0:
@@ -1488,7 +1495,7 @@ class EnhancedAnalyticsManager(ISystemComponent, IRegimeAware):
     def clear_cache(self) -> None:
         """Clear all caches"""
 
-        with self._lock:
+        with self._sync_lock:
             self._results_cache.clear()
 
         # Clear component caches

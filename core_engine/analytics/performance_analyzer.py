@@ -3,6 +3,7 @@ Analytics Engine - Performance Analyzer
 Advanced performance analysis with comprehensive metrics and attribution
 """
 
+import asyncio
 import logging
 import threading
 import numpy as np
@@ -475,8 +476,10 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
         self._benchmark_data = {}
         self._risk_free_rates = {}
 
-        # Threading
-        self._lock = threading.Lock()
+        # Dual-lock pattern: asyncio.Lock for async methods (stop),
+        # threading.Lock for sync methods (cache_performance_metrics, get_cached_metrics, etc.).
+        self._async_lock = asyncio.Lock()
+        self._sync_lock = threading.Lock()
 
         # ISystemComponent state management
         self.is_initialized = False
@@ -627,7 +630,7 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
                 await self.trading_calculator.stop()
 
             # Clear caches
-            with self._lock:
+            async with self._async_lock:
                 cache_size = len(self._performance_cache)
                 self._performance_cache.clear()
                 self._benchmark_data.clear()
@@ -1322,26 +1325,26 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
     def cache_performance_metrics(self, symbol: str, metrics: PerformanceMetrics) -> None:
         """Cache performance metrics"""
 
-        with self._lock:
+        with self._sync_lock:
             self._performance_cache[symbol] = metrics
 
     def get_cached_metrics(self, symbol: str) -> Optional[PerformanceMetrics]:
         """Get cached performance metrics"""
 
-        with self._lock:
+        with self._sync_lock:
             return self._performance_cache.get(symbol)
 
     def clear_cache(self) -> None:
         """Clear performance cache"""
 
-        with self._lock:
+        with self._sync_lock:
             self._performance_cache.clear()
             logger.info("Performance cache cleared")
 
     def get_performance_summary(self) -> Dict[str, Any]:
         """Get performance analysis summary"""
 
-        with self._lock:
+        with self._sync_lock:
             return {
                 'cached_metrics': len(self._performance_cache),
                 'benchmark_data_available': len(self._benchmark_data),

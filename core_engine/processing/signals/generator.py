@@ -22,7 +22,6 @@ from enum import Enum
 from datetime import datetime
 from collections import deque
 import warnings
-import threading
 import uuid
 warnings.filterwarnings('ignore')
 
@@ -230,9 +229,6 @@ class EnhancedSignalGenerator(ISystemComponent, IRegimeAware):
     def signal_history(self) -> List[TradingSignal]:
         """Return signal history as list for backward compatibility."""
         return list(self._signal_history)
-
-        # Threading
-        self._lock = threading.Lock()
 
         self.logger.info(f"🚀 Enhanced Signal Generator initialized with component ID: {self.component_id}")
 
