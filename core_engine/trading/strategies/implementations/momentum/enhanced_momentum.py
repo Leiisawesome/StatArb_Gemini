@@ -757,8 +757,47 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
             )
 
             if should_enter and signal_type:
-                # ADS v3.1  1: SMS gate with pending/stale maturation
                 side = side_from_signal(signal_type)
+
+                # ========================================================
+                # TRANSITION SUPERVISOR GATE (Phase 1)
+                # Detects participant synchronisation phase changes.
+                # Blocks entry when market is NOT structurally ready for
+                # momentum (low coherence, no acceleration, vol mirage).
+                # Runs BEFORE SMS/ERAR to avoid wasted ADS computation.
+                # ========================================================
+                if bool(getattr(self.config, "enable_transition_supervisor", True)):
+                    transition_score = float(current_data.get("transition_score", 1.0))
+                    vov = float(current_data.get("vol_of_vol", 0.5))
+                    coherence = float(current_data.get("directional_coherence", 0.5))
+
+                    # Hard block: vol-of-vol mirage (pre-news, macro uncertainty)
+                    vov_block = float(getattr(self.config, "vov_block_threshold", 0.85))
+                    if vov > vov_block:
+                        return None
+
+                    # Regime-adaptive threshold: stricter in adverse conditions
+                    base_tau = float(getattr(self.config, "transition_threshold", 0.15))
+                    strict_tau = float(getattr(self.config, "transition_threshold_strict", 0.30))
+
+                    # Use strict threshold if regime indicates high vol or low liquidity
+                    use_strict = False
+                    try:
+                        regime_ctx = self.get_current_regime_context()
+                        if regime_ctx is not None:
+                            r_vol = getattr(regime_ctx, 'volatility', None) or getattr(regime_ctx, 'r_vol', 0.5)
+                            r_liq = getattr(regime_ctx, 'liquidity', None) or getattr(regime_ctx, 'r_liq', 0.5)
+                            if float(r_vol) > 0.7 or float(r_liq) < 0.3:
+                                use_strict = True
+                    except Exception:
+                        pass  # Degrade safely: use base threshold
+
+                    tau = strict_tau if use_strict else base_tau
+
+                    if transition_score < tau:
+                        return None
+
+                # ADS v3.1 §1: SMS gate with pending/stale maturation
                 
                 # Trend persistence filter (core alpha)
                 if not self._passes_trend_persistence_filter(data=data, idx=actual_idx, side=side):
@@ -944,6 +983,14 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                         ads_r=ads_ctx.get("ads_regime_vector_obj")
                     )
 
+                    # Capture transition supervisor state at entry for
+                    # downstream exit monitoring (coherence decay detection)
+                    _entry_transition_score = float(current_data.get("transition_score", 0.0))
+                    _entry_coherence = float(current_data.get("directional_coherence", 0.5))
+                    _entry_vov = float(current_data.get("vol_of_vol", 0.5))
+                    _entry_accel = float(current_data.get("composite_accel_norm", 0.0))
+                    _entry_vol_expansion = float(current_data.get("vol_expansion", 0.0))
+
                     signal = StrategySignal(
                         strategy_id=self.strategy_id,
                         symbol=symbol,
@@ -977,7 +1024,13 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                             'txn_volume_divergence': ads_ctx.get("txn_volume_divergence"),
                             'txn_flow_source': ads_ctx.get("txn_flow_source"),
                             'entry_price': current_data['close'] if isinstance(current_data, pd.Series) else current_data.get('close', 0),
-                            'bar_index': idx
+                            'bar_index': idx,
+                            # Transition Supervisor diagnostics (Phase 1)
+                            'transition_score': _entry_transition_score,
+                            'entry_coherence': _entry_coherence,
+                            'entry_vol_of_vol': _entry_vov,
+                            'entry_composite_accel': _entry_accel,
+                            'entry_vol_expansion': _entry_vol_expansion,
                         }
                     )
                     signal.additional_data.update(

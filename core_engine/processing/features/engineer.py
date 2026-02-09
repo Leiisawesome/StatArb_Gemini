@@ -648,6 +648,10 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
         # Rolling statistics
         df = self._create_rolling_features(df)
 
+        # Transition Supervisor features (vol-of-vol, transition_score)
+        # Must run AFTER composite momentum + volatility features are available
+        df = self._create_transition_features(df)
+
         return df
 
     def _create_price_features(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -908,6 +912,60 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
             df['composite_z'] = df['composite_z'].fillna(0.0)
             df['composite_pct'] = df['composite_pct'].fillna(50.0)
 
+            # ================================================================
+            # Transition Supervisor Features (Phase 1)
+            # Computed here because z_scores list is available in this scope.
+            # ================================================================
+
+            # --- Directional Coherence ---
+            # Measures feature agreement on direction AND magnitude across
+            # all composite indicators.  High coherence = participant
+            # synchronisation (institutions aligned).  Low coherence = noise.
+            #
+            # coherence = sign_agreement * |mean(S)| / (std(S) + ε)
+            # Normalised to [0, 1].
+            try:
+                z_matrix = np.column_stack([zs.fillna(0.0).values for zs in z_scores])
+                # Sign agreement: fraction of indicators agreeing on direction
+                sign_agreement = np.abs(np.mean(np.sign(z_matrix), axis=1))  # [0, 1]
+                # Magnitude agreement: |mean| / (std + ε)
+                row_mean = np.mean(z_matrix, axis=1)
+                row_std = np.std(z_matrix, axis=1) + 1e-8
+                magnitude_ratio = np.abs(row_mean) / row_std
+                raw_coherence = sign_agreement * magnitude_ratio
+                # Normalise to [0, 1] via empirical clip-and-scale
+                df['directional_coherence'] = np.clip(raw_coherence / 3.0, 0.0, 1.0)
+            except Exception as e_coh:
+                self.logger.debug(f"Directional coherence computation skipped: {e_coh}")
+                df['directional_coherence'] = 0.5
+
+            # --- Composite Velocity & Acceleration ---
+            # 1st derivative  = rate of change of composite momentum strength
+            # 2nd derivative  = acceleration (phase-transition detector)
+            # Both normalised by rolling std for regime-invariance.
+            try:
+                cz = df['composite_z'].values
+                velocity = np.diff(cz, prepend=cz[0])
+                acceleration = np.diff(velocity, prepend=velocity[0])
+
+                # Normalise by rolling std of composite_z (20-bar window)
+                cz_series = df['composite_z']
+                cz_std = cz_series.rolling(20, min_periods=5).std().fillna(1e-8).values
+                cz_std = np.where(cz_std < 1e-8, 1e-8, cz_std)
+
+                df['composite_velocity'] = velocity / cz_std
+                df['composite_acceleration'] = acceleration / cz_std
+
+                # Clipped normalised versions in [-1, 1] for gate usage
+                df['composite_velocity_norm'] = np.clip(df['composite_velocity'].values / 3.0, -1.0, 1.0)
+                df['composite_accel_norm'] = np.clip(df['composite_acceleration'].values / 3.0, -1.0, 1.0)
+            except Exception as e_acc:
+                self.logger.debug(f"Composite velocity/acceleration computation skipped: {e_acc}")
+                df['composite_velocity'] = 0.0
+                df['composite_acceleration'] = 0.0
+                df['composite_velocity_norm'] = 0.0
+                df['composite_accel_norm'] = 0.0
+
             self.logger.debug(f"Composite features created: z_range=[{df['composite_z'].min():.2f}, {df['composite_z'].max():.2f}], "
                             f"pct_range=[{df['composite_pct'].min():.1f}, {df['composite_pct'].max():.1f}]")
 
@@ -918,6 +976,137 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
                 df['composite_z'] = 0.0
             if 'composite_pct' not in df.columns:
                 df['composite_pct'] = 50.0
+            if 'directional_coherence' not in df.columns:
+                df['directional_coherence'] = 0.5
+            if 'composite_velocity' not in df.columns:
+                df['composite_velocity'] = 0.0
+            if 'composite_acceleration' not in df.columns:
+                df['composite_acceleration'] = 0.0
+            if 'composite_velocity_norm' not in df.columns:
+                df['composite_velocity_norm'] = 0.0
+            if 'composite_accel_norm' not in df.columns:
+                df['composite_accel_norm'] = 0.0
+
+        return df
+
+    def _create_transition_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Transition Supervisor Features (Phase 1)
+        =========================================
+
+        Creates:
+        - vol_of_vol: Volatility-of-volatility (stability of the vol regime).
+          High vov = pre-news / macro uncertainty → block entries.
+        - vol_expansion: Whether volatility is expanding from compressed state.
+        - transition_score ∈ [0, 1]: Multiplicative combination of directional
+          coherence, acceleration gate, vol expansion, and vol-of-vol filter.
+          Any single component at zero kills the score (ADS-compliant:
+          multiplicative, not linear terminal scoring).
+
+        Depends on columns produced by _create_composite_momentum_features:
+          directional_coherence, composite_accel_norm
+        and volatility data:
+          ATR_14 (preferred) or close-based realised vol.
+
+        Returns:
+            DataFrame with transition features added.
+        """
+        try:
+            n = len(df)
+            if n < 30:
+                df['vol_of_vol'] = 0.5
+                df['vol_expansion'] = 0.0
+                df['transition_score'] = 0.0
+                return df
+
+            # ----------------------------------------------------------
+            # 1. Vol-of-Vol: stability of the volatility regime
+            #    = rolling CV (coefficient of variation) of volatility,
+            #      percentile-ranked for regime-invariance.
+            # ----------------------------------------------------------
+            vol_window = 20
+            vov_window = 10
+
+            if 'ATR_14' in df.columns and df['ATR_14'].notna().sum() > vol_window:
+                vol = df['ATR_14'] / df['close'].clip(lower=0.01)
+            elif 'daily_vol' in df.columns and df['daily_vol'].notna().sum() > vol_window:
+                vol = df['daily_vol']
+            else:
+                vol = df['close'].pct_change(fill_method=None).rolling(vol_window, min_periods=5).std()
+
+            vol = vol.ffill().fillna(0)
+
+            vol_rolling_mean = vol.rolling(vov_window, min_periods=3).mean()
+            vol_rolling_std = vol.rolling(vov_window, min_periods=3).std()
+
+            # Coefficient of variation of volatility
+            vov_raw = vol_rolling_std / (vol_rolling_mean + 1e-10)
+
+            # Percentile-rank for regime-invariance (0 = stable, 1 = unstable)
+            rank_window = min(252, n)
+            vov_pct = vov_raw.rolling(rank_window, min_periods=20).rank(pct=True)
+
+            df['vol_of_vol'] = vov_pct.fillna(0.5)
+
+            # ----------------------------------------------------------
+            # 2. Volatility Expansion: is vol expanding from a compressed
+            #    state?  Positive = expanding, zero = flat/contracting.
+            # ----------------------------------------------------------
+            if 'ATR_14' in df.columns and df['ATR_14'].notna().sum() > vol_window:
+                atr = df['ATR_14']
+            else:
+                atr = vol  # fallback to whatever we computed above
+
+            atr_ma = atr.rolling(vol_window, min_periods=5).mean()
+            vol_ratio = atr / (atr_ma + 1e-10)
+            # Expansion signal: capped at [0, 1], >0 means expanding
+            df['vol_expansion'] = np.clip((vol_ratio.values - 1.0), 0.0, 1.0)
+
+            # ----------------------------------------------------------
+            # 3. Transition Score: multiplicative assembly
+            #    = coherence × accel_gate × expansion × vov_gate
+            #    Any single zero kills the score.
+            # ----------------------------------------------------------
+            coherence = df['directional_coherence'].fillna(0.0).values
+            accel_raw = df.get('composite_accel_norm', pd.Series(0.0, index=df.index)).fillna(0.0).values
+
+            # Acceleration gate: only positive acceleration (in signal direction)
+            # is valuable for entry detection.  Map from [-1,1] to [0,1].
+            accel_gate = np.clip(accel_raw, 0.0, 1.0)
+
+            expansion = df['vol_expansion'].fillna(0.0).values
+
+            # Vol-of-vol filter: INVERT (low vov = high gate score = tradable)
+            vov = df['vol_of_vol'].fillna(0.5).values
+            vov_gate = np.clip(1.0 - vov, 0.0, 1.0)
+
+            # Multiplicative combination (ADS-compliant: not linear terminal)
+            raw_transition = coherence * accel_gate * expansion * vov_gate
+
+            # Smooth slightly (3-bar EMA) to reduce tick-to-tick noise
+            alpha_ema = 2.0 / (3.0 + 1.0)
+            smoothed = np.empty_like(raw_transition)
+            smoothed[0] = raw_transition[0]
+            for i in range(1, len(raw_transition)):
+                smoothed[i] = alpha_ema * raw_transition[i] + (1.0 - alpha_ema) * smoothed[i - 1]
+
+            df['transition_score'] = np.clip(smoothed, 0.0, 1.0)
+
+            self.logger.debug(
+                f"Transition features: coherence=[{df['directional_coherence'].min():.3f}, {df['directional_coherence'].max():.3f}], "
+                f"vov=[{df['vol_of_vol'].min():.3f}, {df['vol_of_vol'].max():.3f}], "
+                f"transition=[{df['transition_score'].min():.3f}, {df['transition_score'].max():.3f}]"
+            )
+
+        except Exception as e:
+            self.logger.error(f"Error creating transition features: {e}")
+            for col, default in [
+                ('vol_of_vol', 0.5),
+                ('vol_expansion', 0.0),
+                ('transition_score', 0.0),
+            ]:
+                if col not in df.columns:
+                    df[col] = default
 
         return df
 
@@ -1303,8 +1492,24 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
             'momentum', 'roc', 'trix', 'ultimate_oscillator'
         ]
 
+        # Transition features have designed semantic ranges ([0,1], [-1,1], etc.)
+        # that the multi-exit engine relies on.  Normalizing them destroys
+        # their intended interpretation and must be avoided.
+        transition_features = [
+            'directional_coherence',      # [0, 1] — clipped in feature creation
+            'composite_accel_norm',        # [-1, 1] — clipped in feature creation
+            'composite_velocity_norm',     # [-1, 1] — clipped in feature creation
+            'vol_of_vol',                  # [0, 1] — percentile-ranked
+            'vol_expansion',               # [0, 1]
+            'transition_score',            # [0, 1] — EMA-smoothed composite
+            'composite_z',                 # z-score — already a standardized measure
+            'composite_pct',               # [0, 100] — percentile rank
+            'composite_velocity',          # raw first derivative (used by accel_norm)
+            'composite_acceleration',      # raw second derivative (used by accel_norm)
+        ]
+
         # Columns to preserve (don't normalize)
-        preserve_cols = metadata_cols + trading_indicators + [
+        preserve_cols = metadata_cols + trading_indicators + transition_features + [
             'txn_sma',
             'avg_trade_size',
             'avg_trade_size_sma'

@@ -2197,7 +2197,7 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
         except Exception as e:
             logger.error(f"Post-execution risk check failed: {e}")
 
-    async def update_position(self, symbol: str, side: str, quantity: float, price: float = 0.0, timestamp: Optional[datetime] = None, strategy_id: str = ""):
+    async def update_position(self, symbol: str, side: str, quantity: float, price: float = 0.0, timestamp: Optional[datetime] = None, strategy_id: str = "", metadata: Optional[Dict[str, Any]] = None):
         """
         Update position with comprehensive cash tracking (Phase 10 per Rule 7.3)
 
@@ -2244,7 +2244,8 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
                     price=Decimal(str(price)),
                     commission=Decimal(str(commission)),
                     timestamp=timestamp,
-                    strategy_id=strategy_id
+                    strategy_id=strategy_id,
+                    metadata=metadata or {}
                 )
 
                 # Delegate to PositionBook (SSOT)
@@ -2736,11 +2737,76 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
                             except Exception:
                                 pass
 
+                        # ==========================================================
+                        # Transition Lifecycle: extract entry & current state
+                        # for multi-dimensional health-based exits.
+                        # ==========================================================
+                        def _sf(v):
+                            """Safe float conversion (None-safe)."""
+                            if v is None:
+                                return None
+                            try:
+                                return float(v)
+                            except (TypeError, ValueError):
+                                return None
+
+                        pos_meta = getattr(pos, "metadata", None) or getattr(pos, "additional_data", None) or {}
+
+                        # Entry state (from position metadata, captured at signal time)
+                        _entry_coh = _sf(pos_meta.get("entry_coherence"))
+                        _entry_accel = _sf(pos_meta.get("entry_composite_accel"))
+                        _entry_vov = _sf(pos_meta.get("entry_vol_of_vol"))
+                        _entry_ts = _sf(pos_meta.get("transition_score"))
+                        _entry_cz = _sf(pos_meta.get("composite_z"))
+
+                        # Current state (from latest enriched data store)
+                        _cur_coh = None
+                        _cur_accel = None
+                        _cur_vov = None
+                        _cur_cz = None
+                        try:
+                            if hasattr(self, "_latest_enriched") and symbol in self._latest_enriched:
+                                _enriched = self._latest_enriched[symbol]
+                                _cur_coh = _sf(_enriched.get("directional_coherence"))
+                                _cur_accel = _sf(_enriched.get("composite_accel_norm"))
+                                _cur_vov = _sf(_enriched.get("vol_of_vol"))
+                                _cur_cz = _sf(_enriched.get("composite_z"))
+                        except Exception:
+                            pass
+
+                        # Config parameters
+                        pos_is_long = getattr(pos, "is_long", True)
+                        _health_crit = float(getattr(self.config, "health_critical_threshold", 0.15))
+                        _accel_exhaust = float(getattr(self.config, "accel_exhaustion_threshold", -0.3))
+                        _tp_init = float(getattr(self.config, "tp_initial_pct", 2.0))
+                        _tp_floor = float(getattr(self.config, "tp_floor_pct", 0.3))
+                        _tp_decay = float(getattr(self.config, "tp_decay_minutes", 30.0))
+                        _health_tp = float(getattr(self.config, "health_tp_trigger", 0.7))
+
                         decision = decide_exit(
                             now=now,
                             opened_at=opened_at,
                             pnl_pct=pnl_pct,
+                            is_long=pos_is_long,
                             stop_loss_pct=stop_loss_pct_val,
+                            # Entry state
+                            entry_coherence=_entry_coh,
+                            entry_composite_accel=_entry_accel,
+                            entry_vol_of_vol=_entry_vov,
+                            entry_transition_score=_entry_ts,
+                            entry_composite_z=_entry_cz,
+                            # Current state
+                            current_coherence=_cur_coh,
+                            current_composite_accel=_cur_accel,
+                            current_vol_of_vol=_cur_vov,
+                            current_composite_z=_cur_cz,
+                            # Config
+                            health_critical_threshold=_health_crit,
+                            accel_exhaustion_threshold=_accel_exhaust,
+                            tp_initial_pct=_tp_init,
+                            tp_floor_pct=_tp_floor,
+                            tp_decay_minutes=_tp_decay,
+                            health_tp_trigger=_health_tp,
                             max_holding_minutes=float(getattr(self.config, "max_holding_minutes", 24 * 60)) * self.risk_multiplier,
                             liquidity_bad=liquidity_bad,
                             liquidity_details=liquidity_details,

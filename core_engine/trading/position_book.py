@@ -180,6 +180,9 @@ class BookPosition:
     # Fill history for this position
     fills: List[Fill] = field(default_factory=list)
 
+    # Metadata from the originating signal (e.g. entry_coherence, transition_score)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
     @property
     def is_long(self) -> bool:
         return self.side == PositionSide.LONG
@@ -222,7 +225,8 @@ class BookPosition:
             'strategy_id': self.strategy_id,
             'total_pnl': float(self.total_pnl),
             'pnl_percent': float(self.pnl_percent),
-            'fill_count': len(self.fills)
+            'fill_count': len(self.fills),
+            'metadata': dict(self.metadata) if self.metadata else {}
         }
 
 @dataclass
@@ -818,7 +822,8 @@ class PositionBook(IPositionBook):
             last_fill_at=now,
             status=PositionStatus.OPEN,
             strategy_id=fill.strategy_id,
-            fills=[fill]
+            fills=[fill],
+            metadata=dict(fill.metadata) if fill.metadata else {}
         )
 
         self._positions[fill.symbol] = position

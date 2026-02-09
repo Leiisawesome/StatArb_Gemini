@@ -428,6 +428,66 @@ class MomentumConfig(BaseStrategyConfig):
     erar_tail_lambda: float = 1.0
     """Tail-risk penalty multiplier for ERAR CVaR term. Default: 1.0"""
 
+    # =====================================================================
+    # Transition Supervisor (Phase 1)
+    # Gating layer that detects participant synchronisation phase changes.
+    # Wraps existing SMS/ERAR pipeline — does NOT replace risk stack.
+    # =====================================================================
+    enable_transition_supervisor: bool = True
+    """Enable Transition Supervisor gating on entry. Default: True"""
+
+    transition_threshold: float = 0.15
+    """Minimum transition_score required to allow entry.
+    Score is multiplicative (coherence × accel × expansion × vov_gate).
+    Lower = more permissive. Range recommendation: [0.05, 0.40].
+    Default: 0.15 (moderate — allows entry when features weakly align)."""
+
+    transition_threshold_strict: float = 0.30
+    """Stricter threshold used in adverse regimes (high vol, low liq).
+    Default: 0.30"""
+
+    vov_block_threshold: float = 0.85
+    """Vol-of-vol percentile above which entries are hard-blocked.
+    Prevents entry during volatility mirages (pre-news, macro uncertainty).
+    Default: 0.85 (top 15% vol instability)."""
+
+    # --- Transition Lifecycle Exit Model ---
+    # Replaces the single coherence_decay threshold with a multi-dimensional
+    # transition health framework that mirrors entry logic.
+
+    health_critical_threshold: float = 0.15
+    """Transition health below this → TRANSITION_EXHAUSTION exit.
+    Health = accel_health × coherence_health × vov_health.
+    Range recommendation: [0.05, 0.30]. Default: 0.15"""
+
+    accel_exhaustion_threshold: float = -0.3
+    """Signed acceleration (in entry direction) below this triggers
+    TRANSITION_TAKE_PROFIT when in profit.  Detects wave cresting.
+    Range: [-0.8, -0.1]. Default: -0.3"""
+
+    tp_initial_pct: float = 2.0
+    """Dynamic take-profit initial target (percent).
+    TP(t) = tp_initial * exp(-t/tp_decay_minutes) + tp_floor.
+    Default: 2.0%"""
+
+    tp_floor_pct: float = 0.3
+    """Dynamic take-profit floor (percent).  The minimum TP target
+    as time progresses.  Default: 0.3%"""
+
+    tp_decay_minutes: float = 30.0
+    """Time constant (minutes) for TP target decay.
+    Default: 30.0 (TP halves roughly every 21 minutes)."""
+
+    health_tp_trigger: float = 0.7
+    """Health must be below this fraction for dynamic TP to fire.
+    Prevents premature profit-taking when thesis is still strong.
+    Default: 0.7"""
+
+    transition_pending_stale_bars: int = 15
+    """Max bars to keep a pending signal waiting for transition confirmation.
+    Shorter than SMS stale-kill (50) because transitions are ephemeral.
+    Default: 15"""
+
     def __post_init__(self):
         """Validate momentum configuration parameters"""
         if self.lookback_period <= 0:
@@ -495,6 +555,28 @@ class MomentumConfig(BaseStrategyConfig):
             raise ValueError(f"erar_gamma must be >= 0, got {self.erar_gamma}")
         if self.erar_tail_lambda < 0:
             raise ValueError(f"erar_tail_lambda must be >= 0, got {self.erar_tail_lambda}")
+
+        # Transition Supervisor validation
+        if not 0.0 <= self.transition_threshold <= 1.0:
+            raise ValueError(f"transition_threshold must be [0, 1], got {self.transition_threshold}")
+        if not 0.0 <= self.transition_threshold_strict <= 1.0:
+            raise ValueError(f"transition_threshold_strict must be [0, 1], got {self.transition_threshold_strict}")
+        if not 0.0 <= self.vov_block_threshold <= 1.0:
+            raise ValueError(f"vov_block_threshold must be [0, 1], got {self.vov_block_threshold}")
+        if not 0.0 < self.health_critical_threshold <= 1.0:
+            raise ValueError(f"health_critical_threshold must be (0, 1], got {self.health_critical_threshold}")
+        if not -1.0 <= self.accel_exhaustion_threshold <= 0.0:
+            raise ValueError(f"accel_exhaustion_threshold must be [-1, 0], got {self.accel_exhaustion_threshold}")
+        if self.tp_initial_pct < 0:
+            raise ValueError(f"tp_initial_pct must be >= 0, got {self.tp_initial_pct}")
+        if self.tp_floor_pct < 0:
+            raise ValueError(f"tp_floor_pct must be >= 0, got {self.tp_floor_pct}")
+        if self.tp_decay_minutes <= 0:
+            raise ValueError(f"tp_decay_minutes must be > 0, got {self.tp_decay_minutes}")
+        if not 0.0 < self.health_tp_trigger <= 1.0:
+            raise ValueError(f"health_tp_trigger must be (0, 1], got {self.health_tp_trigger}")
+        if self.transition_pending_stale_bars <= 0:
+            raise ValueError(f"transition_pending_stale_bars must be > 0, got {self.transition_pending_stale_bars}")
 
 @dataclass
 class MeanReversionConfig(BaseStrategyConfig):

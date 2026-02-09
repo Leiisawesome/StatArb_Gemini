@@ -4108,10 +4108,10 @@ class InstitutionalBacktestEngine:
                             except Exception:
                                 pass
 
-                    # Update via CentralRiskManager (single source of truth)
-                    if current_prices and hasattr(self.risk_manager, 'update_market_prices'):
-                        # CRITICAL: update_market_prices is async; must await so MTM + price history are actually updated.
-                        await self.risk_manager.update_market_prices(current_prices, timestamp=timestamp)
+                # Update via CentralRiskManager (single source of truth) — OUTSIDE the loop
+                # so prices from ALL symbols are sent in one batch after collection.
+                if current_prices and hasattr(self.risk_manager, 'update_market_prices'):
+                    await self.risk_manager.update_market_prices(current_prices, timestamp=timestamp)
 
             # ADS v3.1 exits in backtest: synthesize LONG_EXIT signals when multi-exit rules trigger.
             # Rationale: exits are centralized (risk-side), but backtest execution/reporting expects signals.
@@ -4140,24 +4140,37 @@ class InstitutionalBacktestEngine:
                         enable_forward_vol_stops = bool(self._get_strategy_param("enable_forward_vol_stops", False, strategy_id=strat_id))
                         
                         try:
-                            if not getattr(pos, "is_long", True):
-                                continue
+                            # FIX: Evaluate ALL positions (long AND short) for multi-exit rules.
+                            # Previously short positions were skipped, causing them to only exit via EOD.
+                            pos_is_long = getattr(pos, "is_long", True)
                             qty = float(getattr(pos, "quantity", 0.0))
-                            if qty <= 0:
+                            if abs(qty) <= 0:
                                 continue
                             opened_at = getattr(pos, "opened_at", None)
                             if opened_at is None:
                                 continue
+
+                            # FIX: Determine correct exit side based on position direction.
+                            exit_side = "sell" if pos_is_long else "buy"
+
                             # Avoid repeatedly queuing exit while one is already pending for this symbol.
-                            if any((t.get("symbol") == sym and str(t.get("side", "")).lower() == "sell") for t in (self.pending_signals or [])):
+                            # FIX: Check for the correct exit side (was hardcoded to "sell" only).
+                            if any((t.get("symbol") == sym and str(t.get("side", "")).lower() == exit_side) for t in (self.pending_signals or [])):
                                 continue
 
                             held_mins = (timestamp - opened_at).total_seconds() / 60.0
 
-                            # Compute pnl_pct using SSOT entry price + current mark from RiskManager (not PositionBook MTM).
+                            # Compute pnl_pct using SSOT entry price + current mark from RiskManager.
+                            # FIX: Direction-aware PnL calculation (was always assuming long).
                             avg_entry = float(getattr(pos, "avg_entry_price", 0.0) or 0.0)
                             px = float(self.risk_manager.current_prices.get(sym, avg_entry) or avg_entry or 0.0)
-                            pnl_pct = ((px - avg_entry) / avg_entry) * 100.0 if avg_entry > 0 else 0.0
+                            if avg_entry > 0:
+                                if pos_is_long:
+                                    pnl_pct = ((px - avg_entry) / avg_entry) * 100.0
+                                else:
+                                    pnl_pct = ((avg_entry - px) / avg_entry) * 100.0
+                            else:
+                                pnl_pct = 0.0
 
                             # Optional forward-looking vol stop (% distance)
                             stop_loss_pct_val = None
@@ -4196,20 +4209,119 @@ class InstitutionalBacktestEngine:
                                 except Exception:
                                     stop_loss_pct_val = None
 
+                            # ==========================================================
+                            # Transition Lifecycle: extract entry & current state
+                            # for multi-dimensional health-based exits.
+                            # ==========================================================
+                            def _sf(v):
+                                """Safe float conversion (None-safe)."""
+                                if v is None:
+                                    return None
+                                try:
+                                    return float(v)
+                                except (TypeError, ValueError):
+                                    return None
+
+                            pos_meta = getattr(pos, "metadata", None) or {}
+
+                            # Entry state (from position metadata, captured at signal time)
+                            _entry_coh = _sf(pos_meta.get("entry_coherence"))
+                            _entry_accel = _sf(pos_meta.get("entry_composite_accel"))
+                            _entry_vov = _sf(pos_meta.get("entry_vol_of_vol"))
+                            _entry_ts = _sf(pos_meta.get("transition_score"))
+                            _entry_cz = _sf(pos_meta.get("composite_z"))
+
+                            # Current state from PRE-CALCULATED enriched features
+                            # (bar is raw OHLCV — enriched columns live in
+                            #  self.pre_calculated_features_per_symbol / self.pre_calculated_features)
+                            _cur_coh = None
+                            _cur_accel = None
+                            _cur_vov = None
+                            _cur_cz = None
+                            try:
+                                _feat_df = None
+                                if hasattr(self, "pre_calculated_features_per_symbol") and sym in self.pre_calculated_features_per_symbol:
+                                    _feat_df = self.pre_calculated_features_per_symbol[sym]
+                                elif hasattr(self, "pre_calculated_features") and self.pre_calculated_features is not None:
+                                    _feat_df = self.pre_calculated_features
+
+                                if _feat_df is not None and len(_feat_df) > 0:
+                                    _bar_ts = pd.Timestamp(timestamp)
+                                    # Locate row by timestamp (index or column)
+                                    _feat_row = None
+                                    if isinstance(_feat_df.index, pd.DatetimeIndex):
+                                        if _bar_ts in _feat_df.index:
+                                            _feat_row = _feat_df.loc[_bar_ts]
+                                            if hasattr(_feat_row, "iloc") and len(_feat_row.shape) > 1:
+                                                _feat_row = _feat_row.iloc[-1]
+                                    elif "timestamp" in _feat_df.columns:
+                                        _ts_col = pd.to_datetime(_feat_df["timestamp"])
+                                        _mask = _ts_col == _bar_ts
+                                        if _mask.any():
+                                            _feat_row = _feat_df.loc[_mask.values].iloc[-1]
+
+                                    if _feat_row is not None:
+                                        _cur_coh = _sf(_feat_row.get("directional_coherence"))
+                                        _cur_accel = _sf(_feat_row.get("composite_accel_norm"))
+                                        _cur_vov = _sf(_feat_row.get("vol_of_vol"))
+                                        _cur_cz = _sf(_feat_row.get("composite_z"))
+                                    
+                            except Exception as _feat_err:
+                                if not getattr(self, "_exit_feat_err_logged", False):
+                                    self._exit_feat_err_logged = True
+                                    logger.warning(f"Exit feature lookup error: {_feat_err}")
+
+                            # Config parameters (strategy-specific lookup)
+                            _health_crit = float(self._get_strategy_param(
+                                "health_critical_threshold", 0.15, strategy_id=strat_id))
+                            _accel_exhaust = float(self._get_strategy_param(
+                                "accel_exhaustion_threshold", -0.3, strategy_id=strat_id))
+                            _tp_init = float(self._get_strategy_param(
+                                "tp_initial_pct", 2.0, strategy_id=strat_id))
+                            _tp_floor = float(self._get_strategy_param(
+                                "tp_floor_pct", 0.3, strategy_id=strat_id))
+                            _tp_decay = float(self._get_strategy_param(
+                                "tp_decay_minutes", 30.0, strategy_id=strat_id))
+                            _health_tp = float(self._get_strategy_param(
+                                "health_tp_trigger", 0.7, strategy_id=strat_id))
+
                             decision = decide_exit(
                                 now=timestamp,
                                 opened_at=opened_at,
                                 pnl_pct=float(pnl_pct),
+                                is_long=pos_is_long,
                                 stop_loss_pct=stop_loss_pct_val,
+                                # Entry state
+                                entry_coherence=_entry_coh,
+                                entry_composite_accel=_entry_accel,
+                                entry_vol_of_vol=_entry_vov,
+                                entry_transition_score=_entry_ts,
+                                entry_composite_z=_entry_cz,
+                                # Current state
+                                current_coherence=_cur_coh,
+                                current_composite_accel=_cur_accel,
+                                current_vol_of_vol=_cur_vov,
+                                current_composite_z=_cur_cz,
+                                # Config
+                                health_critical_threshold=_health_crit,
+                                accel_exhaustion_threshold=_accel_exhaust,
+                                tp_initial_pct=_tp_init,
+                                tp_floor_pct=_tp_floor,
+                                tp_decay_minutes=_tp_decay,
+                                health_tp_trigger=_health_tp,
                                 max_holding_minutes=float(max_holding_minutes),
                                 liquidity_bad=False,
                                 liquidity_details=None,
                             )
 
                             if decision.should_exit:
+                                # FIX: Signal type must match position direction
+                                # (was hardcoded to "long_exit", shorts never got correct exit type).
+                                exit_signal_type = "long_exit" if pos_is_long else "short_exit"
                                 exit_rows.append({
                                     "symbol": sym,
-                                    "signal_type": "long_exit",
+                                    "signal_type": exit_signal_type,
+                                    "side": exit_side,
                                     "strategy_id": strat_id,
                                     "confidence": 1.0,
                                     "strength": 1.0,
@@ -4220,6 +4332,7 @@ class InstitutionalBacktestEngine:
                                         "held_minutes": held_mins,
                                         "pnl_pct": float(pnl_pct),
                                         "stop_loss_pct": float(stop_loss_pct_val) if stop_loss_pct_val is not None else None,
+                                        "position_side": "long" if pos_is_long else "short",
                                     },
                                 })
                         except Exception:
@@ -4580,7 +4693,8 @@ class InstitutionalBacktestEngine:
                                 'signal_type': signal_type,
                                 'authorization': authorization,
                                 'timestamp': timestamp,
-                                'current_price': current_price  # ✅ Store symbol-specific price
+                                'current_price': current_price,  # ✅ Store symbol-specific price
+                                'additional_data': signal_row.get('additional_data', {}),  # Transition Supervisor metadata
                             })
                         else:
                             pass
@@ -4926,7 +5040,8 @@ class InstitutionalBacktestEngine:
                                 quantity=actual_quantity,  # Use actual quantity (may be reduced)
                                 price=simulated_fill.fill_price,  # Use fill price (includes costs)
                                 timestamp=bar_timestamp,
-                                strategy_id=auth_trade.get('strategy_id', '')  # Carry over strategy attribution
+                                strategy_id=auth_trade.get('strategy_id', ''),  # Carry over strategy attribution
+                                metadata=auth_trade.get('additional_data', {}),  # Transition Supervisor diagnostics
                             )
                             logger.debug(f"📈 Position updated via RiskManager (Rule 4): {position_update}")
                         except Exception as e:
