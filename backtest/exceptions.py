@@ -106,11 +106,14 @@ class BacktestIntegrityError(BacktestError):
     3. Restarted from clean state
     """
 
+from typing import Optional, Dict, Any
+
+
 def format_backtest_error(
     error_type: str,
     message: str,
-    context: dict = None,
-    suggestion: str = None
+    context: Optional[Dict[str, Any]] = None,
+    suggestion: Optional[str] = None
 ) -> str:
     """
     Format a detailed backtest error message

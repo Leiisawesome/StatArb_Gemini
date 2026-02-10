@@ -17,6 +17,7 @@ import logging
 from pathlib import Path
 
 from backtest.utils.paths import backtest_results_dir
+from backtest.utils import trade_timestamp_key
 
 logger = logging.getLogger(__name__)
 
@@ -169,18 +170,7 @@ class BaseExperiment(ABC):
                     # Any residual quantity beyond closing becomes a new lot (opening/reversing).
                     positions: Dict[str, Dict[str, List[tuple[float, float]]]] = {}  # strategy_run -> symbol -> lots
 
-                    def _trade_ts_key(trade: Dict[str, Any]):
-                        ts = trade.get('timestamp')
-                        if isinstance(ts, datetime):
-                            return ts
-                        if isinstance(ts, str):
-                            try:
-                                return datetime.fromisoformat(ts.replace('Z', '+00:00'))
-                            except Exception:
-                                return ts
-                        return ts
-
-                    for i, trade in enumerate(sorted(trades, key=_trade_ts_key), 1):
+                    for i, trade in enumerate(sorted(trades, key=trade_timestamp_key), 1):
                         strategy_run = trade.get('strategy_run', trade.get('strategy_id', 'default'))
                         if strategy_run not in positions:
                             positions[strategy_run] = {}
@@ -311,40 +301,56 @@ class BaseExperiment(ABC):
         performance = engine_results.get('performance', {}) or {}
         summary = engine_results.get('summary', {}) or {}
 
+        # H2 fix: Use explicit `is not None` checks instead of `or`-chains
+        # to avoid treating 0.0 (a valid metric value) as falsy/missing.
+
+        def _first_not_none(*values):
+            """Return the first value that is not None, or 0.0 as fallback."""
+            for v in values:
+                if v is not None:
+                    return v
+            return 0.0
+
         # Handle total_trades - check all locations
-        total_trades = (
-            performance.get('total_trades') or
-            summary.get('total_trades') or
-            engine_results.get('total_trades', 0)
+        total_trades = _first_not_none(
+            performance.get('total_trades'),
+            summary.get('total_trades'),
+            engine_results.get('total_trades', 0),
         )
 
         # Handle total_return - check summary first (it stores as decimal, convert to %)
         # summary['total_return'] is 0.00597 meaning 0.597%
-        total_return_pct = (
-            performance.get('total_return_pct') or
-            (summary.get('total_return', 0.0) * 100) or  # Convert decimal to percentage
-            engine_results.get('total_return_pct', 0.0)
-        )
+        perf_return = performance.get('total_return_pct')
+        summary_return = summary.get('total_return')
+        if perf_return is not None:
+            total_return_pct = perf_return
+        elif summary_return is not None:
+            total_return_pct = summary_return * 100  # Convert decimal to percentage
+        else:
+            total_return_pct = engine_results.get('total_return_pct', 0.0)
 
         # Handle sharpe_ratio - check summary first
-        sharpe_ratio = (
-            performance.get('sharpe_ratio') or
-            summary.get('sharpe_ratio') or
-            engine_results.get('sharpe_ratio', 0.0)
+        sharpe_ratio = _first_not_none(
+            performance.get('sharpe_ratio'),
+            summary.get('sharpe_ratio'),
+            engine_results.get('sharpe_ratio', 0.0),
         )
 
         # Handle max_drawdown_pct - check summary first (stored as decimal, convert to %)
-        max_drawdown_pct = (
-            performance.get('max_drawdown_pct') or
-            (summary.get('max_drawdown_pct', 0.0) * 100) or  # Convert decimal to percentage
-            engine_results.get('max_drawdown_pct', 0.0)
-        )
+        perf_dd = performance.get('max_drawdown_pct')
+        summary_dd = summary.get('max_drawdown_pct')
+        if perf_dd is not None:
+            max_drawdown_pct = perf_dd
+        elif summary_dd is not None:
+            max_drawdown_pct = summary_dd * 100  # Convert decimal to percentage
+        else:
+            max_drawdown_pct = engine_results.get('max_drawdown_pct', 0.0)
 
         # Handle win_rate - check summary first (stored as decimal, convert to %)
-        win_rate_decimal = (
-            performance.get('win_rate') or
-            summary.get('win_rate') or
-            engine_results.get('win_rate', 0.0)
+        win_rate_decimal = _first_not_none(
+            performance.get('win_rate'),
+            summary.get('win_rate'),
+            engine_results.get('win_rate', 0.0),
         )
         win_rate = win_rate_decimal * 100 if win_rate_decimal <= 1.0 else win_rate_decimal
 

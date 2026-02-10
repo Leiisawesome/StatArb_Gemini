@@ -13,9 +13,9 @@ from typing import List
 # ═══════════════════════════════════════════════
 UNIVERSE: List[str] = [
     # Core equity (high-ADV, institutional flow)
-    'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA', 'NVDA', 'META', 'NFLX',
+    'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA', 'NVDA', 'META', 'AMD',
     # Market proxies (REQUIRED for RPS decomposition)
-    'SPY', 'QQQ',
+    'SPY', 'QQQ', 'IWM'
 ]
 
 EQUITY_SYMBOLS: List[str] = [s for s in UNIVERSE if s not in ['SPY', 'QQQ']]
@@ -23,8 +23,8 @@ MARKET_PROXY: str = 'SPY'
 
 # Minimum 6 months, preferred 9-12. Must span multiple vol regimes.
 # Adjust to available data in ClickHouse.
-START_DATE = datetime(2025, 2, 1)
-END_DATE = datetime(2025, 12, 31)
+START_DATE = datetime(2024, 1, 1)
+END_DATE = datetime(2024, 12, 31)
 
 # ═══════════════════════════════════════════════
 # Feature Parameters (DO NOT TUNE — use defaults)

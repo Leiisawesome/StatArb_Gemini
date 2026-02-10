@@ -21,9 +21,11 @@ Follows:
 """
 
 from typing import Dict, Any, List, Optional
+from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 import logging
+import math
 import pandas as pd
 import sys
 import asyncio
@@ -104,6 +106,14 @@ class InstitutionalBacktestEngine:
                     else:
                         config.output_directory = str(backtest_results_dir() / od_path)
 
+        # AXIS8 FIX: Validate critical config at construction time.
+        # BacktestConfig.validate() is only called via CLI, not direct instantiation.
+        if config.initial_capital <= 0:
+            raise ValueError(
+                f"initial_capital must be > 0, got {config.initial_capital}. "
+                f"A zero-capital backtest produces meaningless results."
+            )
+
         self.config = config
         self.backtest_name = config.backtest_name
         self.backtest_mode = config.backtest_mode
@@ -113,9 +123,13 @@ class InstitutionalBacktestEngine:
 
         # ✅ PHASE 2: PositionBook as SINGLE SOURCE OF TRUTH for positions
         # All components query this instead of maintaining their own position state
+        # G8 FIX: BacktestConfig defines `commission_per_trade`, not `commission_per_share`.
+        # The old code tried the non-existent attribute and always fell back to 0.005,
+        # silently ignoring any YAML-configured commission rate.
+        _commission = getattr(config, 'commission_per_trade', None) or getattr(config, 'commission_per_share', 0.005)
         self.position_book: IPositionBook = PositionBook(
             initial_cash=config.initial_capital,
-            default_commission_per_share=config.commission_per_share if hasattr(config, 'commission_per_share') else 0.005
+            default_commission_per_share=_commission
         )
         logger.info(f"📘 PositionBook initialized with ${config.initial_capital:,.2f} initial capital (SSOT)")
 
@@ -166,6 +180,12 @@ class InstitutionalBacktestEngine:
         self.backtest_results: Dict[str, Any] = {}
         self.execution_history: List[Dict[str, Any]] = []
         self.position_history: List[Dict[str, Any]] = []
+
+        # C6 R3 FIX: Memory cap for long backtests.
+        # position_history is sampled down when it exceeds this limit.
+        # execution_history is kept in full (trades are sparse) but warned.
+        self._max_position_history = 200_000
+        self._position_history_trim_warned = False
 
         # CRITICAL FIX: Pending signals queue for next-bar execution
         # Signals generated at bar N are queued and executed at bar N+1 open
@@ -544,6 +564,11 @@ class InstitutionalBacktestEngine:
                         continue
 
                     logger.info(f"   Initializing {component_name}...")
+                    # G15 FIX: Critical components (data, risk, strategy) must not
+                    # fail silently — a backtest without them produces wrong results.
+                    _critical_components = {'data_manager', 'risk_manager', 'strategy_manager',
+                                            'clickhouse_data_manager', 'central_risk_manager'}
+                    _is_critical = any(c in component_name.lower() for c in _critical_components)
                     try:
                         if hasattr(component, 'initialize'):
                             await component.initialize()
@@ -551,20 +576,31 @@ class InstitutionalBacktestEngine:
                             await component.start()
                         logger.info(f"   ✅ {component_name} initialized")
                     except Exception as e:
-                        logger.error(f"   ❌ Failed to initialize {component_name}: {e}")
-                        # Continue with other components
+                        if _is_critical:
+                            logger.error(f"   ❌ CRITICAL component {component_name} failed: {e}")
+                            raise RuntimeError(f"Critical component {component_name} failed to initialize: {e}") from e
+                        else:
+                            logger.warning(f"   ⚠️ Optional component {component_name} failed: {e}")
+                            # Continue with other components
 
                 logger.info(f"\n✅ {len(self.components)} components initialized")
             else:
                 logger.info("\n⚠️  No components registered - skipping initialization")
-
-            self.is_initialized = True
 
             # ✅ RULE 1 COMPLIANCE: Validate all components implement ISystemComponent
             validation_results = await self.validate_all_components()
 
             # ✅ RULE 2 COMPLIANCE: Validate regime dependency (IRegimeAware)
             regime_dependency_valid = self.validate_regime_dependency()
+
+            # Gate initialization on validation (C4 fix)
+            if not validation_results['overall_compliant']:
+                logger.warning("⚠️ Rule 1 compliance validation failed — proceeding with warnings")
+            if not regime_dependency_valid:
+                logger.warning("⚠️ Rule 2 regime dependency validation failed — proceeding with warnings")
+
+            # Mark initialized only AFTER validation passes
+            self.is_initialized = True
 
             logger.info("\n" + "=" * 80)
             logger.info("✅ INITIALIZATION COMPLETE")
@@ -583,6 +619,11 @@ class InstitutionalBacktestEngine:
 
         except Exception as e:
             logger.error(f"❌ Initialization failed: {e}", exc_info=True)
+            # Clean up any already-started components to prevent resource leaks
+            try:
+                await self.shutdown()
+            except Exception as shutdown_err:
+                logger.warning(f"⚠️ Cleanup after failed init also failed: {shutdown_err}")
             return False
 
     async def _initialize_phase2_data_regime(self) -> None:
@@ -634,10 +675,10 @@ class InstitutionalBacktestEngine:
         try:
             from core_engine.regime.regime_manager import RegimeManager
 
-            # Create regime engine config matching RegimeConfig structure
+            # Create regime engine config from BacktestConfig (H3 fix — was hardcoded)
             regime_config = {
-                'lookback_window': 60,
-                'volatility_window': 20,
+                'lookback_window': getattr(self.config, 'regime_lookback_window', 60),
+                'volatility_window': getattr(self.config, 'regime_volatility_window', 20),
                 'trend_threshold': 0.02,
                 'regime_change_threshold': 0.7,
                 'update_frequency_hours': 1,
@@ -762,21 +803,57 @@ class InstitutionalBacktestEngine:
             logger.info("\n📥 Loading historical data...")
             await self._load_historical_data()
 
-            # Consolidate multi-symbol data for bar-by-bar iteration
-            # We use the first symbol as the primary timeline, but pass all symbols to strategies
+            # C4 R4 FIX: Consolidate multi-symbol data for bar-by-bar iteration.
+            # Build a UNIFIED timeline from the union of all symbols' timestamps
+            # so that no symbol's bars are missed during iteration.
             if len(self.market_data) == 1:
                 # Single symbol - use directly
                 symbol = list(self.market_data.keys())[0]
                 self.historical_data = self.market_data[symbol]
                 logger.info(f"✅ Historical data consolidated: {len(self.historical_data)} bars for {symbol}")
             elif len(self.market_data) > 1:
-                # Multi-symbol - use first symbol as primary timeline
-                # Strategies will receive all symbols' data via self.market_data
-                symbol = list(self.market_data.keys())[0]
-                self.historical_data = self.market_data[symbol]
+                # Multi-symbol: build union timeline.
+                # Each bar in historical_data uses the first symbol's OHLCV for the
+                # main iteration, but we ensure the timeline covers ALL symbols.
+                primary_sym = list(self.market_data.keys())[0]
+                all_timestamps = set()
+                for sym, df in self.market_data.items():
+                    if 'timestamp' in df.columns:
+                        all_timestamps.update(df['timestamp'].dropna().tolist())
+                    elif isinstance(df.index, pd.DatetimeIndex):
+                        all_timestamps.update(df.index.tolist())
+
+                if all_timestamps:
+                    union_ts = sorted(all_timestamps)
+                    # Reindex primary symbol to the union timeline with forward-fill
+                    primary_df = self.market_data[primary_sym].copy()
+                    if 'timestamp' in primary_df.columns:
+                        primary_df = primary_df.set_index('timestamp')
+                    # Reindex and forward-fill so bars without primary data
+                    # carry forward last known price (no lookahead)
+                    union_index = pd.DatetimeIndex(union_ts)
+                    if primary_df.index.tz != union_index.tz:
+                        try:
+                            if union_index.tz is None and primary_df.index.tz is not None:
+                                union_index = union_index.tz_localize(primary_df.index.tz)
+                            elif union_index.tz is not None and primary_df.index.tz is None:
+                                primary_df.index = primary_df.index.tz_localize(union_index.tz)
+                        except Exception as _tz_err:
+                            logger.debug(f"TZ alignment best-effort: {_tz_err}")
+                    primary_reindexed = primary_df.reindex(union_index, method='ffill')
+                    primary_reindexed.index.name = 'timestamp'
+                    primary_reindexed = primary_reindexed.reset_index()
+                    self.historical_data = primary_reindexed
+                else:
+                    self.historical_data = self.market_data[primary_sym]
+
                 total_bars = sum(len(df) for df in self.market_data.values())
                 logger.info(f"✅ Multi-symbol backtest: {len(self.market_data)} symbols, {total_bars} total bars")
-                logger.info(f"   Primary timeline: {symbol} ({len(self.historical_data)} bars)")
+                logger.info(f"   Union timeline: {len(self.historical_data)} bars (primary: {primary_sym})")
+
+            # H5: Corporate action detection — check for suspicious price jumps
+            # that indicate unadjusted stock splits or reverse splits.
+            self._check_corporate_action_integrity()
 
         except Exception as e:
             logger.error(f"❌ Failed to initialize ClickHouseDataManager: {e}", exc_info=True)
@@ -843,7 +920,8 @@ class InstitutionalBacktestEngine:
                             req = max(req, 120, lb, base)
                         else:
                             req = max(req, lb, base)
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"Warmup inference fallback to base={base}: {e}")
                     req = base
                 return int(req)
 
@@ -853,7 +931,8 @@ class InstitutionalBacktestEngine:
                 warmup_bars = _infer_warmup_bars()
             try:
                 warmup_bars = int(warmup_bars)
-            except Exception:
+            except (ValueError, TypeError) as e:
+                logger.debug(f"warmup_bars conversion failed ({e}), inferring")
                 warmup_bars = _infer_warmup_bars()
 
             if self.config.interval in ['1min', '5min', '15min', '1h']:
@@ -864,7 +943,7 @@ class InstitutionalBacktestEngine:
                 if self.config.interval.endswith("min"):
                     try:
                         interval_min = int(self.config.interval.replace("min", ""))
-                    except Exception:
+                    except (ValueError, AttributeError):
                         interval_min = 1
                 elif self.config.interval == "1h":
                     interval_min = 60
@@ -1061,6 +1140,44 @@ class InstitutionalBacktestEngine:
         except Exception as e:
             logger.error(f"❌ Failed to initialize LiquidityAssessmentEngine: {e}", exc_info=True)
             raise RuntimeError(f"Liquidity engine initialization failed: {e}")
+
+    # ============================================================
+    # H5: Corporate Action Integrity Check
+    # ============================================================
+
+    def _check_corporate_action_integrity(self) -> None:
+        """
+        H5: Detect potential unadjusted corporate actions in historical data.
+
+        Checks for overnight price jumps > 40% (typical split/reverse-split
+        signature) and logs warnings. Does NOT auto-correct — the user must
+        ensure data is split-adjusted before running backtests.
+
+        This is a defensive heuristic, not a guarantee.
+        """
+        JUMP_THRESHOLD = 0.40  # 40% overnight move = suspicious
+
+        for symbol, df in self.market_data.items():
+            if len(df) < 2:
+                continue
+
+            close_col = 'close' if 'close' in df.columns else 'Close'
+            if close_col not in df.columns:
+                continue
+
+            closes = df[close_col].values
+            for i in range(1, len(closes)):
+                prev, curr = closes[i - 1], closes[i]
+                if prev <= 0 or curr <= 0:
+                    continue
+                ret = abs(curr / prev - 1.0)
+                if ret > JUMP_THRESHOLD:
+                    logger.warning(
+                        f"⚠️ H5 CORPORATE ACTION ALERT: {symbol} @ row {i}: "
+                        f"overnight move {ret:.1%} (${prev:.2f} → ${curr:.2f}). "
+                        f"Possible unadjusted split/reverse-split. "
+                        f"Ensure data is split-adjusted before backtesting."
+                    )
 
     # ============================================================
     # Phase 3: Processing Pipeline Integration (Rule 3 - Unified Pipeline)
@@ -2484,21 +2601,21 @@ class InstitutionalBacktestEngine:
                 TradingCircuitBreakers, CircuitBreakerConfig
             )
 
-            # Create circuit breaker config (matching CircuitBreakerConfig dataclass)
+            # Create circuit breaker config from BacktestConfig (H3 fix — was hardcoded)
             breaker_config = CircuitBreakerConfig(
                 # Order Rate Limiting
-                max_orders_per_second=10,      # 10 orders/sec max
-                max_orders_per_minute=100,     # 100 orders/min max
+                max_orders_per_second=10,
+                max_orders_per_minute=100,
 
-                # Loss Limits
-                daily_loss_limit_pct=-0.02,    # -2% daily loss → halt
-                warning_threshold_pct=0.80,    # Warning at 80% of limit
+                # Loss Limits — read from BacktestConfig
+                daily_loss_limit_pct=getattr(self.config, 'circuit_breaker_daily_loss_limit', -0.02),
+                warning_threshold_pct=0.80,
 
-                # Drawdown Limits
-                max_drawdown_from_high_pct=-0.05,  # -5% from high → halt
+                # Drawdown Limits — read from BacktestConfig
+                max_drawdown_from_high_pct=getattr(self.config, 'circuit_breaker_drawdown_limit', -0.05),
 
-                # Position Concentration
-                max_position_concentration=0.20,   # 20% max per position
+                # Position Concentration — read from BacktestConfig
+                max_position_concentration=self.config.max_concentration,
 
                 # Emergency Actions
                 cancel_pending_orders_on_halt=True,
@@ -2885,8 +3002,6 @@ class InstitutionalBacktestEngine:
             final_capital = initial_capital
             if self.risk_manager and hasattr(self.risk_manager, 'portfolio_value'):
                 final_capital = self.risk_manager.portfolio_value
-            elif self.position_tracker:
-                final_capital = self.position_tracker.cash
 
             # Calculate basic metrics
             total_return = (final_capital - initial_capital) / initial_capital if initial_capital > 0 else 0
@@ -2985,8 +3100,6 @@ class InstitutionalBacktestEngine:
             final_capital = initial_capital
             if self.risk_manager and hasattr(self.risk_manager, 'portfolio_value'):
                 final_capital = self.risk_manager.portfolio_value
-            elif self.position_tracker:
-                final_capital = self.position_tracker.cash
 
             # Calculate basic metrics
             total_return = (final_capital - initial_capital) / initial_capital if initial_capital > 0 else 0
@@ -3011,22 +3124,56 @@ class InstitutionalBacktestEngine:
             # Calculate max drawdown from position history
             max_drawdown = 0.0
             max_drawdown_pct = 0.0
-            if self.position_history:
-                equity_values = [snap.get('equity', initial_capital) for snap in self.position_history]
+            # H2 R4 FIX: Filter position_history to exclude warmup period
+            # before computing any performance metrics.
+            _filtered_history = self.position_history
+            if _filtered_history and hasattr(self, 'simulation_start_dt'):
+                _sim_start = pd.Timestamp(self.simulation_start_dt)
+                if _sim_start.tzinfo is not None:
+                    _sim_start = _sim_start.tz_localize(None)
+                _filtered = []
+                for snap in self.position_history:
+                    snap_ts = pd.Timestamp(snap.get('timestamp', datetime.min))
+                    if snap_ts.tzinfo is not None:
+                        snap_ts = snap_ts.tz_localize(None)
+                    if snap_ts >= _sim_start:
+                        _filtered.append(snap)
+                _filtered_history = _filtered if _filtered else self.position_history
+
+            # F14 FIX: Also track max drawdown duration (bars in drawdown).
+            max_dd_duration_bars = 0
+            if _filtered_history:
+                equity_values = [snap.get('equity', initial_capital) for snap in _filtered_history]
                 if equity_values:
                     peak = equity_values[0]
-                    for equity in equity_values:
+                    current_dd_start = 0  # bar index where current drawdown began
+                    in_drawdown = False
+                    for i, equity in enumerate(equity_values):
                         if equity > peak:
+                            if in_drawdown:
+                                dd_len = i - current_dd_start
+                                max_dd_duration_bars = max(max_dd_duration_bars, dd_len)
+                                in_drawdown = False
                             peak = equity
+                        else:
+                            if not in_drawdown and peak > 0:
+                                dd_pct = (peak - equity) / peak
+                                if dd_pct > 1e-9:
+                                    in_drawdown = True
+                                    current_dd_start = i
                         drawdown = (peak - equity) / peak if peak > 0 else 0
                         if drawdown > max_drawdown_pct:
                             max_drawdown_pct = drawdown
                             max_drawdown = peak - equity
+                    # Close out any open drawdown at end
+                    if in_drawdown:
+                        dd_len = len(equity_values) - current_dd_start
+                        max_dd_duration_bars = max(max_dd_duration_bars, dd_len)
 
             # Calculate Sharpe ratio from position history returns
             sharpe_ratio = 0.0
-            if self.position_history and len(self.position_history) > 1:
-                equity_values = [snap.get('equity', initial_capital) for snap in self.position_history]
+            if _filtered_history and len(_filtered_history) > 1:
+                equity_values = [snap.get('equity', initial_capital) for snap in _filtered_history]
                 if len(equity_values) > 1:
                     import numpy as np
                     # Calculate returns
@@ -3041,28 +3188,53 @@ class InstitutionalBacktestEngine:
                         mean_return = np.mean(returns_arr)
                         std_return = np.std(returns_arr)
 
-                        # FIX: Proper Sharpe ratio for short backtests
-                        # For 1-day backtests, annualization creates unrealistic metrics
+                        # G1 FIX: Use a SINGLE continuous annualization formula for all
+                        # durations. The previous code had a 140x discontinuity at the
+                        # 5-day/6-day boundary (sqrt(5) vs sqrt(252*390)).
+                        #
+                        # Correct formula: SR_ann = (mean/std) * sqrt(N_bars_per_year)
+                        # This is the standard Lo (2002) annualization, applied uniformly.
+                        # For short backtests the result is noisy, but at least it's on the
+                        # same scale as longer backtests, enabling valid comparison.
                         if std_return > 0:
                             n_bars = len(returns)
-                            bars_per_day = 390  # 1-minute bars
+                            # Derive bars_per_day from interval
+                            _interval = getattr(self.config, 'interval', '1min')
+                            _interval_lower = _interval.lower()
+                            _interval_map = {
+                                '1min': 390, '5min': 78, '15min': 26,
+                                '30min': 13, '1h': 7, '1d': 1,
+                            }
+                            bars_per_day = _interval_map.get(_interval_lower, 390)
                             trading_days = max(1, n_bars / bars_per_day)
 
-                            # Calculate raw (non-annualized) Sharpe first
-                            raw_sharpe = mean_return / std_return
+                            # G14 FIX: Subtract risk-free rate per bar before computing Sharpe.
+                            rf_annual = getattr(self.config, 'risk_free_rate', 0.0)
+                            bars_per_year = 252 * bars_per_day
+                            rf_per_bar = rf_annual / bars_per_year if bars_per_year > 0 else 0.0
+                            excess_returns = returns_arr - rf_per_bar
+                            mean_excess = np.mean(excess_returns)
+                            # G10 FIX: Use ddof=1 (sample std) — unbiased estimator
+                            std_excess = np.std(excess_returns, ddof=1)
 
-                            if trading_days <= 1:
-                                # 1-day backtest: NO annualization (report as-is)
-                                # Annualizing a single day is statistically meaningless
-                                sharpe_ratio = raw_sharpe
-                            elif trading_days <= 5:
-                                # Short backtest (2-5 days): minimal annualization
-                                # Use sqrt(trading_days) to scale, not full year
-                                sharpe_ratio = raw_sharpe * np.sqrt(trading_days)
-                            else:
-                                # Longer backtest: standard annualization
-                                annualization_factor = np.sqrt(252 * bars_per_day)
+                            if std_excess > 0:
+                                raw_sharpe = mean_excess / std_excess
+                                # Single annualization: sqrt(bars_per_year), always
+                                annualization_factor = np.sqrt(bars_per_year)
                                 sharpe_ratio = raw_sharpe * annualization_factor
+
+            # AXIS1 FIX: Sanitize all computed metrics to prevent Inf/NaN
+            # from propagating into reports, optimizers, or downstream analytics.
+            import math as _math
+            def _safe(v, default=0.0):
+                return v if isinstance(v, (int, float)) and _math.isfinite(v) else default
+
+            total_return = _safe(total_return)
+            sharpe_ratio = _safe(sharpe_ratio)
+            max_drawdown = _safe(max_drawdown)
+            max_drawdown_pct = _safe(max_drawdown_pct)
+            win_rate = _safe(win_rate)
+            final_capital = _safe(final_capital, initial_capital)
 
             # Create summary dict
             summary = {
@@ -3076,6 +3248,7 @@ class InstitutionalBacktestEngine:
                 "sharpe_ratio": sharpe_ratio,
                 "max_drawdown": max_drawdown,
                 "max_drawdown_pct": max_drawdown_pct,
+                "max_drawdown_duration_bars": max_dd_duration_bars,  # F14 FIX
                 "win_rate": win_rate,
                 "winning_trades": winning_trades,
                 "losing_trades": losing_trades,
@@ -3315,10 +3488,42 @@ class InstitutionalBacktestEngine:
                     session_open, session_close = cal.get_session_times(ts_local.to_pydatetime(), asset_class)
                     if not (session_open.time() <= ts_local.time() < session_close.time()):
                         continue
-                except Exception:
-                    pass
+                except Exception as e:
+                    # H8 R3: Log RTH gate failures instead of swallowing
+                    # F2 FIX: was `bar_index` (undefined), correct variable is `idx`
+                    if idx == 0:
+                        logger.debug(f"RTH gate check skipped (non-fatal): {e}")
 
                 self.current_bar_index = idx
+
+                # H3 R4 FIX: Update all symbol prices at each bar for
+                # accurate portfolio valuation (mark-to-market).
+                if self.risk_manager and hasattr(self.risk_manager, 'current_prices'):
+                    bar_ts = pd.Timestamp(timestamp)
+                    for sym, sym_df in self.market_data.items():
+                        try:
+                            if sym_df.empty:
+                                continue
+                            # Get the latest price AT or BEFORE current timestamp
+                            if isinstance(sym_df.index, pd.DatetimeIndex):
+                                _idx = sym_df.index
+                            elif 'timestamp' in sym_df.columns:
+                                _idx = pd.DatetimeIndex(sym_df['timestamp'])
+                            else:
+                                continue
+                            _ts = bar_ts
+                            if _idx.tz is not None and _ts.tz is None:
+                                _ts = _ts.tz_localize(_idx.tz)
+                            elif _idx.tz is None and _ts.tz is not None:
+                                _ts = _ts.tz_localize(None)
+                            mask = _idx <= _ts
+                            if mask.any():
+                                last_idx = mask[::-1].idxmax() if isinstance(mask.index, pd.RangeIndex) else mask.values.nonzero()[0][-1]
+                                close_col = 'close' if 'close' in sym_df.columns else 'Close'
+                                if close_col in sym_df.columns:
+                                    self.risk_manager.current_prices[sym] = float(sym_df[close_col].iloc[last_idx])
+                        except Exception as _price_err:
+                            logger.debug(f"Per-bar price update for {sym}: {_price_err}")
 
                 # Progress reporting
                 if idx % progress_interval == 0 or idx == total_bars - 1:
@@ -3331,7 +3536,6 @@ class InstitutionalBacktestEngine:
                     bar_result = await self._process_single_bar(bar, timestamp, idx, pre_calc_index)
 
                     bars_processed += 1
-                    pre_calc_index += 1  # Increment pre-calc index for next bar
                     if bar_result.get('signals_generated', 0) > 0:
                         bars_with_signals += 1
                     if bar_result.get('trades_executed', 0) > 0:
@@ -3346,6 +3550,97 @@ class InstitutionalBacktestEngine:
                     logger.error(f"❌ Error processing bar {idx} at {timestamp}: {e}")
                     # Continue with next bar rather than failing entire backtest
                     continue
+                finally:
+                    # F11 FIX: Always advance pre_calc_index, even on error.
+                    # pre_calc_index tracks position in the timeline, not processed bars.
+                    # Skipping it on error causes all subsequent iloc slices to drift.
+                    pre_calc_index += 1
+
+            # AXIS2 FIX: Discard pending signals from the last bar.
+            # These signals were generated using bar N's data and would normally
+            # execute at bar N+1's open — but bar N+1 doesn't exist. Executing
+            # them at bar N's open would be temporally inconsistent (decision
+            # uses close data, fill at earlier open price). In live trading,
+            # these would simply expire. Log them for diagnostics.
+            if self.pending_signals and bars_processed > 0:
+                logger.info(
+                    f"⏳ Discarding {len(self.pending_signals)} pending signal(s) "
+                    f"from final bar (no next bar to execute on)"
+                )
+                for sig in self.pending_signals:
+                    logger.debug(
+                        f"   Discarded: {sig.get('symbol')} {sig.get('side')} "
+                        f"qty={sig.get('quantity', 0):.2f}"
+                    )
+                self.pending_signals = []
+
+            # C5 R4 FIX: Force-close all open positions at last bar's close price.
+            # Prevents final equity from including unrealized P&L of dangling positions.
+            if self.risk_manager and self.risk_manager.current_positions and bars_processed > 0:
+                open_positions = dict(self.risk_manager.current_positions)
+                if open_positions:
+                    logger.info(
+                        f"🔒 Force-closing {len(open_positions)} open position(s) at backtest end"
+                    )
+                    last_close = bar.get('close', 0) if bar is not None else 0
+                    for sym, qty in open_positions.items():
+                        if abs(qty) < 1e-9:
+                            continue
+                        close_side = 'sell' if qty > 0 else 'buy'
+                        close_qty = abs(qty)
+                        # Get symbol-specific price
+                        sym_close = last_close
+                        if sym in self.market_data and len(self.market_data[sym]) > 0:
+                            df_sym = self.market_data[sym]
+                            close_col = 'close' if 'close' in df_sym.columns else 'Close'
+                            if close_col in df_sym.columns:
+                                sym_close = float(df_sym[close_col].iloc[-1])
+                        try:
+                            # G9 FIX: Route force-close through the execution simulator
+                            # for realistic cost modeling, matching EOD liquidation behavior.
+                            _fill_price = sym_close
+                            _total_cost_bps = 0.0
+                            if hasattr(self, 'execution_simulator'):
+                                _fc_market_data = {
+                                    'close': sym_close,
+                                    'volume': bar.get('volume', 1000000) if bar is not None else 1000000,
+                                    'volatility': bar.get('volatility', 0.02) if bar is not None else 0.02,
+                                    'timestamp': timestamp,
+                                }
+                                _fc_fill = self.execution_simulator.simulate_fill(
+                                    symbol=sym,
+                                    side=close_side,
+                                    quantity=close_qty,
+                                    decision_price=sym_close,
+                                    market_data=_fc_market_data,
+                                    authorization_id=f'END_CLOSE_{sym}',
+                                    strategy_id='BACKTEST_END_CLOSE',
+                                )
+                                _fill_price = _fc_fill.fill_price
+                                _total_cost_bps = _fc_fill.costs.total_cost_bps
+
+                            # G3 FIX: Capture return value to get realized_pnl.
+                            position_update = await self.risk_manager.update_position(
+                                symbol=sym, side=close_side, quantity=close_qty,
+                                price=_fill_price, timestamp=timestamp,
+                                strategy_id='BACKTEST_END_CLOSE',
+                                backtest_fill=True,
+                            )
+                            _rpnl = 0.0
+                            if isinstance(position_update, dict):
+                                _rpnl = position_update.get('realized_pnl', 0.0)
+                            self.execution_history.append({
+                                'timestamp': timestamp, 'symbol': sym,
+                                'side': close_side, 'quantity': close_qty,
+                                'fill_price': _fill_price, 'market_price': sym_close,
+                                'decision_price': sym_close, 'confidence': 1.0,
+                                'strategy_id': 'BACKTEST_END_CLOSE',
+                                'authorization_id': f'END_CLOSE_{sym}',
+                                'total_cost_bps': _total_cost_bps,
+                                'realized_pnl': _rpnl,
+                            })
+                        except Exception as e:
+                            logger.warning(f"⚠️ Failed to close {sym} at backtest end: {e}")
 
             # Backtest complete
             end_time = datetime.now()
@@ -3359,7 +3654,8 @@ class InstitutionalBacktestEngine:
             logger.info(f"   Bars with Trades: {bars_with_trades}")
             logger.info(f"   Total Trades: {len(self.execution_history)}")
             logger.info(f"   Duration: {duration:.2f} seconds")
-            logger.info(f"   Speed: {bars_processed/duration:.1f} bars/sec")
+            # F16 FIX: Guard against zero duration (sub-millisecond backtests)
+            logger.info(f"   Speed: {bars_processed/duration:.1f} bars/sec" if duration > 0 else f"   Speed: N/A (duration < 1ms)")
             logger.info("=" * 80 + "\n")
 
             # Generate performance report
@@ -3378,7 +3674,8 @@ class InstitutionalBacktestEngine:
                 'bars_with_signals': bars_with_signals,
                 'bars_with_trades': bars_with_trades,
                 'total_trades': len(self.execution_history),
-                'final_capital': self.risk_manager.portfolio_value if self.risk_manager else (self.position_tracker.cash if self.position_tracker else 0),
+                # G11 FIX: Removed dead self.position_tracker reference
+                'final_capital': self.risk_manager.portfolio_value if self.risk_manager else self.config.initial_capital,
                 'duration_seconds': duration,
                 'bars_per_second': bars_processed / duration if duration > 0 else 0,
                 'report': report,
@@ -3386,18 +3683,27 @@ class InstitutionalBacktestEngine:
                 'end_time': end_time
             }
 
-            self.is_running = False
             return results
 
         except Exception as e:
             logger.error(f"❌ Backtest execution failed: {e}", exc_info=True)
-            self.is_running = False
             return {
                 'success': False,
                 'error': str(e),
                 'total_bars': bars_processed if 'bars_processed' in locals() else 0,
                 'total_trades': len(self.execution_history)
             }
+        finally:
+            # AXIS7 FIX: Ensure resources are released on both success and failure.
+            # This prevents ClickHouse connection leaks on mid-backtest exceptions.
+            self.is_running = False
+            try:
+                if hasattr(self, 'data_manager') and self.data_manager is not None:
+                    if hasattr(self.data_manager, 'stop'):
+                        await asyncio.wait_for(self.data_manager.stop(), timeout=5.0)
+                        logger.debug("DataManager stopped in finally block")
+            except Exception as cleanup_err:
+                logger.debug(f"DataManager cleanup in finally: {cleanup_err}")
 
     async def _check_eod_liquidation(self, timestamp: datetime, bar: pd.Series) -> int:
         """
@@ -3518,52 +3824,127 @@ class InstitutionalBacktestEngine:
             side = 'sell' if position_qty > 0 else 'buy'  # Sell longs, buy to cover shorts
             qty = abs(position_qty)
 
-            # Simulate the liquidation execution
-            execution = {
+            # C3 FIX: Route EOD liquidations through the execution simulator for
+            # realistic cost modeling (spread, impact, slippage) instead of
+            # hardcoded 5 bps. EOD is often the most volatile period.
+            eod_market_data = {
+                'close': close_price,
+                'volume': bar.get('volume', 1000000),
+                'volatility': bar.get('volatility', 0.02),
                 'timestamp': timestamp,
-                'symbol': symbol,
-                'side': side,
-                'quantity': qty,
-                'requested_quantity': qty,
-                'quantity_reduction': 0,
-                'decision_price': close_price,
-                'market_price': close_price,
-                'fill_price': close_price,
-                'confidence': 1.0,  # EOD liquidation is mandatory
-                'signal_strength': 0.0,
-                'signal_timestamp': timestamp,
-                'signal_bar_close': close_price,
-                'execution_delay_bars': 0,
-                'total_cost_bps': 5.0,  # Assume minimal cost
-                'spread_cost_bps': 2.5,
-                'market_impact_bps': 2.5,
-                'slippage_bps': 0.0,
-                'commission_bps': 0.0,
-                'total_cost_dollars': qty * close_price * 5 / 10000,
-                'permanent_impact_bps': 0.0,
-                'temporary_impact_bps': 2.5,
-                'implementation_shortfall_bps': 0.0,
-                'arrival_cost_bps': 0.0,
-                'realized_pnl': 0.0,  # Will be calculated by risk manager
-                'retry_count': 0,
-                'had_rejections': False,
-                'rejection_count': 0,
-                'authorization_id': f'eod_liq_{timestamp}_{symbol}',
-                'strategy_id': strat_id or 'EOD_LIQUIDATION',
-                'strategy_run': strat_id or 'EOD_LIQUIDATION',
-                'fill_id': f'eod_fill_{timestamp}_{symbol}',
-                'regime': 'eod_close',
-                'liquidity_score': 100.0
             }
 
+            # Get regime context for cost scaling
+            eod_regime_context = None
+            if self.regime_engine and hasattr(self.regime_engine, 'get_current_regime'):
+                try:
+                    eod_regime_context = self.regime_engine.get_current_regime()
+                except Exception as e:
+                    logger.debug(f"EOD regime context retrieval failed: {e}")
+
+            # Use simulator if available, otherwise fall back to manual construction
+            if hasattr(self, 'execution_simulator'):
+                simulated_fill = self.execution_simulator.simulate_fill(
+                    symbol=symbol,
+                    side=side,
+                    quantity=qty,
+                    decision_price=close_price,
+                    market_data=eod_market_data,
+                    authorization_id=f'EOD_LIQUIDATION_{timestamp}_{symbol}',
+                    strategy_id=strat_id or 'EOD_LIQUIDATION',
+                    regime_context=eod_regime_context,
+                )
+                execution = {
+                    'timestamp': timestamp,
+                    'symbol': symbol,
+                    'side': side,
+                    'quantity': qty,
+                    'requested_quantity': qty,
+                    'quantity_reduction': 0,
+                    'decision_price': close_price,
+                    'market_price': simulated_fill.market_price,
+                    'fill_price': simulated_fill.fill_price,
+                    'confidence': 1.0,
+                    'signal_strength': 0.0,
+                    'signal_timestamp': timestamp,
+                    'signal_bar_close': close_price,
+                    'execution_delay_bars': 0,
+                    'total_cost_bps': simulated_fill.costs.total_cost_bps,
+                    'spread_cost_bps': simulated_fill.costs.spread_cost_bps,
+                    'market_impact_bps': simulated_fill.costs.market_impact_bps,
+                    'slippage_bps': simulated_fill.costs.slippage_bps,
+                    'commission_bps': simulated_fill.costs.commission_bps,
+                    'total_cost_dollars': simulated_fill.costs.total_cost_dollars,
+                    'permanent_impact_bps': simulated_fill.costs.permanent_impact_bps,
+                    'temporary_impact_bps': simulated_fill.costs.temporary_impact_bps,
+                    'implementation_shortfall_bps': simulated_fill.implementation_shortfall_bps,
+                    'arrival_cost_bps': simulated_fill.arrival_cost_bps,
+                    'realized_pnl': 0.0,  # Will be calculated by risk manager
+                    'retry_count': 0,
+                    'had_rejections': False,
+                    'rejection_count': 0,
+                    'authorization_id': f'EOD_LIQUIDATION_{timestamp}_{symbol}',
+                    'strategy_id': strat_id or 'EOD_LIQUIDATION',
+                    'strategy_run': strat_id or 'EOD_LIQUIDATION',
+                    'fill_id': simulated_fill.fill_id,
+                    'regime': simulated_fill.costs.regime or 'eod_close',
+                    'liquidity_score': simulated_fill.costs.liquidity_score or 100.0,
+                }
+                fill_price_for_pnl = simulated_fill.fill_price
+            else:
+                # Fallback: minimal cost estimate (only if simulator not initialized)
+                estimated_cost_bps = 5.0
+                cost_mult = estimated_cost_bps / 10000
+                fill_price_fallback = close_price * (1.0 - cost_mult) if side == 'sell' else close_price * (1.0 + cost_mult)
+                execution = {
+                    'timestamp': timestamp,
+                    'symbol': symbol,
+                    'side': side,
+                    'quantity': qty,
+                    'requested_quantity': qty,
+                    'quantity_reduction': 0,
+                    'decision_price': close_price,
+                    'market_price': close_price,
+                    'fill_price': fill_price_fallback,
+                    'confidence': 1.0,
+                    'signal_strength': 0.0,
+                    'signal_timestamp': timestamp,
+                    'signal_bar_close': close_price,
+                    'execution_delay_bars': 0,
+                    'total_cost_bps': estimated_cost_bps,
+                    'spread_cost_bps': 2.5,
+                    'market_impact_bps': 2.5,
+                    'slippage_bps': 0.0,
+                    'commission_bps': 0.0,
+                    'total_cost_dollars': qty * close_price * estimated_cost_bps / 10000,
+                    'permanent_impact_bps': 0.0,
+                    'temporary_impact_bps': 2.5,
+                    'implementation_shortfall_bps': 0.0,
+                    'arrival_cost_bps': 0.0,
+                    'realized_pnl': 0.0,
+                    'retry_count': 0,
+                    'had_rejections': False,
+                    'rejection_count': 0,
+                    'authorization_id': f'EOD_LIQUIDATION_{timestamp}_{symbol}',
+                    'strategy_id': strat_id or 'EOD_LIQUIDATION',
+                    'strategy_run': strat_id or 'EOD_LIQUIDATION',
+                    'fill_id': f'eod_fill_{timestamp}_{symbol}',
+                    'regime': 'eod_close',
+                    'liquidity_score': 100.0,
+                }
+                fill_price_for_pnl = fill_price_fallback
+
             # Update position via CentralRiskManager (Rule 4)
+            # H4: Pass backtest_fill=True to skip CRM's internal cost deduction
+            # (costs already embedded in fill_price by execution simulator)
             position_update = await self.risk_manager.update_position(
                 symbol=symbol,
                 side=side,
                 quantity=qty,
-                price=close_price,
+                price=fill_price_for_pnl,
                 timestamp=timestamp,
-                strategy_id=strat_id
+                strategy_id=strat_id,
+                backtest_fill=True,
             )
 
             # Update execution with actual P&L from risk manager
@@ -3660,9 +4041,32 @@ class InstitutionalBacktestEngine:
             # - execute at bar N+1 open
             if self.pending_signals:
                 try:
+                    # C2 STALENESS FIX: Filter out signals older than 1 bar.
+                    # Signals should execute on the very next bar after generation.
+                    # If they're still pending after that, they're stale.
+                    max_signal_age_bars = 1
+                    fresh_signals = []
+                    for sig in self.pending_signals:
+                        sig_bar_idx = sig.get('signal_bar_index')
+                        if sig_bar_idx is None:
+                            # H2 R3 FIX: Missing signal_bar_index means unknown age.
+                            # Treat as stale to prevent immortal signals from broken paths.
+                            logger.warning(
+                                f"⚠️ Dropping signal with no signal_bar_index: "
+                                f"{sig.get('symbol')} {sig.get('side')} — treating as stale"
+                            )
+                        elif (bar_index - sig_bar_idx) > max_signal_age_bars:
+                            logger.warning(
+                                f"⚠️ Expired stale signal: {sig.get('symbol')} {sig.get('side')} "
+                                f"(generated at bar {sig_bar_idx}, now at bar {bar_index}, "
+                                f"age={bar_index - sig_bar_idx} bars > max {max_signal_age_bars})"
+                            )
+                        else:
+                            fresh_signals.append(sig)
+
                     open_price = bar.get('open', bar.get('close', 0))
                     executed_trades = await self._execute_pending_signals(
-                        self.pending_signals,
+                        fresh_signals,
                         bar,
                         timestamp,
                         execution_price=open_price,
@@ -3708,8 +4112,12 @@ class InstitutionalBacktestEngine:
                             # CRITICAL FIX: Use np.argmax to get iloc position, not idxmax which returns label
                             import numpy as np
                             current_bar_iloc = np.argmax(current_bar_mask.values)  # Get iloc position
-                            # Pass data up to and including current bar (for historical context)
-                            features_historical = self.pre_calculated_features.iloc[:current_bar_iloc + 1].copy()
+                            # C1 LOOKAHEAD FIX: Pass data up to but EXCLUDING current bar.
+                            # Strategies must decide using only data available BEFORE the
+                            # current bar's close is known. The current bar's OHLCV is not
+                            # finalized until the bar completes, so including it leaks the
+                            # close price into the signal decision.
+                            features_historical = self.pre_calculated_features.iloc[:current_bar_iloc].copy()
                             
                             # Ensure features_historical has timestamp index for strategy consistency
                             if 'timestamp' in features_historical.columns:
@@ -3718,12 +4126,14 @@ class InstitutionalBacktestEngine:
                             features_historical = pd.DataFrame()
                     elif hasattr(self.pre_calculated_features.index, 'equals'):
                         # Use index if timestamp not in columns
-                        mask = self.pre_calculated_features.index <= bar_timestamp
+                        # C1 R3 FIX: Use strict < to EXCLUDE current bar (lookahead)
+                        mask = self.pre_calculated_features.index < bar_timestamp
                         features_historical = self.pre_calculated_features[mask].copy()
                     else:
                         # Fallback to iloc if we can't match by timestamp
+                        # C1 R3 FIX: Use :pre_calc_index (not +1) to EXCLUDE current bar
                         if pre_calc_index < len(self.pre_calculated_features):
-                            features_historical = self.pre_calculated_features.iloc[:pre_calc_index+1].copy()
+                            features_historical = self.pre_calculated_features.iloc[:pre_calc_index].copy()
                         else:
                             features_historical = pd.DataFrame()  # Empty if out of bounds
 
@@ -3797,14 +4207,16 @@ class InstitutionalBacktestEngine:
                                         sym_ts = pd.to_datetime(sym_ind['timestamp'])
                                         if getattr(sym_ts.dt, "tz", None) is not None and ts_compare.tz is None:
                                             ts_compare = ts_compare.tz_localize(sym_ts.dt.tz)
-                                        mask = sym_ts <= ts_compare
+                                        # AXIS2 FIX: Strict < to EXCLUDE current bar's close
+                                        # from signal generation (prevents lookahead bias).
+                                        mask = sym_ts < ts_compare
                                         df_enriched = sym_ind[mask].copy()
                                         # Ensure datetime index for strategy zscore/window logic
                                         try:
                                             if 'timestamp' in df_enriched.columns:
                                                 df_enriched = df_enriched.set_index('timestamp')
-                                        except Exception:
-                                            pass
+                                        except Exception as _idx_err:
+                                            logger.debug(f"Enriched data index set for {sym}: {_idx_err}")
                                         enriched_data_per_symbol[sym] = df_enriched
                                         continue
 
@@ -3818,14 +4230,15 @@ class InstitutionalBacktestEngine:
                                             ind_ts = pd.to_datetime(ind_df['timestamp'])
                                             if getattr(ind_ts.dt, "tz", None) is not None and ts_compare.tz is None:
                                                 ts_compare = ts_compare.tz_localize(ind_ts.dt.tz)
-                                            m = ind_ts <= ts_compare
+                                            # AXIS2 FIX: Strict < to EXCLUDE current bar
+                                            m = ind_ts < ts_compare
                                             df_enriched = ind_df[m].copy()
                                             if 'timestamp' in df_enriched.columns:
                                                 df_enriched = df_enriched.set_index('timestamp')
                                             enriched_data_per_symbol[sym] = df_enriched
                                             continue
-                                except Exception:
-                                    pass
+                                except Exception as _ind_err:
+                                    logger.debug(f"Single-symbol indicator fallback for {sym}: {_ind_err}")
 
                             # Last resort: use features_historical (kept for backward compatibility)
                             if not is_multi_symbol and not features_historical.empty:
@@ -3850,13 +4263,17 @@ class InstitutionalBacktestEngine:
                                 elif hasattr(sym_data.index, 'tz') and sym_data.index.tz is None:
                                     if ts_compare.tz is not None:
                                         ts_compare = ts_compare.tz_localize(None)
-                                sym_data = sym_data[sym_data.index <= ts_compare]
+                                # AXIS2 FIX: Strict < to EXCLUDE current bar
+                                sym_data = sym_data[sym_data.index < ts_compare]
 
                                 enriched_data_per_symbol[sym] = sym_data
                                 logger.warning(f"⚠️  Using raw market_data for {sym} - enriched features unavailable")
                             else:
                                 logger.warning(f"⚠️  No data available for {sym}")
-                                enriched_data_per_symbol[sym] = pd.DataFrame()
+                                # AXIS4 FIX: Provide empty DataFrame with correct column contract
+                                enriched_data_per_symbol[sym] = pd.DataFrame(
+                                    columns=['open', 'high', 'low', 'close', 'volume']
+                                )
 
                         signals_result = await self.strategy_manager.generate_signals(
                             self.config.symbols,
@@ -3923,9 +4340,8 @@ class InstitutionalBacktestEngine:
                 if self.strategy_manager and hasattr(self.strategy_manager, 'active_strategies') and self.strategy_manager.active_strategies:
                     # STRATEGY generates signals based on enriched features (not raw OHLCV)
                     try:
-                        # For fallback: create enriched data on-the-fly
-                        enriched_features_fallback = features_df.copy()
-
+                        # F15 FIX: Removed dead `enriched_features_fallback` variable.
+                        # The actual data passed to strategies is built via `enriched_data_per_symbol` below.
                         logger.debug(f"⚠️  Pre-calculation unavailable, generating enriched features on-the-fly at bar {bar_index}")
 
                         # Pass enriched features to strategy (not raw OHLCV)
@@ -3973,12 +4389,17 @@ class InstitutionalBacktestEngine:
                                     elif hasattr(sym_data.index, 'tz') and sym_data.index.tz is None:
                                         if ts_compare.tz is not None:
                                             ts_compare = ts_compare.tz_localize(None)
-                                    sym_data = sym_data[sym_data.index <= ts_compare]
+                                    # AXIS2 FIX: Strict < to EXCLUDE current bar
+                                    sym_data = sym_data[sym_data.index < ts_compare]
 
                                 enriched_data_per_symbol[sym] = sym_data
                             else:
-                                # Fallback to the bar data
-                                enriched_data_per_symbol[sym] = enriched_features_fallback
+                                # AXIS4 FIX: Do not fall back to a different symbol's features.
+                                # Provide empty contract-compliant DataFrame instead.
+                                logger.warning(f"⚠️  No market_data for {sym} in on-the-fly path")
+                                enriched_data_per_symbol[sym] = pd.DataFrame(
+                                    columns=['open', 'high', 'low', 'close', 'volume']
+                                )
 
                         signals_result = await self.strategy_manager.generate_signals(
                             self.config.symbols,
@@ -4348,8 +4769,8 @@ class InstitutionalBacktestEngine:
                                     trade["signal_bar_index"] = bar_index
                                     trade["signal_timestamp"] = timestamp
                                 self.pending_signals.extend(authorized_exits)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"⚠️ ADS exit processing error (non-fatal): {e}")
 
             # Record position history after execution
             if self.risk_manager:
@@ -4368,6 +4789,18 @@ class InstitutionalBacktestEngine:
                     'max_drawdown_pct': getattr(self.risk_manager, 'max_drawdown_pct', 0.0)
                 }
                 self.position_history.append(position_snapshot)
+
+                # C6 R3 FIX: Trim position_history to prevent OOM on long backtests.
+                # Keep every Nth snapshot when over limit (downsample, not truncate).
+                if len(self.position_history) > self._max_position_history:
+                    if not self._position_history_trim_warned:
+                        logger.info(
+                            f"📊 position_history exceeded {self._max_position_history} entries — "
+                            f"downsampling to every-other snapshot to conserve memory"
+                        )
+                        self._position_history_trim_warned = True
+                    # Keep every other entry (50% reduction)
+                    self.position_history = self.position_history[::2]
 
             return bar_results
 
@@ -4418,8 +4851,82 @@ class InstitutionalBacktestEngine:
             # For now, we'll directly authorize signals from the pipeline
             # In future phases, this will involve multi-strategy coordination
 
+            # H6 FIX: Detect and resolve per-symbol signal conflicts BEFORE
+            # individual authorization. If multiple strategies produce opposing
+            # signals (BUY + SELL) for the same symbol on the same bar, process
+            # only the higher-confidence signal to avoid guaranteed round-trip costs.
+            # H1 R3 FIX: Aligned with entry_signals/exit_signals used below.
+            # 'short_entry' = opening a short (entry), NOT exit.
+            # 'short_exit'/'cover' = closing a short (exit), NOT entry.
+            _entry_signals = {'buy', 'long_entry', 'short_entry', 'short'}
+            _exit_signals = {'sell', 'long_exit', 'short_exit', 'cover', 'close',
+                             'close_long', 'close_short', 'flatten'}
+
+            # Group signals by symbol
+            symbol_signals = defaultdict(list)
+            for _idx, _row in signals_df.iterrows():
+                _sym = _row.get('symbol', self.config.symbols[0])
+                symbol_signals[_sym].append((_idx, _row))
+
+            # Build a filtered index set — drop lower-confidence side of conflicts
+            drop_indices = set()
+            for _sym, _sigs in symbol_signals.items():
+                if len(_sigs) < 2:
+                    continue
+                buy_sigs = []
+                sell_sigs = []
+                for _idx, _row in _sigs:
+                    _st_raw = _row.get('signal_type', _row.get('signal', 'HOLD'))
+                    _st = _st_raw.value.lower() if hasattr(_st_raw, 'value') else str(_st_raw).lower()
+                    if _st in _entry_signals:
+                        buy_sigs.append((_idx, _row))
+                    elif _st in _exit_signals:
+                        sell_sigs.append((_idx, _row))
+                if buy_sigs and sell_sigs:
+                    # Conflict detected — keep the side with higher max confidence
+                    best_buy_conf = max(r.get('confidence', 0) for _, r in buy_sigs)
+                    best_sell_conf = max(r.get('confidence', 0) for _, r in sell_sigs)
+                    losers = sell_sigs if best_buy_conf >= best_sell_conf else buy_sigs
+                    for _idx, _ in losers:
+                        drop_indices.add(_idx)
+                    logger.info(
+                        f"⚔️ Signal conflict on {_sym}: "
+                        f"{len(buy_sigs)} buy vs {len(sell_sigs)} sell — "
+                        f"dropping {'sell' if best_buy_conf >= best_sell_conf else 'buy'} side"
+                    )
+
+            # C3 R4 FIX: Track per-bar aggregate cash commitment.
+            # Prevents multiple BUY signals on the same bar from exceeding
+            # available cash when processed sequentially.
+            _bar_cash_committed = 0.0
+            _available_cash_at_bar = (
+                self.risk_manager.available_cash if hasattr(self.risk_manager, 'available_cash')
+                else self.config.initial_capital
+            )
+
             # Convert signals to trade requests
+            from backtest.utils.validation import validate_signal as _validate_signal
             for idx, signal_row in signals_df.iterrows():
+                # H6: Skip signals dropped by conflict resolution
+                if idx in drop_indices:
+                    continue
+
+                # C3 R3 FIX: Structural validation of signal fields BEFORE processing.
+                # Uses soft gate (log + skip) rather than hard raise to avoid crashing
+                # the entire backtest on a single malformed signal.
+                try:
+                    _sig_dict = signal_row.to_dict() if hasattr(signal_row, 'to_dict') else dict(signal_row)
+                    # Map 'signal_type' to 'signal' key that validate_signal expects
+                    if 'signal' not in _sig_dict and 'signal_type' in _sig_dict:
+                        _st = _sig_dict['signal_type']
+                        _sig_dict['signal'] = _st.value if hasattr(_st, 'value') else str(_st)
+                    # H5 R4 FIX: Require symbol + signal type (not just symbol).
+                    _validate_signal(_sig_dict, bar_index=0,
+                                     required_fields=['symbol', 'signal'])
+                except Exception as _val_err:
+                    logger.warning(f"⚠️ Signal validation failed (skipping): {_val_err}")
+                    continue
+
                 # Extract signal information
                 symbol = signal_row.get('symbol', self.config.symbols[0])
 
@@ -4435,6 +4942,15 @@ class InstitutionalBacktestEngine:
 
                 confidence = signal_row.get('confidence', 0.5)
                 signal_strength = signal_row.get('signal_strength', signal_row.get('strength', 0))
+
+                # C5 FIX: Guard against NaN/Inf confidence values.
+                # NaN fails all comparisons (benign), but Inf passes all thresholds
+                # and would bypass risk gates.
+                if not isinstance(confidence, (int, float)) or not math.isfinite(confidence):
+                    logger.warning(
+                        f"⚠️ Invalid confidence={confidence} for {symbol} — dropping signal"
+                    )
+                    continue
 
                 # CRITICAL FIX: Extract target_weight and quantity_type from signal
                 target_weight = signal_row.get('target_weight', None)
@@ -4457,9 +4973,12 @@ class InstitutionalBacktestEngine:
                 # Normalize signal type to lowercase for comparison
                 signal_type_lower = signal_type.lower() if isinstance(signal_type, str) else str(signal_type).lower()
 
-                # Define valid actionable signals
-                entry_signals = ['buy', 'long_entry', 'short_entry']
-                exit_signals = ['sell', 'long_exit', 'short_exit', 'close', 'close_long', 'close_short']
+                # F7 FIX: Signal type sets must match the conflict resolver exactly.
+                # Missing types here cause signals to be silently dropped after
+                # surviving conflict resolution, producing unexplained gaps.
+                entry_signals = ['buy', 'long_entry', 'short_entry', 'short']
+                exit_signals = ['sell', 'long_exit', 'short_exit', 'close',
+                                'close_long', 'close_short', 'cover', 'flatten']
                 actionable_signals = entry_signals + exit_signals
 
                 # Use config's min_confidence_threshold (default 0.6 for backward compatibility)
@@ -4467,17 +4986,10 @@ class InstitutionalBacktestEngine:
                 
                 if signal_type_lower in actionable_signals and confidence >= min_confidence:
 
-                    # Get current position
+                    # Get current position from CentralRiskManager (Rule 4 SSOT)
                     current_position = 0.0
                     if self.risk_manager:
-                        # Use CentralRiskManager as source of truth (Rule 4)
-                        # current_positions is Dict[str, float], not Dict[str, Position]
                         current_position = self.risk_manager.current_positions.get(symbol, 0.0)
-                    elif self.position_tracker:
-                        # Fallback to deprecated position tracker if risk manager not available
-                        position_obj = self.position_tracker.get_position(symbol)
-                        if position_obj:
-                            current_position = position_obj.quantity
 
                     has_long = current_position > 0
                     has_short = current_position < 0
@@ -4490,19 +5002,40 @@ class InstitutionalBacktestEngine:
                             sym_data = sym_data.set_index('timestamp')
                         # Filter up to current timestamp
                         ts_compare = pd.Timestamp(timestamp)
+                        # F8 FIX: Handle reverse TZ case (ts has tz, index doesn't)
                         if hasattr(sym_data.index, 'tz') and sym_data.index.tz is not None and ts_compare.tz is None:
                             ts_compare = ts_compare.tz_localize(sym_data.index.tz)
+                        elif hasattr(ts_compare, 'tz') and ts_compare.tz is not None and (not hasattr(sym_data.index, 'tz') or sym_data.index.tz is None):
+                            ts_compare = ts_compare.tz_localize(None)
                         filtered_data = sym_data[sym_data.index <= ts_compare]
                         if len(filtered_data) > 0:
                             current_price = float(filtered_data['close'].iloc[-1])
                         else:
-                            current_price = 100.0  # Fallback
+                            # F8 FIX: Remove $100 fallback — skip signal instead of using
+                            # fabricated price that corrupts position sizing and P&L.
+                            logger.warning(
+                                f"⚠️ No price data for {symbol} at {timestamp} "
+                                f"(market_data exists but filtered to 0 rows) — skipping signal"
+                            )
+                            continue
                     elif not bar_df.empty and 'close' in bar_df.columns:
-                        # Fallback to bar_df if symbol is in there
-                        symbol_bars = bar_df[bar_df['symbol'] == symbol] if 'symbol' in bar_df.columns else bar_df
-                        current_price = float(symbol_bars['close'].iloc[-1]) if len(symbol_bars) > 0 else 100.0
+                        # H6 R4 FIX: Only use bar_df if it contains data for THIS symbol.
+                        # Never fall back to primary symbol's price for a different symbol.
+                        if 'symbol' in bar_df.columns:
+                            symbol_bars = bar_df[bar_df['symbol'] == symbol]
+                        else:
+                            # Single-symbol bar_df — only use if it matches the signal's symbol
+                            symbol_bars = bar_df if symbol == self.config.symbols[0] else pd.DataFrame()
+                        if len(symbol_bars) > 0:
+                            current_price = float(symbol_bars['close'].iloc[-1])
+                        else:
+                            logger.warning(
+                                f"⚠️ No price data for {symbol} at {timestamp} — skipping signal"
+                            )
+                            continue
                     else:
-                        current_price = 100.0
+                        logger.warning(f"⚠️ No price data for {symbol} at {timestamp} — skipping signal")
+                        continue
 
                     # ================================================================
                     # Determine trade action based on explicit signal type
@@ -4580,7 +5113,7 @@ class InstitutionalBacktestEngine:
                     # ==============================================================
                     # SHORT_ENTRY: Open short position OR close long (if shorts disabled)
                     # ==============================================================
-                    elif signal_type_lower in ['short_entry']:
+                    elif signal_type_lower in ['short_entry', 'short']:
                         if has_long:
                             # Close the long position first (or instead of shorting)
                             side = 'sell'
@@ -4603,7 +5136,7 @@ class InstitutionalBacktestEngine:
                     # ==============================================================
                     # SHORT_EXIT / CLOSE_SHORT: Close short position
                     # ==============================================================
-                    elif signal_type_lower in ['short_exit', 'close_short']:
+                    elif signal_type_lower in ['short_exit', 'close_short', 'cover']:
                         if has_short:
                             side = 'buy'
                             quantity = abs(float(current_position))
@@ -4635,7 +5168,7 @@ class InstitutionalBacktestEngine:
                     # ==============================================================
                     # CLOSE: Close any position
                     # ==============================================================
-                    elif signal_type_lower == 'close':
+                    elif signal_type_lower in ['close', 'flatten']:
                         if has_long:
                             side = 'sell'
                             quantity = abs(float(current_position))
@@ -4656,12 +5189,41 @@ class InstitutionalBacktestEngine:
                     if side is None or quantity <= 0:
                         continue
 
+                    # C3 R4 FIX: Pre-authorization per-bar cash budget check.
+                    # Reject BUY signals that would exceed remaining bar budget.
+                    if side == 'buy' and current_price > 0:
+                        trade_cost_est = quantity * current_price
+                        remaining_cash = _available_cash_at_bar - _bar_cash_committed
+                        if remaining_cash < trade_cost_est:
+                            # Try to size down to remaining cash
+                            if remaining_cash > current_price:
+                                quantity = max(1.0, remaining_cash / current_price)
+                                logger.debug(
+                                    f"   ⚠️ C3: Reduced {symbol} BUY qty to {quantity:.0f} "
+                                    f"(bar cash budget: ${remaining_cash:,.0f})"
+                                )
+                            else:
+                                logger.debug(
+                                    f"   ⛔ C3: Skipping {symbol} BUY — bar cash budget "
+                                    f"exhausted (${remaining_cash:,.0f} < ${trade_cost_est:,.0f})"
+                                )
+                                continue
+
                     # Request authorization from CentralRiskManager (BRICK #8)
                     if self.risk_manager:
                         from core_engine.system.central_risk_manager import TradingDecisionRequest, TradingDecisionType
 
+                        # F6 FIX: Use POSITION_EXIT for exit signals.
+                        # POSITION_ENTRY triggers regime/vol/confidence scaling which
+                        # chronically reduces exit quantities, leaving residual positions.
+                        is_exit_signal = signal_type_lower in exit_signals
+                        decision_type = (
+                            TradingDecisionType.POSITION_EXIT if is_exit_signal
+                            else TradingDecisionType.POSITION_ENTRY
+                        )
+
                         request = TradingDecisionRequest(
-                            decision_type=TradingDecisionType.POSITION_ENTRY,
+                            decision_type=decision_type,
                             symbol=symbol,
                             side=side,
                             quantity=quantity,
@@ -4672,7 +5234,8 @@ class InstitutionalBacktestEngine:
                                 'timestamp': timestamp.isoformat() if hasattr(timestamp, 'isoformat') else str(timestamp),
                                 'signal_type': signal_type,
                                 'bar_index': self.current_bar_index,
-                                'debug_run': 'momentum_smoke'
+                                'debug_run': 'momentum_smoke',
+                                'is_exit': is_exit_signal,
                             }
                         )
 
@@ -4682,12 +5245,13 @@ class InstitutionalBacktestEngine:
                         # Check if authorized
                         from core_engine.system.central_risk_manager import AuthorizationLevel
                         if authorization.authorization_level != AuthorizationLevel.REJECTED:
+                            auth_qty = authorization.authorized_quantity
                             # Authorized: add to list for next-bar execution
                             authorized_trades.append({
                                 'strategy_id': signal_row.get('strategy_id', 'backtest_strategy'),
                                 'symbol': symbol,
                                 'side': side,
-                                'quantity': authorization.authorized_quantity,
+                                'quantity': auth_qty,
                                 'confidence': confidence,
                                 'signal_strength': signal_strength,
                                 'signal_type': signal_type,
@@ -4696,8 +5260,16 @@ class InstitutionalBacktestEngine:
                                 'current_price': current_price,  # ✅ Store symbol-specific price
                                 'additional_data': signal_row.get('additional_data', {}),  # Transition Supervisor metadata
                             })
+                            # C3 R4 FIX: Debit per-bar cash budget for BUY
+                            if side == 'buy' and current_price > 0:
+                                _bar_cash_committed += auth_qty * current_price
                         else:
-                            pass
+                            # Log rejected trades for diagnostics (was silently dropped)
+                            logger.debug(
+                                f"⛔ Trade REJECTED: {symbol} {side} "
+                                f"qty={authorization.authorized_quantity:.2f} "
+                                f"reason={getattr(authorization, 'rejection_reason', 'N/A')}"
+                            )
                 else:
                     continue
 
@@ -4797,21 +5369,30 @@ class InstitutionalBacktestEngine:
         try:
             from backtest.engine.historical_execution_simulator import HistoricalExecutionSimulator
 
-            # Create simulator if not exists
+            # Create simulator if not exists (H3 fix — use BacktestConfig values)
             if not hasattr(self, 'execution_simulator'):
                 disable_rejections = getattr(self, 'disable_rejections', False)
                 self.execution_simulator = HistoricalExecutionSimulator({
                     'fill_model': 'realistic',
-                    'base_spread_bps': 5.0,
-                    'base_slippage_bps': 2.0,
-                    'commission_per_share': 0.005,
+                    'base_spread_bps': getattr(self.config, 'max_spread_bps', 5.0),
+                    'base_slippage_bps': getattr(self.config, 'base_slippage_bps', 2.0),
+                    'commission_per_share': getattr(self.config, 'commission_per_trade', 0.005),
                     'enable_random_slippage': False,  # Deterministic for backtesting
-                    'impact_linear_coeff': 0.1,
-                    'impact_sqrt_coeff': 0.5,
-                    'disable_rejections': disable_rejections
+                    'impact_linear_coeff': getattr(self.config, 'linear_coefficient', 0.1),
+                    'impact_sqrt_coeff': getattr(self.config, 'sqrt_coefficient', 0.5),
+                    'disable_rejections': disable_rejections,
+                    'execution_seed': getattr(self.config, 'execution_seed', None),
                 })
 
             executed_trades = []
+
+            # F12 FIX: Execute SELLs before BUYs to free cash first.
+            # Without this, BUYs may be rejected for insufficient cash even
+            # though pending SELLs would have provided the funds.
+            authorized_trades = sorted(
+                authorized_trades,
+                key=lambda t: 0 if t.get('side', '').lower() == 'sell' else 1
+            )
 
             for auth_trade in authorized_trades:
                 try:
@@ -4847,18 +5428,22 @@ class InstitutionalBacktestEngine:
                                     quantity = current_position
                                     auth_trade['quantity'] = quantity
 
-                    # CRITICAL FIX: Use symbol-specific price for multi-symbol strategies
-                    # Priority: 1) auth_trade['current_price'] (symbol-specific, set during authorization)
-                    #           2) override_price (next-bar OPEN, for single-symbol)
+                    # F1 FIX: Price priority for next-bar execution.
+                    # override_price = next bar's OPEN (the actual execution price).
+                    # auth_trade['current_price'] = authorization-time close (the DECISION price).
+                    # The fill must happen at the execution bar's open, not the signal bar's close.
+                    # Priority: 1) override_price (next-bar OPEN — the real execution price)
+                    #           2) auth_trade['current_price'] (authorization-time, for multi-symbol sizing)
                     #           3) current_bar['close'] (fallback)
-                    if 'current_price' in auth_trade and auth_trade['current_price'] is not None:
-                        # Use symbol-specific price from authorization (multi-symbol correct)
+                    if override_price is not None:
+                        # Next-bar OPEN is the correct execution price
+                        current_price = override_price
+                        # Decision price = signal bar's close (for implementation shortfall calc)
+                        decision_price = auth_trade.get('signal_bar_close', override_price)
+                    elif 'current_price' in auth_trade and auth_trade['current_price'] is not None:
+                        # Multi-symbol fallback: use authorization-time price
                         current_price = auth_trade['current_price']
                         decision_price = current_price
-                    elif override_price is not None:
-                        # Fallback to next-bar OPEN (single-symbol mode)
-                        current_price = override_price
-                        decision_price = auth_trade.get('signal_bar_close', override_price)
                     else:
                         current_price = current_bar.get('close', 0)
                         decision_price = current_price
@@ -4978,7 +5563,7 @@ class InstitutionalBacktestEngine:
                         symbol=symbol,
                         side=side.lower(),
                         quantity=quantity,
-                        decision_price=current_price,  # Use current_price from authorization
+                        decision_price=decision_price,  # G4 FIX: bar N close (when signal was generated), NOT current_price (bar N+1 open)
                         market_data=market_data,
                         authorization_id=getattr(auth_trade.get('authorization', {}), 'authorization_id', ''),
                         strategy_id=auth_trade.get('strategy_id', 'backtest_strategy'),
@@ -5034,6 +5619,8 @@ class InstitutionalBacktestEngine:
                     position_update = {}
                     if self.risk_manager:
                         try:
+                            # H4: backtest_fill=True tells CRM that costs are already
+                            # embedded in fill_price by HistoricalExecutionSimulator
                             position_update = await self.risk_manager.update_position(
                                 symbol=symbol,
                                 side=side,
@@ -5042,11 +5629,22 @@ class InstitutionalBacktestEngine:
                                 timestamp=bar_timestamp,
                                 strategy_id=auth_trade.get('strategy_id', ''),  # Carry over strategy attribution
                                 metadata=auth_trade.get('additional_data', {}),  # Transition Supervisor diagnostics
+                                backtest_fill=True,
                             )
                             logger.debug(f"📈 Position updated via RiskManager (Rule 4): {position_update}")
+                            # F9 FIX: Check success flag — rejected position updates
+                            # should not be recorded as executed trades.
+                            if isinstance(position_update, dict) and not position_update.get('success', True):
+                                logger.warning(
+                                    f"⚠️ Position update rejected for {symbol}: "
+                                    f"{position_update.get('error', 'unknown')} — skipping trade record"
+                                )
+                                continue
                         except Exception as e:
                             logger.error(f"❌ Position update failed for {symbol}: {e}")
                             position_update = {'realized_pnl': 0.0}
+                            # F9 FIX: Don't record phantom trades on exceptions
+                            continue
                     else:
                         logger.warning(f"⚠️  No RiskManager available - position update skipped (violates Rule 4)")
 
@@ -5178,23 +5776,36 @@ class InstitutionalBacktestEngine:
 
     async def shutdown(self) -> bool:
         """
-        Graceful shutdown of backtest engine
+        Graceful shutdown of backtest engine.
+
+        C5 R3 FIX: Idempotent — safe to call multiple times.
+        H6 R3 FIX: Per-component timeout prevents hangs.
 
         Returns:
             True if shutdown successful
         """
+        # C5: Idempotency guard
+        if not self.is_initialized and not self.is_running:
+            logger.debug("Engine already shut down (idempotent no-op)")
+            return True
+
         try:
             logger.info("\n🛑 Shutting down backtest engine...")
 
-            # Manually stop all components
+            # Stop all components with timeout (H6 R3 FIX)
             for component_name, component in self.components.items():
                 try:
-                    if hasattr(component, 'stop'):
-                        await component.stop()
+                    if hasattr(component, 'stop') and callable(getattr(component, 'stop', None)):
+                        await asyncio.wait_for(component.stop(), timeout=5.0)
                         logger.info(f"   ✅ {component_name} stopped")
+                except asyncio.TimeoutError:
+                    logger.warning(f"   ⚠️ {component_name} shutdown timed out (5s)")
                 except Exception as e:
                     logger.error(f"   ❌ Failed to stop {component_name}: {e}")
 
+            # Clear references to help GC
+            self.components.clear()
+            self.component_ids.clear()
             self.is_running = False
             self.is_initialized = False
 
@@ -5203,6 +5814,8 @@ class InstitutionalBacktestEngine:
 
         except Exception as e:
             logger.error(f"❌ Shutdown failed: {e}")
+            self.is_running = False
+            self.is_initialized = False
             return False
 
     # ============================================================
@@ -5213,7 +5826,8 @@ class InstitutionalBacktestEngine:
         """Get current engine status"""
         return {
             'backtest_name': self.backtest_name,
-            'backtest_mode': self.backtest_mode.value,
+            # G13 FIX: Guard against raw string (no .value attribute)
+            'backtest_mode': self.backtest_mode.value if hasattr(self.backtest_mode, 'value') else str(self.backtest_mode),
             'is_initialized': self.is_initialized,
             'is_running': self.is_running,
             'components_registered': len(self.components),

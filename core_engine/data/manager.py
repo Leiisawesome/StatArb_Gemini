@@ -890,7 +890,17 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors='coerce')
 
-        # P3-22 Fix: Handle NaNs introduced by coercion
+        # AXIS4 FIX: Inf handling MUST come before NaN handling so that
+        # Inf values are converted to NaN and then caught by ffill/bfill/drop.
+        import numpy as np
+        numeric_cols_present = [c for c in numeric_cols if c in df.columns]
+        if numeric_cols_present:
+            inf_count = np.isinf(df[numeric_cols_present]).sum().sum()
+            if inf_count > 0:
+                self.logger.warning(f"Found {inf_count} Inf values in numeric columns — replacing with NaN")
+                df[numeric_cols_present] = df[numeric_cols_present].replace([np.inf, -np.inf], np.nan)
+
+        # P3-22 Fix: Handle NaNs introduced by coercion (and Inf→NaN above)
         # Forward-fill then backward-fill for OHLC continuity; drop rows still NaN
         price_cols = [c for c in ['open', 'high', 'low', 'close'] if c in df.columns]
         if price_cols:
@@ -908,6 +918,24 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
         # Volume: fill NaN with 0 (missing volume is semantically zero)
         if 'volume' in df.columns:
             df['volume'] = df['volume'].fillna(0)
+
+        # H4 R4 FIX: Check for and remove duplicate timestamps within each symbol.
+        # Duplicates cause incorrect bar iteration and indicator calculations.
+        if 'symbol' in df.columns and 'timestamp' in df.columns:
+            dup_mask = df.duplicated(subset=['symbol', 'timestamp'], keep='last')
+            n_dups = dup_mask.sum()
+            if n_dups > 0:
+                self.logger.warning(
+                    f"Removed {n_dups} duplicate timestamp rows "
+                    f"({n_dups / len(df) * 100:.1f}% of data)"
+                )
+                df = df[~dup_mask].copy()
+        elif 'timestamp' in df.columns:
+            dup_mask = df.duplicated(subset=['timestamp'], keep='last')
+            n_dups = dup_mask.sum()
+            if n_dups > 0:
+                self.logger.warning(f"Removed {n_dups} duplicate timestamp rows")
+                df = df[~dup_mask].copy()
 
         # Sort by symbol and timestamp
         # In bulk replay/backtest, ClickHouse already returns ORDER BY ticker, window_start/timestamp_ns,

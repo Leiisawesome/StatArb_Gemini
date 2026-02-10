@@ -114,6 +114,27 @@ async def run_phase0() -> Dict[str, Any]:
     Returns full results dict for programmatic access.
     """
     from core_engine.data.manager import ClickHouseDataManager
+
+    from .config import END_DATE, START_DATE, UNIVERSE
+
+    logger.info("=" * 80)
+    logger.info("PHASE 0: PROPAGATION BACKSCAN")
+    logger.info("Objective: Detect propagation state -- NOT optimize returns")
+    logger.info(f"Universe: {UNIVERSE}")
+    logger.info(f"Date Range: {START_DATE} to {END_DATE}")
+    logger.info("=" * 80)
+    logger.info("Step 0: Loading and validating data...")
+
+    data_manager = ClickHouseDataManager()
+    await data_manager.initialize()
+    try:
+        return await _run_phase0_core(data_manager)
+    finally:
+        await data_manager.stop()
+
+
+async def _run_phase0_core(data_manager) -> Dict[str, Any]:
+    """Core Phase 0 logic (data_manager lifecycle managed by caller)."""
     from core_engine.data.market_calendar import MarketCalendar
     from core_engine.data.rth_filter import filter_bars_to_rth
 
@@ -154,21 +175,6 @@ async def run_phase0() -> Dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     start_time = time.time()
-
-    logger.info("=" * 80)
-    logger.info("PHASE 0: PROPAGATION BACKSCAN")
-    logger.info("Objective: Detect propagation state -- NOT optimize returns")
-    logger.info(f"Universe: {UNIVERSE}")
-    logger.info(f"Date Range: {START_DATE} to {END_DATE}")
-    logger.info("=" * 80)
-
-    # ═══════════════════════════════════════════
-    # Step 0: Load and validate data
-    # ═══════════════════════════════════════════
-    logger.info("Step 0: Loading and validating data...")
-
-    data_manager = ClickHouseDataManager()
-    await data_manager.initialize()
 
     calendar = MarketCalendar()
     all_data: Dict[str, pd.DataFrame] = {}

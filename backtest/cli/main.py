@@ -202,24 +202,27 @@ Examples:
         print("\n🔧 Initializing backtest engine...")
         engine = InstitutionalBacktestEngine(config=config)
 
-        # Initialize components
-        print("   Initializing components...")
-        init_success = await engine.initialize()
+        try:
+            # Initialize components
+            print("   Initializing components...")
+            init_success = await engine.initialize()
 
-        if not init_success:
-            print("❌ Engine initialization failed")
-            return 1
+            if not init_success:
+                print("❌ Engine initialization failed")
+                return 1
 
-        print("✅ Engine initialized (12/12 components operational)")
+            print("✅ Engine initialized (12/12 components operational)")
 
-        # Run backtest
-        print("\n🚀 Running backtest...")
-        print(f"   Period: {config.start_date} → {config.end_date}")
-        print(f"   Symbols: {', '.join(config.symbols)}")
-        print(f"   Strategies: {len(config.strategies)}")
-        print("")
+            # Run backtest
+            print("\n🚀 Running backtest...")
+            print(f"   Period: {config.start_date} → {config.end_date}")
+            print(f"   Symbols: {', '.join(config.symbols)}")
+            print(f"   Strategies: {len(config.strategies)}")
+            print("")
 
-        results = await engine.run_backtest()
+            results = await engine.run_backtest()
+        finally:
+            await engine.shutdown()
 
         # Display results
         if results['success']:
@@ -426,18 +429,19 @@ Examples:
         return 0
 
     def _load_config_file(self, path: str) -> BacktestConfig:
-        """Load configuration from JSON or YAML file"""
-        import yaml
+        """Load configuration from JSON or YAML file.
 
-        with open(path, 'r') as f:
-            # Support both YAML and JSON formats
-            if path.endswith(('.yaml', '.yml')):
-                config_dict = yaml.safe_load(f)
-            else:
+        YAML files are loaded via load_with_includes (supports `includes:` directive)
+        and optionally converted from papertest schema via load_config adapter (M8 fix).
+        """
+        if path.endswith(('.yaml', '.yml')):
+            from backtest.utils.config_loader import load_config
+            config_dict = load_config(path)
+        else:
+            with open(path, 'r') as f:
                 config_dict = json.load(f)
 
         # Convert to BacktestConfig (CENTRALIZED using core_engine)
-        # BacktestConfig now flattens all nested configs (Rule 1, Section 7)
         return BacktestConfig.from_dict(config_dict)
 
     def _build_config_from_args(self, args: argparse.Namespace) -> BacktestConfig:

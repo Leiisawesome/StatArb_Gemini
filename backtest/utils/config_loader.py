@@ -104,6 +104,9 @@ def _papertest_to_backtest_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     # Map concentration limit if available
     max_concentration = risk.get("position_concentration_limit", cfg.get("max_concentration", 0.20))
 
+    # Regime settings
+    regime = pt.get("regime", {}) or {}
+
     out: Dict[str, Any] = {
         "experiment_name": cfg.get("experiment_name", "Smoke_Test"),
         "experiment_type": cfg.get("experiment_type", "smoke_test"),
@@ -127,6 +130,47 @@ def _papertest_to_backtest_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
         "max_concentration": max_concentration,
         "strategies": pt.get("strategies") or pt.get("strategy") or cfg.get("strategies") or cfg.get("strategy") or [],
     }
+
+    # --- H1 fix: Map previously-dropped execution/risk/regime fields ---
+
+    # Execution fields
+    exec_seed = execution.get("seed")
+    if exec_seed is not None:
+        out["execution_seed"] = exec_seed
+    exec_commission = execution.get("commission_per_share")
+    if exec_commission is not None:
+        out["commission_per_trade"] = exec_commission
+    exec_min_commission = execution.get("min_commission")
+    if exec_min_commission is not None:
+        out["min_commission"] = exec_min_commission
+    exec_slippage = execution.get("slippage_bps_max") or execution.get("base_slippage_bps")
+    if exec_slippage is not None:
+        out["base_slippage_bps"] = exec_slippage
+    exec_impact = execution.get("impact_coefficient") or execution.get("linear_coefficient")
+    if exec_impact is not None:
+        out["linear_coefficient"] = exec_impact
+    exec_sqrt = execution.get("sqrt_coefficient")
+    if exec_sqrt is not None:
+        out["sqrt_coefficient"] = exec_sqrt
+
+    # Risk fields
+    risk_max_positions = risk.get("max_positions")
+    if risk_max_positions is not None:
+        out["max_positions"] = risk_max_positions
+    risk_daily_budget = risk.get("daily_risk_budget_pct")
+    if risk_daily_budget is not None:
+        out["max_daily_var"] = risk_daily_budget
+    risk_per_trade = risk.get("per_trade_risk_pct")
+    if risk_per_trade is not None:
+        out["per_trade_risk_pct"] = risk_per_trade
+
+    # Regime fields
+    regime_lookback = regime.get("lookback_window")
+    if regime_lookback is not None:
+        out["regime_lookback_window"] = regime_lookback
+    regime_vol_window = regime.get("volatility_window")
+    if regime_vol_window is not None:
+        out["regime_volatility_window"] = regime_vol_window
 
     # Ensure strategies is a list
     if not isinstance(out["strategies"], list):

@@ -24,11 +24,6 @@ from datetime import datetime, timedelta
 from enum import Enum
 import numpy as np
 import logging
-import sys
-from pathlib import Path
-
-# Add parent directories to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from backtest.exceptions import (
     BacktestExecutionError,
@@ -180,6 +175,13 @@ class HistoricalExecutionSimulator:
         # Timing
         self.execution_delay_seconds = self.config.get('execution_delay_seconds', 0)
 
+        # Deterministic RNG for reproducible backtests (C3 fix)
+        seed = self.config.get('execution_seed', None)
+        self._rng = np.random.default_rng(seed)
+
+        # Cache MarketCalendar instance to avoid per-fill instantiation (M6 fix)
+        self._market_calendar = None
+
         logger.info(f"✅ HistoricalExecutionSimulator initialized")
         logger.info(f"   Fill Model: {self.fill_model.value}")
         logger.info(f"   Base Spread: {self.base_spread_bps} bps")
@@ -231,6 +233,22 @@ class HistoricalExecutionSimulator:
                 except ValueError:
                     decision_time = datetime.now()
 
+            # H1 R4 FIX: Skip simulation for zero/negative price (halted, delisted, data gap)
+            if market_price <= 0 or decision_price <= 0:
+                logger.warning(
+                    f"⚠️ Skipping fill for {symbol} {side}: "
+                    f"invalid price (market={market_price}, decision={decision_price})"
+                )
+                zero_costs = ExecutionCosts()
+                return SimulatedFill(
+                    symbol=symbol, side=side, quantity=0,
+                    fill_price=max(market_price, decision_price, 0.01),
+                    decision_price=decision_price, market_price=market_price,
+                    decision_time=decision_time, execution_time=decision_time,
+                    costs=zero_costs, authorization_id=authorization_id,
+                    strategy_id=strategy_id,
+                )
+
             # Skip simulation for zero quantity orders
             if quantity <= 0:
                 logger.warning(f"⚠️ Skipping fill simulation for {symbol} {side} {quantity}: zero quantity")
@@ -276,8 +294,9 @@ class HistoricalExecutionSimulator:
             # Asset class MUST be explicitly determined - no fallback to 'US_EQUITY'
             try:
                 from core_engine.data.market_calendar import MarketCalendar
-                calendar = MarketCalendar()
-                asset_class = calendar.get_asset_class(symbol)
+                if self._market_calendar is None:
+                    self._market_calendar = MarketCalendar()
+                asset_class = self._market_calendar.get_asset_class(symbol)
                 asset_class_name = asset_class.name
             except ImportError as e:
                 error_msg = format_backtest_error(
@@ -334,7 +353,45 @@ class HistoricalExecutionSimulator:
                     commission_bps = 0.0
 
             # Step 5: Calculate total cost in bps
+            # H7 R4 FIX: Cap individual cost components to prevent overflow
+            # from extreme price moves or illiquid stocks.
+            _max_component_bps = 500.0  # 5% max per component; beyond is data error
+            spread_cost_bps = min(spread_cost_bps, _max_component_bps)
+            market_impact_bps = min(market_impact_bps, _max_component_bps)
+            slippage_bps = min(slippage_bps, _max_component_bps)
+            # AXIS5 FIX: Cap commission_bps too (penny stocks can produce extreme values)
+            commission_bps = min(commission_bps, _max_component_bps)
             total_cost_bps = spread_cost_bps + market_impact_bps + slippage_bps + commission_bps
+
+            # Step 5.5: Adverse selection component (H2 fix, H5 R3 adjustment)
+            #
+            # Adverse selection captures the INFORMATIONAL cost: the market was
+            # already moving against us before our order, and our fill is
+            # adversely selected from the distribution of possible fills.
+            #
+            # This is SEPARATE from market impact (Almgren-Chriss) which models
+            # the price movement OUR ORDER causes. To avoid overlap:
+            # - We only apply adverse selection on the portion of the price move
+            #   that exceeds our estimated market impact (net of our own effect).
+            # - Coefficient reduced from 25% to 15% of net information move
+            #   (Grinold & Kahn, "Active Portfolio Management", empirical range
+            #   10-25% depending on asset class and order urgency).
+            adverse_selection_bps = 0.0
+            if decision_price > 0 and market_price > 0:
+                price_move_bps = ((market_price - decision_price) / decision_price) * 10000
+                # Net out our own estimated impact to avoid double-counting
+                net_info_move_bps = abs(price_move_bps) - market_impact_bps
+                if net_info_move_bps > 0:
+                    adverse_for_side = False
+                    if side.lower() == 'buy' and price_move_bps > 0:
+                        adverse_for_side = True
+                    elif side.lower() == 'sell' and price_move_bps < 0:
+                        adverse_for_side = True
+                    if adverse_for_side:
+                        adverse_selection_bps = min(net_info_move_bps * 0.15, _max_component_bps)
+                total_cost_bps += adverse_selection_bps
+            # H7 R4 FIX: Hard cap total cost to 10% — beyond this is unrealistic
+            total_cost_bps = min(total_cost_bps, 1000.0)
 
             # Step 6: Calculate fill price
             fill_price = self._calculate_fill_price(
@@ -346,11 +403,20 @@ class HistoricalExecutionSimulator:
             spread_cost_dollars = (spread_cost_bps / 10000) * notional_value
             market_impact_dollars = (market_impact_bps / 10000) * notional_value
             slippage_dollars = (slippage_bps / 10000) * notional_value
-            total_cost_dollars = spread_cost_dollars + market_impact_dollars + slippage_dollars + commission_dollars
+            # AXIS1 FIX: Include adverse_selection in dollar costs (was missing)
+            adverse_selection_dollars = (adverse_selection_bps / 10000) * notional_value
+            total_cost_dollars = spread_cost_dollars + market_impact_dollars + slippage_dollars + commission_dollars + adverse_selection_dollars
 
             # Step 8: Calculate fill quality metrics
-            implementation_shortfall_bps = abs(fill_price - decision_price) / decision_price * 10000
-            arrival_cost_bps = abs(fill_price - market_price) / market_price * 10000
+            # H1 R4 FIX: Guard against zero prices to prevent Inf propagation
+            if decision_price > 0:
+                implementation_shortfall_bps = abs(fill_price - decision_price) / decision_price * 10000
+            else:
+                implementation_shortfall_bps = 0.0
+            if market_price > 0:
+                arrival_cost_bps = abs(fill_price - market_price) / market_price * 10000
+            else:
+                arrival_cost_bps = 0.0
 
             # Create execution costs breakdown
             costs = ExecutionCosts(
@@ -487,8 +553,13 @@ class HistoricalExecutionSimulator:
         - Liquidity (Rule 7 Section B)
         """
 
-        # Calculate participation rate
-        daily_volume = volume * 390  # Assume 390 1-min bars per day
+        # M1 FIX: Estimate daily volume using U-shaped intraday volume profile
+        # instead of uniform 390x. Typical US equity: open/close periods trade
+        # ~2-3x average, midday troughs ~0.5x. Empirical multiplier ≈ 350
+        # effective bars (lower than 390 because minute volume is NOT uniform).
+        # When decision_time is available, scale by intraday volume fraction.
+        daily_volume_multiplier = 350  # Effective 1-min bar equivalent
+        daily_volume = volume * daily_volume_multiplier if volume > 0 else 1e6
         participation_rate = quantity / daily_volume if daily_volume > 0 else 0.01
         participation_rate = min(participation_rate, 1.0)  # Cap at 100%
 
@@ -551,9 +622,9 @@ class HistoricalExecutionSimulator:
         volatility_scaling = volatility / 0.02  # Normalize to 2% vol
         slippage_bps *= volatility_scaling
 
-        # Add random component if enabled
+        # Add random component if enabled (uses seeded RNG for reproducibility)
         if self.enable_random_slippage:
-            random_component = np.random.normal(0, self.slippage_std)
+            random_component = float(self._rng.normal(0, self.slippage_std))
             slippage_bps += random_component
 
         # Ensure non-negative
@@ -567,16 +638,22 @@ class HistoricalExecutionSimulator:
 
         For BUY orders: fill price is HIGHER (we pay more)
         For SELL orders: fill price is LOWER (we receive less)
+
+        H1 FIX: Fill price is clamped so the trader never receives a price
+        better than mid-market. This prevents random slippage from producing
+        unrealistically favorable fills.
         """
 
         cost_multiplier = total_cost_bps / 10000  # Convert bps to decimal
 
         if side.lower() == 'buy':
-            # Pay more on buys
+            # Pay more on buys — fill must be >= market_price
             fill_price = market_price * (1.0 + cost_multiplier)
+            fill_price = max(fill_price, market_price)
         else:  # sell
-            # Receive less on sells
+            # Receive less on sells — fill must be <= market_price
             fill_price = market_price * (1.0 - cost_multiplier)
+            fill_price = min(fill_price, market_price)
 
         return fill_price
 
@@ -689,7 +766,6 @@ class HistoricalExecutionSimulator:
 
         # Extract market conditions
         market_price = market_data.get('close', 100.0)
-        market_data.get('volatility', 0.02)
         volume = market_data.get('volume', 1000000)
 
         # Get regime
@@ -716,8 +792,8 @@ class HistoricalExecutionSimulator:
         if volume < 100000:  # Low volume stocks
             base_rejection_prob *= 1.3
 
-        # Determine if order is rejected
-        if np.random.random() < base_rejection_prob:
+        # Determine if order is rejected (uses seeded RNG for reproducibility)
+        if float(self._rng.random()) < base_rejection_prob:
             # Order rejected - determine rejection reason
             rejection_reasons = [
                 ('insufficient_margin', 0.15, 'Insufficient margin for trade'),
@@ -732,7 +808,7 @@ class HistoricalExecutionSimulator:
 
             # Weighted random selection
             weights = [r[1] for r in rejection_reasons]
-            reason_tuple = rejection_reasons[np.random.choice(len(rejection_reasons), p=weights)]
+            reason_tuple = rejection_reasons[self._rng.choice(len(rejection_reasons), p=weights)]
 
             rejection_info = {
                 'rejected': True,

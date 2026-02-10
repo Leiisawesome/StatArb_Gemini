@@ -25,6 +25,7 @@ from backtest.experiments.base_experiment import BaseExperiment, ExperimentResul
 from backtest.engine.institutional_backtest_engine import InstitutionalBacktestEngine
 from core_engine.config import BacktestConfig
 from backtest.utils.paths import backtest_results_dir
+from backtest.utils import trade_timestamp_key
 import numpy as np
 
 class SmokeTest(BaseExperiment):
@@ -62,14 +63,15 @@ class SmokeTest(BaseExperiment):
                 # Initialize engine (ORCHESTRATION ONLY - no logic re-implementation)
                 self.logger.info("   Initializing InstitutionalBacktestEngine...")
                 engine = InstitutionalBacktestEngine(backtest_config)
-                await engine.initialize()
+                try:
+                    await engine.initialize()
 
-                # Run backtest (black box)
-                self.logger.info("   Running backtest...")
-                engine_results = await engine.run_backtest()
-
-                # Shutdown engine to release resources (Rule 1 compliance)
-                await engine.shutdown()
+                    # Run backtest (black box)
+                    self.logger.info("   Running backtest...")
+                    engine_results = await engine.run_backtest()
+                finally:
+                    # Shutdown engine to release resources (Rule 1 compliance)
+                    await engine.shutdown()
 
             # Extract metrics
             duration = time.time() - start_time
@@ -180,7 +182,12 @@ class SmokeTest(BaseExperiment):
         experiment_name: str,
         strategies: List[Dict[str, Any]],
     ) -> Dict[str, Any]:
-        """Run each strategy in isolation and aggregate results additively."""
+        """Run each strategy in isolation and aggregate results proportionally.
+
+        H3 FIX: Each strategy receives capital proportional to its allocation_pct
+        (defaults to equal split). Combined returns are weighted accordingly,
+        preventing the unrealistic scenario of 100% capital per strategy.
+        """
         external_configs = self.config.get('external_strategy_configs', []) or []
         if external_configs:
             return await self._run_external_config_backtests(experiment_name, external_configs)
@@ -201,27 +208,48 @@ class SmokeTest(BaseExperiment):
         initial_capital = float(self.config.get('initial_capital', 100000))
         bars_processed = 0
 
+        # H3 FIX: Compute capital allocation weights
+        total_alloc = sum(s.get('allocation_pct', 1.0 / len(strategies)) for s in strategies)
+
+        # C7 R3 FIX: Validate allocation sums to ~1.0 when explicitly set
+        has_explicit_alloc = any('allocation_pct' in s for s in strategies)
+        if has_explicit_alloc and abs(total_alloc - 1.0) > 0.05:
+            self.logger.warning(
+                f"⚠️ allocation_pct values sum to {total_alloc:.3f} (expected ~1.0). "
+                f"Capital will be normalized but results may not match expectations."
+            )
+
         for idx, strategy in enumerate(strategies, start=1):
             strategy_name = strategy.get('name', f"strategy_{idx}")
             isolated_name = f"{experiment_name}_{strategy_name}"
 
+            # H3 FIX: Allocate capital proportionally
+            alloc_pct = strategy.get('allocation_pct', 1.0 / len(strategies))
+            strategy_capital = initial_capital * (alloc_pct / total_alloc)
+
             run_config = dict(self.config)
             run_config['experiment_name'] = isolated_name
             run_config['strategies'] = [strategy]
+            run_config['initial_capital'] = strategy_capital
 
             backtest_config = self._create_backtest_config(run_config)
 
             self.logger.info(f"   ▶️  Isolated run: {strategy_name}")
             engine = InstitutionalBacktestEngine(backtest_config)
-            await engine.initialize()
-            engine_results = await engine.run_backtest()
-            await engine.shutdown()
+            try:
+                await engine.initialize()
+                engine_results = await engine.run_backtest()
+            finally:
+                await engine.shutdown()
 
             run_summary = (engine_results.get('summary') or {}) if engine_results else {}
             run_metrics = self._extract_performance_metrics(engine_results or {})
 
+            # H3 FIX: Weight return by allocation fraction so combined return
+            # reflects actual capital deployment (not 100% per strategy).
+            alloc_weight = alloc_pct / total_alloc
             run_total_return = run_summary.get('total_return', run_metrics['total_return_pct'] / 100.0)
-            total_return += run_total_return
+            total_return += run_total_return * alloc_weight
 
             run_total_trades = run_summary.get('total_trades', run_metrics['total_trades'])
             total_trades += int(run_total_trades or 0)
@@ -237,9 +265,10 @@ class SmokeTest(BaseExperiment):
             max_drawdown = max(max_drawdown, float(run_max_dd))
 
             run_sharpe = run_summary.get('sharpe_ratio', run_metrics['sharpe_ratio']) or 0.0
-            if run_total_trades and run_total_trades > 0:
-                sharpe_weighted_sum += float(run_sharpe) * float(run_total_trades)
-                sharpe_weight += float(run_total_trades)
+            # G6 FIX: Weight Sharpe by capital allocation, not trade count.
+            # Trade-count weighting biases toward high-turnover strategies.
+            sharpe_weighted_sum += float(run_sharpe) * alloc_weight
+            sharpe_weight += alloc_weight
 
             run_execution_history = engine_results.get('execution_history', []) if engine_results else []
             for trade in run_execution_history:
@@ -258,19 +287,8 @@ class SmokeTest(BaseExperiment):
         hypothesis_tests = self._compute_hypothesis_tests(isolated_runs)
         oos_validation = self._compute_oos_validation(isolated_runs)
 
-        # Sort by timestamp for deterministic trade list output
-        def _trade_ts_key(trade: Dict[str, Any]):
-            ts = trade.get('timestamp')
-            if isinstance(ts, datetime):
-                return ts
-            if isinstance(ts, str):
-                try:
-                    return datetime.fromisoformat(ts.replace('Z', '+00:00'))
-                except Exception:
-                    return ts
-            return ts
-
-        combined_execution_history.sort(key=_trade_ts_key)
+        # Sort by timestamp for deterministic trade list output (M4 fix — use shared utility)
+        combined_execution_history.sort(key=trade_timestamp_key)
 
         combined_final_capital = initial_capital + (initial_capital * total_return)
         combined_win_rate = (winning_trades / total_trades) if total_trades > 0 else 0.0
@@ -323,7 +341,12 @@ class SmokeTest(BaseExperiment):
         return returns
 
     def _paired_t_test(self, a: List[float], b: List[float]) -> Dict[str, Any]:
-        """Paired t-test with normal approximation fallback."""
+        """Paired t-test using proper t-distribution (not normal approximation).
+
+        F13 FIX: The normal approximation inflates significance for small
+        samples (n < 30). Using scipy's t-distribution with (n-1) degrees
+        of freedom gives the correct p-value.
+        """
         n = min(len(a), len(b))
         if n < 2:
             return {"p_value": None, "t_stat": None, "n": n}
@@ -333,8 +356,13 @@ class SmokeTest(BaseExperiment):
         if std_diff == 0:
             return {"p_value": 1.0, "t_stat": 0.0, "n": n}
         t_stat = mean_diff / (std_diff / np.sqrt(n))
-        # Normal approximation for p-value
-        p_value = float(2.0 * (1.0 - 0.5 * (1.0 + np.math.erf(abs(t_stat) / np.sqrt(2)))))
+        # Use t-distribution with n-1 degrees of freedom
+        try:
+            from scipy import stats as sp_stats
+            p_value = float(2.0 * sp_stats.t.sf(abs(t_stat), df=n - 1))
+        except ImportError:
+            # Fallback: normal approximation if scipy unavailable
+            p_value = float(2.0 * (1.0 - 0.5 * (1.0 + np.math.erf(abs(t_stat) / np.sqrt(2)))))
         return {"p_value": p_value, "t_stat": float(t_stat), "n": n}
 
     def _compute_hypothesis_tests(self, isolated_runs: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -409,15 +437,22 @@ class SmokeTest(BaseExperiment):
             backtest_config = self._create_backtest_config(cfg)
 
             engine = InstitutionalBacktestEngine(backtest_config)
-            await engine.initialize()
-            engine_results = await engine.run_backtest()
-            await engine.shutdown()
+            try:
+                await engine.initialize()
+                engine_results = await engine.run_backtest()
+            finally:
+                await engine.shutdown()
 
             run_summary = (engine_results.get('summary') or {}) if engine_results else {}
             run_metrics = self._extract_performance_metrics(engine_results or {})
 
+            # G7 FIX: Weight returns/Sharpe by equal allocation (1/N) for external configs,
+            # matching the isolated-strategy path. Without this, summing raw returns
+            # from N configs each using 100% capital overstates combined performance.
+            _ext_alloc_weight = 1.0 / len(config_paths)
+
             run_total_return = run_summary.get('total_return', run_metrics['total_return_pct'] / 100.0)
-            total_return += run_total_return
+            total_return += run_total_return * _ext_alloc_weight
 
             run_total_trades = run_summary.get('total_trades', run_metrics['total_trades'])
             total_trades += int(run_total_trades or 0)
@@ -433,9 +468,9 @@ class SmokeTest(BaseExperiment):
             max_drawdown = max(max_drawdown, float(run_max_dd))
 
             run_sharpe = run_summary.get('sharpe_ratio', run_metrics['sharpe_ratio']) or 0.0
-            if run_total_trades and run_total_trades > 0:
-                sharpe_weighted_sum += float(run_sharpe) * float(run_total_trades)
-                sharpe_weight += float(run_total_trades)
+            # G6/G7 FIX: Weight by allocation, not trade count
+            sharpe_weighted_sum += float(run_sharpe) * _ext_alloc_weight
+            sharpe_weight += _ext_alloc_weight
 
             run_execution_history = engine_results.get('execution_history', []) if engine_results else []
             for trade in run_execution_history:
@@ -451,18 +486,7 @@ class SmokeTest(BaseExperiment):
                 'metrics': run_metrics,
             })
 
-        def _trade_ts_key(trade: Dict[str, Any]):
-            ts = trade.get('timestamp')
-            if isinstance(ts, datetime):
-                return ts
-            if isinstance(ts, str):
-                try:
-                    return datetime.fromisoformat(ts.replace('Z', '+00:00'))
-                except Exception:
-                    return ts
-            return ts
-
-        combined_execution_history.sort(key=_trade_ts_key)
+        combined_execution_history.sort(key=trade_timestamp_key)
 
         combined_final_capital = initial_capital + (initial_capital * total_return)
         combined_win_rate = (winning_trades / total_trades) if total_trades > 0 else 0.0

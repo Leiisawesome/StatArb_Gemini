@@ -159,6 +159,18 @@ class BacktestConfig:
     output_directory: str = "backtest_results"
     save_intermediate_results: bool = False
 
+    # Execution simulator settings
+    execution_seed: Optional[int] = None
+    """Random seed for execution simulator (slippage, rejections). None = non-deterministic."""
+    regime_lookback_window: int = 60
+    """Lookback window for regime detection."""
+    regime_volatility_window: int = 20
+    """Volatility window for regime detection."""
+    circuit_breaker_daily_loss_limit: float = -0.02
+    """Daily loss limit for circuit breaker (negative decimal, e.g. -0.02 = -2%)."""
+    circuit_breaker_drawdown_limit: float = -0.05
+    """Max drawdown limit for circuit breaker (negative decimal, e.g. -0.05 = -5%)."""
+
     # Performance settings
     parallel_execution: bool = False
     max_workers: int = 4
@@ -188,8 +200,11 @@ class BacktestConfig:
             except ValueError as e:
                 errors.append(f"Invalid date format: {e}")
 
-        # Validate interval
-        if self.interval not in ["1min", "5min", "15min", "30min", "1H", "1D"]:
+        # G12 FIX: Normalize interval to lowercase before validation.
+        # The data manager only handles lowercase ("1h", "1d") so accepting
+        # "1H"/"1D" in validation but not in query building causes runtime errors.
+        self.interval = self.interval.lower() if isinstance(self.interval, str) else self.interval
+        if self.interval not in ["1min", "5min", "15min", "30min", "1h", "1d"]:
             errors.append(f"Invalid interval: {self.interval}")
 
         # Validate warmup bars

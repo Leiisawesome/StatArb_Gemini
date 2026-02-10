@@ -1635,7 +1635,8 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
             if request.current_price <= 0:
                 raise ConfigurationRequiredError("Current price must be provided for risk calculation")
             price = request.current_price
-            position_impact = (request.quantity * price) / self.portfolio_value
+            # AXIS1 FIX: Guard against zero portfolio_value
+            position_impact = (request.quantity * price) / self.portfolio_value if self.portfolio_value > 0 else 1.0
 
             # Adjust for volatility
             volatility_adjustment = max(1.0, request.volatility_estimate)
@@ -1666,7 +1667,8 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
                 raise ConfigurationRequiredError("Current price must be provided for risk calculation")
             price = request.current_price
             position_value = abs(new_position * price)
-            position_pct = position_value / self.portfolio_value
+            # AXIS1 FIX: Guard against zero portfolio_value
+            position_pct = position_value / self.portfolio_value if self.portfolio_value > 0 else 1.0
 
             # Use small tolerance for floating point comparisons (Rule 3)
             # This prevents rejections due to tiny precision errors (e.g. 10.000000000000001% > 10.0%)
@@ -1696,7 +1698,8 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
                 raise ConfigurationRequiredError("Current price must be provided for risk calculation")
             price = request.current_price
             position_value = abs(new_position * price)
-            concentration = position_value / self.portfolio_value
+            # AXIS1 FIX: Guard against zero portfolio_value
+            concentration = position_value / self.portfolio_value if self.portfolio_value > 0 else 1.0
 
             # Use small tolerance for floating point comparisons (Rule 3)
             tolerance = 1e-6
@@ -1879,7 +1882,13 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
                                    f"available {max_sellable:.2f}, authorized {max_sellable:.2f}")
                         authorized_qty = max_sellable
 
-            # Apply risk-based adjustment
+            # F6 FIX: Skip risk/regime/vol/confidence scaling for exits.
+            # Exit signals should close the full position — scaling them down
+            # leaves residual positions that drift with no active management.
+            if request.decision_type == TradingDecisionType.POSITION_EXIT:
+                return max(0.0, authorized_qty)
+
+            # Apply risk-based adjustment (entries only)
             if risk_impact > self.config.auto_approval_threshold:
                 # Reduce quantity for higher risk
                 risk_reduction = min(0.5, (risk_impact - self.config.auto_approval_threshold) * 2)
@@ -2180,7 +2189,8 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
 
         try:
             # Check position limits
-            position_pct = abs(new_position * 100.0) / self.portfolio_value  # Assuming $100/share
+            # AXIS1 FIX: Guard against zero portfolio_value
+            position_pct = abs(new_position * 100.0) / self.portfolio_value if self.portfolio_value > 0 else 1.0
 
             if position_pct > self.config.max_position_size:
                 logger.warning(f"⚠️ Position limit breach: {symbol} at {position_pct:.2f}% "
@@ -2197,7 +2207,7 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
         except Exception as e:
             logger.error(f"Post-execution risk check failed: {e}")
 
-    async def update_position(self, symbol: str, side: str, quantity: float, price: float = 0.0, timestamp: Optional[datetime] = None, strategy_id: str = "", metadata: Optional[Dict[str, Any]] = None):
+    async def update_position(self, symbol: str, side: str, quantity: float, price: float = 0.0, timestamp: Optional[datetime] = None, strategy_id: str = "", metadata: Optional[Dict[str, Any]] = None, **kwargs):
         """
         Update position with comprehensive cash tracking (Phase 10 per Rule 7.3)
 
@@ -2230,8 +2240,15 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
                 from decimal import Decimal
                 from core_engine.trading.position_book import Fill, FillSide
 
-                # Calculate commission (same logic as legacy path)
-                commission = max(1.0, quantity * price * 0.00005)
+                # F3 FIX: Respect backtest_fill flag — when True, the
+                # HistoricalExecutionSimulator has already embedded all costs
+                # (spread, impact, slippage, commission) into fill_price.
+                # Applying commission again double-counts.
+                is_backtest_fill = kwargs.get('backtest_fill', False)
+                if is_backtest_fill:
+                    commission = 0.0
+                else:
+                    commission = max(1.0, quantity * price * 0.00005)
 
                 # Convert side string to enum
                 fill_side = FillSide.BUY if side.lower() == 'buy' else FillSide.SELL
@@ -2311,15 +2328,21 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
             current_position = self.current_positions.get(symbol, 0.0)
             previous_cash = self.available_cash
 
-            # AUDIT FIX #2: Calculate transaction costs (commission + slippage)
-            # Commission: $1.00 per trade (retail typical) or 0.50 bps minimum
-            commission = max(1.0, quantity * price * 0.00005)  # Greater of $1 or 0.50 bps
-
-            # Slippage: Already included in fill price (from adverse selection)
-            # But add explicit tracking for analytics
-            # Typical: 0.50-1.00 bps for TSLA
-            slippage_bps = 0.5  # Already applied in fill price, just tracking here
-            slippage_cost = quantity * price * (slippage_bps / 10000)
+            # H4 COST OWNERSHIP BOUNDARY:
+            # In backtest mode, the HistoricalExecutionSimulator has ALREADY
+            # embedded all transaction costs (spread, impact, slippage, commission)
+            # into the fill_price. The price passed here IS the cost-adjusted fill.
+            # Therefore, we set transaction_cost = 0 in backtest mode to avoid
+            # double-counting. In live/paper mode, the broker fill price is the
+            # raw fill and costs must be deducted separately.
+            is_backtest_fill = kwargs.get('backtest_fill', False)
+            if is_backtest_fill:
+                commission = 0.0
+                slippage_cost = 0.0
+            else:
+                commission = max(1.0, quantity * price * 0.00005)  # Greater of $1 or 0.50 bps
+                slippage_bps = 0.5
+                slippage_cost = quantity * price * (slippage_bps / 10000)
 
             total_transaction_cost = commission + slippage_cost
 
@@ -2328,6 +2351,40 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
                 new_position = current_position + quantity
                 cash_change = -(quantity * price)  # Cash decreases for purchase
                 cash_change -= total_transaction_cost  # Subtract transaction costs
+
+                # H4 R3 FIX + C2 R4 FIX: Cash balance gate.
+                # If covering a short, only the EXCESS portion (going long beyond
+                # the cover) requires cash. A pure cover frees margin, not spends cash.
+                is_covering_short = current_position < 0
+                if is_covering_short:
+                    cover_qty = min(quantity, abs(current_position))
+                    excess_long_qty = quantity - cover_qty
+                    if excess_long_qty > 0:
+                        # AXIS3 FIX: The FULL trade costs cash = quantity * price + costs.
+                        # The cover portion costs cover_qty * price in cash outflow.
+                        # The excess portion costs excess_long_qty * price.
+                        # Validate the TOTAL won't make cash negative.
+                        if (self.available_cash + cash_change) < 0:
+                            logger.warning(
+                                f"❌ BUY REJECTED: {symbol} {quantity} @ ${price:.2f} — "
+                                f"covers {cover_qty} short + excess {excess_long_qty} long "
+                                f"total cash impact ${cash_change:,.2f} exceeds "
+                                f"available ${self.available_cash:,.2f}"
+                            )
+                            return {
+                                'success': False,
+                                'error': f'Insufficient cash for cover+long reversal'
+                            }
+                elif (self.available_cash + cash_change) < 0:
+                    logger.warning(
+                        f"❌ BUY REJECTED: {symbol} {quantity} @ ${price:.2f} — "
+                        f"insufficient cash (${self.available_cash:,.2f} + ${cash_change:,.2f} < 0)"
+                    )
+                    return {
+                        'success': False,
+                        'error': f'Insufficient cash: need ${abs(cash_change):,.2f}, have ${self.available_cash:,.2f}'
+                    }
+
                 self.available_cash += cash_change
 
                 logger.info(
@@ -2392,29 +2449,84 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
             # Update portfolio metrics
             self._update_portfolio_metrics()
 
-            # Sprint 1: Update P&L tracking (GAP 4-5)
+            # C4 R3 FIX: Compute realized P&L for the legacy path (no PositionBook).
+            # Logic: closing or reducing a position realizes P&L. Opening increases
+            # the cost basis. Direction is inferred from current_position sign.
+            realized_pnl = 0.0
+            is_closing = False
+            if side.lower() == 'buy' and current_position < 0:
+                # Buying to cover a short — this is a close
+                close_qty = min(quantity, abs(current_position))
+                avg_entry = getattr(self, '_avg_entry_prices', {}).get(symbol, price)
+                realized_pnl = close_qty * (avg_entry - price)  # Short P&L: entry - exit
+                is_closing = True
+            elif side.lower() == 'sell' and current_position > 0:
+                # Selling a long — this is a close
+                close_qty = min(quantity, current_position)
+                avg_entry = getattr(self, '_avg_entry_prices', {}).get(symbol, price)
+                realized_pnl = close_qty * (price - avg_entry)  # Long P&L: exit - entry
+                is_closing = True
+
+            # Update average entry price for new/increased positions
+            if not hasattr(self, '_avg_entry_prices'):
+                self._avg_entry_prices = {}
+
+            if not is_closing:
+                # Opening or adding to position — update avg entry
+                existing_qty = abs(current_position)
+                existing_entry = self._avg_entry_prices.get(symbol, 0.0)
+                total_qty = existing_qty + quantity
+                if total_qty > 0:
+                    self._avg_entry_prices[symbol] = (
+                        (existing_entry * existing_qty + price * quantity) / total_qty
+                    )
+            elif abs(new_position) < 1e-9:
+                # Fully closed — remove entry price
+                self._avg_entry_prices.pop(symbol, None)
+            elif (current_position > 0 and new_position < 0) or \
+                 (current_position < 0 and new_position > 0):
+                # C1 R4 FIX: Position REVERSED (long→short or short→long).
+                # The closing leg P&L was already computed above.
+                # Now track the entry price for the NEW direction at current price.
+                self._avg_entry_prices[symbol] = price
+
+            # AXIS3 FIX: pnl_tracker integration with correct quantities.
+            # For reversals, close the old leg with close_qty, then open the new leg.
+            _strategy_id = kwargs.get('strategy_id', None)
             if hasattr(self, 'pnl_tracker') and self.pnl_tracker:
                 try:
-                    # Determine if this is entry or close
-                    if side.lower() == 'buy':
-                        # Position entry (buy)
+                    if is_closing:
+                        # Use close_qty (not full quantity) — the actual closed portion
+                        _close_qty = close_qty if close_qty > 0 else quantity
+                        await self.pnl_tracker.update_position_close(
+                            symbol=symbol,
+                            quantity=_close_qty,
+                            exit_price=price,
+                            strategy_id=_strategy_id,
+                            timestamp=timestamp
+                        )
+                        # For reversals, also record the opening leg of the new direction
+                        _is_reversal = (
+                            (current_position > 0 and new_position < 0) or
+                            (current_position < 0 and new_position > 0)
+                        )
+                        if _is_reversal and abs(new_position) > 1e-9:
+                            await self.pnl_tracker.update_position_entry(
+                                symbol=symbol,
+                                quantity=abs(new_position),
+                                entry_price=price,
+                                strategy_id=_strategy_id,
+                                timestamp=timestamp
+                            )
+                    else:
                         await self.pnl_tracker.update_position_entry(
                             symbol=symbol,
                             quantity=quantity,
                             entry_price=price,
-                            strategy_id=None,  # Would come from authorization metadata
+                            strategy_id=_strategy_id,
                             timestamp=timestamp
                         )
-                    elif side.lower() == 'sell':
-                        # Position close (sell)
-                        await self.pnl_tracker.update_position_close(
-                            symbol=symbol,
-                            quantity=quantity,
-                            exit_price=price,
-                            strategy_id=None,  # Would come from authorization metadata
-                            timestamp=timestamp
-                        )
-                    logger.debug(f"✅ P&L tracker updated for {symbol} (Sprint 1)")
+                    logger.debug(f"✅ P&L tracker updated for {symbol}")
                 except Exception as e:
                     logger.warning(f"⚠️ P&L tracker update failed: {e}")
 
@@ -2434,7 +2546,8 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
                 'cash_change': cash_change,
                 'available_cash': self.available_cash,
                 'portfolio_value': self.portfolio_value,
-                'timestamp': timestamp
+                'timestamp': timestamp,
+                'realized_pnl': realized_pnl,  # C4 R3 FIX: always present
             }
 
         except Exception as e:

@@ -184,8 +184,10 @@ class WalkForwardAnalysis(BaseExperiment):
             train_start = current_start
             train_end = train_start + timedelta(days=train_days)
 
-            # Testing period
-            test_start = train_end
+            # F5 FIX: Insert a 1-day gap between train and test to prevent
+            # data leakage. train_end == test_start means the last training
+            # bar and first test bar can share the same calendar day.
+            test_start = train_end + timedelta(days=1)
             test_end = test_start + timedelta(days=test_days)
 
             # Check if we exceed overall end date
@@ -234,6 +236,7 @@ class WalkForwardAnalysis(BaseExperiment):
             for key in ['walk_forward', 'parameter_grid', 'experiment_name', 'experiment_type', 'log_level', 'save_trade_log', 'save_regime_log']:
                 config_dict.pop(key, None)
 
+            engine = None
             try:
                 # Run backtest
                 engine = InstitutionalBacktestEngine(BacktestConfig(**config_dict))
@@ -250,6 +253,15 @@ class WalkForwardAnalysis(BaseExperiment):
             except Exception as e:
                 self.logger.warning(f"       Optimization failed for {params}: {e}")
                 continue
+            finally:
+                # G5 FIX: Shutdown engine to release ClickHouse connections and memory.
+                # Without this, a grid search over N combinations * M windows leaks
+                # N*M database sessions.
+                if engine is not None:
+                    try:
+                        await engine.shutdown()
+                    except Exception:
+                        pass
 
         return best_params
 
@@ -276,17 +288,24 @@ class WalkForwardAnalysis(BaseExperiment):
 
         # Run backtest
         engine = InstitutionalBacktestEngine(BacktestConfig(**config_dict))
-        await engine.initialize()
-        result = await engine.run_backtest()
+        try:
+            await engine.initialize()
+            result = await engine.run_backtest()
 
-        # Extract metrics
-        performance = result.get('performance', {})
-        return {
-            'total_return_pct': performance.get('total_return_pct', 0.0),
-            'sharpe_ratio': performance.get('sharpe_ratio', 0.0),
-            'max_drawdown_pct': performance.get('max_drawdown_pct', 0.0),
-            'total_trades': performance.get('total_trades', 0)
-        }
+            # Extract metrics
+            performance = result.get('performance', {})
+            return {
+                'total_return_pct': performance.get('total_return_pct', 0.0),
+                'sharpe_ratio': performance.get('sharpe_ratio', 0.0),
+                'max_drawdown_pct': performance.get('max_drawdown_pct', 0.0),
+                'total_trades': performance.get('total_trades', 0)
+            }
+        finally:
+            # G5 FIX: Release engine resources after test period too.
+            try:
+                await engine.shutdown()
+            except Exception:
+                pass
 
     def _calculate_grid_size(self, param_grid: Dict[str, List]) -> int:
         """Calculate total combinations in grid"""

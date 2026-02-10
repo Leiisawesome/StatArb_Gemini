@@ -114,8 +114,10 @@ def validate_market_data_bar(
         volatility = bar['volatility']
         if not isinstance(volatility, (int, float)):
             validation_errors.append(f"volatility: wrong type (expected number, got {type(volatility).__name__})")
-        elif not (0 < volatility < 1):
-            validation_errors.append(f"volatility: out of range ({volatility} not in (0, 1))")
+        elif volatility < 0:
+            # Only reject negative volatility; realized vol > 100% is legitimate for
+            # crypto and distressed equities (M10 fix — was 0 < vol < 1).
+            validation_errors.append(f"volatility: invalid value ({volatility} < 0)")
 
     # Timestamp validation
     if 'timestamp' in bar:
@@ -216,14 +218,21 @@ def validate_signal(
         target_weight = signal['target_weight']
         if not isinstance(target_weight, (int, float)):
             validation_errors.append(f"target_weight: wrong type (expected number, got {type(target_weight).__name__})")
-        elif not (0.0 <= target_weight <= 1.0):
-            validation_errors.append(f"target_weight: out of range ({target_weight} not in [0.0, 1.0])")
+        elif not (-1.0 <= target_weight <= 1.0):
+            # Allow negative weights for short signals (M10 fix — was [0, 1])
+            validation_errors.append(f"target_weight: out of range ({target_weight} not in [-1.0, 1.0])")
 
-    # Validate signal type
+    # Validate signal type (M10 fix + R3 fix: case-insensitive, full signal type set)
     if 'signal' in signal:
-        valid_signals = ['BUY', 'SELL', 'HOLD', 'CLOSE']
-        if signal['signal'] not in valid_signals:
-            validation_errors.append(f"signal: invalid value ('{signal['signal']}' not in {valid_signals})")
+        valid_signals = {
+            'buy', 'sell', 'hold', 'close',
+            'long_entry', 'long_exit', 'short_entry', 'short_exit',
+            'short_sell', 'short', 'cover', 'flatten',
+            'close_long', 'close_short',
+        }
+        sig_lower = str(signal['signal']).lower()
+        if sig_lower not in valid_signals:
+            validation_errors.append(f"signal: invalid value ('{signal['signal']}' not in {sorted(valid_signals)})")
 
     if validation_errors:
         error_msg = format_backtest_error(
