@@ -177,6 +177,7 @@ class InstitutionalBacktestEngine:
         # Phase 5 components (Execution)
         self.trading_engine = None     # BRICK #9a (order=30)
         self.execution_engine = None   # BRICK #9b (order=40)
+        self.order_management_system = None  # P4: Optional OMS for path parity
 
         # Phase 6 components (Analytics)
         self.metrics_calculator = None # BRICK #10 (order=32)
@@ -3248,6 +3249,18 @@ class InstitutionalBacktestEngine:
         if not self.is_initialized:
             raise RuntimeError("Engine not initialized. Call initialize() first.")
 
+        # Pre-share execution cost parameters with CRM for Gate 6 cost alignment.
+        # Must happen before any signal processing (i.e., before simulate_execution
+        # creates the HistoricalExecutionSimulator).
+        if hasattr(self, 'risk_manager') and self.risk_manager is not None:
+            self.risk_manager._exec_sim_config = {
+                'base_spread_bps': getattr(self.config, 'base_spread_bps', 5.0),
+                'base_slippage_bps': getattr(self.config, 'base_slippage_bps', 2.0),
+                'commission_per_share': getattr(self.config, 'commission_per_trade', 0.005),
+                'impact_linear_coeff': getattr(self.config, 'linear_coefficient', 0.1),
+                'impact_sqrt_coeff': getattr(self.config, 'sqrt_coefficient', 0.5),
+            }
+
         try:
             start_time = datetime.now()
             self.is_running = True
@@ -4067,26 +4080,70 @@ class InstitutionalBacktestEngine:
                     regime_result = None
 
             # ================================================================
-            # EOD GUARD: Skip all signal execution and generation after EOD liquidation
+            # EOD GUARD: Skip all signal execution and generation at/after EOD
             # ================================================================
-            # Once EOD liquidation has fired for today, no new trades should be opened.
-            # This prevents the bug where a signal generated on the EOD bar (or the bar
-            # immediately after) opens a new position that won't be closed until next day.
+            # Two checks:
+            #   1. _eod_flags already set (EOD liquidation already fired today)
+            #   2. PROACTIVE: current bar time >= eod_close_time for ANY strategy
+            #      This catches pending signals from bar N-1 that would execute
+            #      at bar N (the EOD bar) BEFORE _check_eod_liquidation fires.
             _eod_guard_active = False
+            _ts_for_eod = pd.Timestamp(timestamp)
+            if _ts_for_eod.tzinfo is not None:
+                _ts_for_eod = _ts_for_eod.tz_convert('America/New_York')
+
+            # Check 1: _eod_flags already set
             if hasattr(self, '_eod_flags'):
-                _ts_for_eod = pd.Timestamp(timestamp)
-                if _ts_for_eod.tzinfo is not None:
-                    _ts_for_eod = _ts_for_eod.tz_convert('America/New_York')
                 _eod_key_guard = f"eod_liquidated_{_ts_for_eod.date()}"
                 if self._eod_flags.get(_eod_key_guard, False):
                     _eod_guard_active = True
-                    # Discard any pending signals — they were generated before/during EOD
-                    if self.pending_signals:
+
+            # Check 2: Proactive time-based guard — if current bar >= earliest
+            # EOD close time across all strategies, block new entries.
+            if not _eod_guard_active:
+                try:
+                    _current_mins = _ts_for_eod.hour * 60 + _ts_for_eod.minute
+                    # Find the earliest eod_close_time across all strategies
+                    _earliest_eod_mins = None
+                    if hasattr(self.config, 'strategies') and self.config.strategies:
+                        for strat in self.config.strategies:
+                            strat_params = strat.get('parameters', {}) if isinstance(strat, dict) else {}
+                            if strat_params.get('enable_eod_liquidation', False):
+                                _eod_str = strat_params.get('eod_close_time', '15:55')
+                                _h, _m = map(int, _eod_str.split(':'))
+                                _eod_mins = _h * 60 + _m
+                                if _earliest_eod_mins is None or _eod_mins < _earliest_eod_mins:
+                                    _earliest_eod_mins = _eod_mins
+
+                    if _earliest_eod_mins is not None and _current_mins >= _earliest_eod_mins:
+                        _eod_guard_active = True
                         logger.debug(
-                            f"⏰ EOD guard: Discarding {len(self.pending_signals)} pending signals "
-                            f"after EOD liquidation at {timestamp}"
+                            f"⏰ EOD proactive guard: bar {_ts_for_eod.strftime('%H:%M')} >= "
+                            f"eod_close_time {_earliest_eod_mins // 60}:{_earliest_eod_mins % 60:02d}"
                         )
-                        self.pending_signals = []
+                except Exception:
+                    pass  # Non-fatal — fall through to flag-based guard
+
+            if _eod_guard_active and self.pending_signals:
+                # Filter: discard ENTRY pending signals; keep EXIT signals
+                _kept = []
+                _discarded = 0
+                for sig in self.pending_signals:
+                    _sig_type = str(sig.get('signal_type', sig.get('side', ''))).lower()
+                    _is_exit = sig.get('is_exit', False) or _sig_type in (
+                        'sell', 'long_exit', 'short_exit', 'close', 'close_long',
+                        'close_short', 'cover', 'flatten',
+                    )
+                    if _is_exit:
+                        _kept.append(sig)
+                    else:
+                        _discarded += 1
+                if _discarded > 0:
+                    logger.debug(
+                        f"⏰ EOD guard: Discarding {_discarded} entry pending signals "
+                        f"at {timestamp} (kept {len(_kept)} exits)"
+                    )
+                self.pending_signals = _kept
 
             # ================================================================
             # PT-style sequencing: execute prior-bar pending signals at THIS bar open
@@ -5236,11 +5293,79 @@ class InstitutionalBacktestEngine:
                                 'bar_index': self.current_bar_index,
                                 'debug_run': 'momentum_smoke',
                                 'is_exit': is_exit_signal,
+                                'target_weight': target_weight,
+                                'quantity_type': quantity_type,
+                                'original_signal_metadata': {
+                                    'strength': signal_strength,
+                                    'target_weight': target_weight,
+                                    'signal_type': signal_type,
+                                },
                             }
                         )
 
-                        # Get authorization
-                        authorization = await self.risk_manager.authorize_trading_decision(request)
+                        # Get authorization (P5: optionally use 6-gate pipeline)
+                        if getattr(self.config, 'use_6gate_auth', False):
+                            # Extract bar volume/volatility for Gate 6 cost model alignment
+                            _bar_vol = 0.0
+                            _bar_volatility = 0.02
+                            try:
+                                if 'filtered_data' in dir() and filtered_data is not None and len(filtered_data) > 0:
+                                    _last_bar = filtered_data.iloc[-1]
+                                    _bar_vol = float(_last_bar.get('volume', 0)) if hasattr(_last_bar, 'get') else float(getattr(_last_bar, 'volume', 0))
+                                    _bar_volatility = float(_last_bar.get('volatility', 0.02)) if hasattr(_last_bar, 'get') else float(getattr(_last_bar, 'volatility', 0.02))
+                                elif hasattr(signal_row, 'get'):
+                                    _bar_vol = float(signal_row.get('volume', 0))
+                                    _bar_volatility = float(signal_row.get('volatility', 0.02))
+                            except Exception:
+                                pass
+
+                            _6gate_signal = {
+                                'symbol': symbol,
+                                'side': side,
+                                'requested_quantity': quantity,
+                                'signal_strength': signal_strength,
+                                'confidence': confidence,
+                                'strategy_id': signal_row.get('strategy_id', 'backtest_strategy'),
+                                'signal_timestamp': timestamp,
+                                'arrival_price': current_price,
+                                'stop_loss_pct': 0.02,
+                                # Metadata parity with traditional TradingDecisionRequest
+                                'is_exit': is_exit_signal,
+                                'signal_type': signal_type,
+                                'target_weight': target_weight,
+                                'quantity_type': quantity_type,
+                                'available_cash': float(self.risk_manager._position_book.get_cash_balance())
+                                    if hasattr(self.risk_manager, '_position_book') and self.risk_manager._position_book
+                                    else self.risk_manager.portfolio_value * 0.95,
+                                'original_signal_metadata': {
+                                    'strength': signal_strength,
+                                    'target_weight': target_weight,
+                                    'signal_type': signal_type,
+                                },
+                                # Gate 6 cost model inputs (aligned with execution simulator)
+                                'bar_volume': _bar_vol,
+                                'bar_volatility': _bar_volatility,
+                            }
+                            _6gate_result = await self.risk_manager.authorize_signal_6gate(
+                                signal=_6gate_signal,
+                                current_price=current_price,
+                                portfolio_value=self.risk_manager.portfolio_value,
+                            )
+                            # Adapt 6-gate result to authorization interface
+                            from core_engine.system.central_risk_manager import AuthorizationLevel
+                            class _6GateAuth:
+                                pass
+                            authorization = _6GateAuth()
+                            authorization.authorization_level = (
+                                AuthorizationLevel.AUTOMATIC if _6gate_result.get('authorized', False)
+                                else AuthorizationLevel.REJECTED
+                            )
+                            authorization.authorized_quantity = _6gate_result.get('authorized_quantity', 0.0)
+                            authorization.authorization_id = f"6gate_{symbol}_{self.current_bar_index}"
+                            authorization.rejection_reason = _6gate_result.get('rejection_reason', '')
+                            authorization.gate_diagnostics = _6gate_result.get('gates', {})
+                        else:
+                            authorization = await self.risk_manager.authorize_trading_decision(request)
 
                         # Check if authorized
                         from core_engine.system.central_risk_manager import AuthorizationLevel
@@ -5374,7 +5499,7 @@ class InstitutionalBacktestEngine:
                 disable_rejections = getattr(self, 'disable_rejections', False)
                 self.execution_simulator = HistoricalExecutionSimulator({
                     'fill_model': 'realistic',
-                    'base_spread_bps': getattr(self.config, 'max_spread_bps', 5.0),
+                    'base_spread_bps': getattr(self.config, 'base_spread_bps', 5.0),
                     'base_slippage_bps': getattr(self.config, 'base_slippage_bps', 2.0),
                     'commission_per_share': getattr(self.config, 'commission_per_trade', 0.005),
                     'enable_random_slippage': False,  # Deterministic for backtesting
@@ -5383,6 +5508,22 @@ class InstitutionalBacktestEngine:
                     'disable_rejections': disable_rejections,
                     'execution_seed': getattr(self.config, 'execution_seed', None),
                 })
+
+            # Share execution simulator config with CRM for Gate 6 cost alignment
+            if hasattr(self, 'risk_manager') and self.risk_manager is not None:
+                self.risk_manager._exec_sim_config = {
+                    'base_spread_bps': getattr(self.config, 'base_spread_bps', 5.0),
+                    'base_slippage_bps': getattr(self.config, 'base_slippage_bps', 2.0),
+                    'commission_per_share': getattr(self.config, 'commission_per_trade', 0.005),
+                    'impact_linear_coeff': getattr(self.config, 'linear_coefficient', 0.1),
+                    'impact_sqrt_coeff': getattr(self.config, 'sqrt_coefficient', 0.5),
+                }
+
+            # P4: Initialize OMS for path parity when enabled
+            if getattr(self.config, 'use_oms', False) and self.order_management_system is None:
+                from core_engine.system.order_management_system import OrderManagementSystem
+                self.order_management_system = OrderManagementSystem(config={})
+                logger.info("📋 OMS enabled for backtest path parity")
 
             executed_trades = []
 
@@ -5580,6 +5721,7 @@ class InstitutionalBacktestEngine:
                     from core_engine.utils.pipeline_trace import get_tracer, CP4_ORDER_CREATE, CP5_FILL
                     _cp45_tracer = get_tracer()
                     if _cp45_tracer.enabled:
+                        _cp4_auth_obj = auth_trade.get('authorization')
                         _cp45_tracer.emit(
                             trace_id=_auth_id or f"order_{symbol}_{bar_timestamp}",
                             checkpoint=CP4_ORDER_CREATE,
@@ -5595,6 +5737,8 @@ class InstitutionalBacktestEngine:
                                 "decision_price": float(decision_price),
                                 "execution_price": float(current_price),
                                 "strategy_id": _strategy_id,
+                                "authorized_quantity": float(getattr(_cp4_auth_obj, 'authorized_quantity', 0)) if _cp4_auth_obj else float(quantity),
+                                "authorization_level": str(getattr(_cp4_auth_obj, 'authorization_level', '')) if _cp4_auth_obj else '',
                             },
                             output_data={
                                 "success": execution_result['success'],
@@ -5651,6 +5795,26 @@ class InstitutionalBacktestEngine:
                     if actual_quantity < quantity:
                         logger.info(f"[INFO] Quantity reduced during retry: {quantity} -> {actual_quantity} ({symbol})")
 
+                    # P4: Route through OMS when enabled for path parity
+                    if self.order_management_system is not None:
+                        try:
+                            _oms_order = await self.order_management_system.create_order(
+                                authorization_id=_auth_id,
+                                symbol=symbol,
+                                side=side,
+                                quantity=float(actual_quantity),
+                                strategy_id=_strategy_id,
+                            )
+                            await self.order_management_system.submit_order(_oms_order.order_id)
+                            await self.order_management_system.record_fill(
+                                order_id=_oms_order.order_id,
+                                fill_quantity=float(actual_quantity),
+                                fill_price=float(simulated_fill.fill_price),
+                                commission=float(simulated_fill.costs.total_cost_dollars),
+                            )
+                        except Exception as _oms_err:
+                            logger.warning(f"OMS routing failed (non-fatal): {_oms_err}")
+
                     # --- CP5: Pipeline Trace - Fill (backtest path) ---
                     if _cp45_tracer.enabled:
                         _cp45_tracer.emit(
@@ -5669,6 +5833,10 @@ class InstitutionalBacktestEngine:
                                 "market_price": float(simulated_fill.market_price),
                                 "price": float(simulated_fill.fill_price),
                                 "fill_price": float(simulated_fill.fill_price),
+                                "success": execution_result['success'],
+                                "final_quantity": float(execution_result.get('final_quantity', 0)),
+                                "retry_count": execution_result['retry_count'],
+                                "rejection_count": len(execution_result['rejection_history']),
                             },
                             output_data={
                                 "total_cost_bps": float(simulated_fill.costs.total_cost_bps),
@@ -5692,6 +5860,20 @@ class InstitutionalBacktestEngine:
                         try:
                             # H4: backtest_fill=True tells CRM that costs are already
                             # embedded in fill_price by HistoricalExecutionSimulator
+                            # Build metadata with cost attribution from execution simulator
+                            _fill_metadata = auth_trade.get('additional_data', {}) or {}
+                            _fill_metadata['cost_attribution'] = {
+                                'total_cost_bps': float(simulated_fill.costs.total_cost_bps),
+                                'spread_cost_bps': float(simulated_fill.costs.spread_cost_bps),
+                                'market_impact_bps': float(simulated_fill.costs.market_impact_bps),
+                                'slippage_bps': float(simulated_fill.costs.slippage_bps),
+                                'commission_bps': float(simulated_fill.costs.commission_bps),
+                                'total_cost_dollars': float(simulated_fill.costs.total_cost_dollars),
+                                'implementation_shortfall_bps': float(simulated_fill.implementation_shortfall_bps),
+                                'decision_price': float(simulated_fill.decision_price),
+                                'market_price': float(simulated_fill.market_price),
+                                'fill_price': float(simulated_fill.fill_price),
+                            }
                             position_update = await self.risk_manager.update_position(
                                 symbol=symbol,
                                 side=side,
@@ -5699,7 +5881,7 @@ class InstitutionalBacktestEngine:
                                 price=simulated_fill.fill_price,  # Use fill price (includes costs)
                                 timestamp=bar_timestamp,
                                 strategy_id=auth_trade.get('strategy_id', ''),  # Carry over strategy attribution
-                                metadata=auth_trade.get('additional_data', {}),  # Transition Supervisor diagnostics
+                                metadata=_fill_metadata,
                                 backtest_fill=True,
                             )
                             logger.debug(f"📈 Position updated via RiskManager (Rule 4): {position_update}")

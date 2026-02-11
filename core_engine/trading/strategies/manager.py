@@ -2430,6 +2430,8 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                                 input_data={
                                     "symbols": symbols,
                                     "market_data_keys": list((market_data or {}).keys()),
+                                    "bar_timestamp": str(getattr(_sig, 'timestamp', '')),
+                                    "symbol": getattr(_sig, 'symbol', ''),
                                 },
                                 output_data={
                                     "signal_type": str(getattr(_sig, 'signal_type', '')),
@@ -2490,6 +2492,8 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                             input_data={
                                 "symbols": symbols,
                                 "strategy_count": len(strategy_signals),
+                                "bar_timestamp": str(getattr(_sig, 'timestamp', '')),
+                                "symbol": getattr(_sig, 'symbol', ''),
                             },
                             output_data={
                                 "signal_type": str(getattr(_sig, 'signal_type', '')),

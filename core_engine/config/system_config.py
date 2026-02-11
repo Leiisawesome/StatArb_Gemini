@@ -83,6 +83,10 @@ class BacktestConfig:
     commission_per_trade: float = 0.005
     min_liquidity_score: float = 60.0
     max_spread_bps: float = 25.0
+    base_spread_bps: float = 5.0
+    """Typical bid-ask spread in bps used by execution simulator and cost gate.
+    This is the BASE spread (not the max liquidity filter). For liquid large-caps
+    (TSLA, AAPL) ~3-5 bps; for mid-caps ~8-15 bps."""
 
     # Market impact model (Rule 7 - Execution Management)
     impact_model: str = "almgren_chriss"  # or "kyle_lambda", "simple"
@@ -92,6 +96,15 @@ class BacktestConfig:
     volatility_slippage_multiplier: float = 1.5
     default_fill_rate: float = 0.99
     partial_fills_enabled: bool = False
+
+    # OMS integration (P4: optional order management system in backtest)
+    use_oms: bool = False
+    """When True, backtest routes fills through OrderManagementSystem for path parity with live trading."""
+
+    # 6-Gate authorization (v2: default for backtest — per-gate waterfall + cost gate)
+    use_6gate_auth: bool = True
+    """When True, backtest uses the enhanced 8-gate authorize_signal_6gate pipeline
+    with full sizing parity, cost-awareness gate, and per-gate audit trail."""
 
     # Risk settings (core_engine/config/component_config.py: RiskConfig)
     initial_capital: float = 1_000_000.0

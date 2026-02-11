@@ -127,6 +127,17 @@ class RealTimePnLTracker:
         self.winning_trades = 0
         self.losing_trades = 0
 
+        # Cost Attribution (P1: execution cost decomposition)
+        self.total_execution_costs = 0.0
+        self.cost_breakdown: Dict[str, float] = {
+            'spread_cost_dollars': 0.0,
+            'market_impact_dollars': 0.0,
+            'slippage_dollars': 0.0,
+            'commission_dollars': 0.0,
+        }
+        self.cost_per_symbol: Dict[str, float] = {}  # symbol → total cost $
+        self.cost_per_strategy: Dict[str, float] = {}  # strategy_id → total cost $
+
         # Vectorized State for Performance (GAP 4-5 Enhancement)
         self._symbols_vec: List[str] = []
         self._positions_vec: np.ndarray = np.array([])
@@ -439,6 +450,47 @@ class RealTimePnLTracker:
 
         # Sync vectorized state
         self._rebuild_vector_state()
+
+    def record_cost_attribution(
+        self,
+        symbol: str,
+        cost_attribution: Dict[str, Any],
+        strategy_id: Optional[str] = None,
+    ) -> None:
+        """
+        Record execution cost attribution from a fill.
+
+        Called by CentralRiskManager when processing fills with cost metadata.
+        Enables PnL decomposition into gross alpha vs execution friction.
+
+        Args:
+            symbol: Trading symbol
+            cost_attribution: Dict with cost breakdown from execution simulator
+            strategy_id: Strategy that generated the trade
+        """
+        if not cost_attribution:
+            return
+
+        cost_dollars = cost_attribution.get('total_cost_dollars', 0.0)
+        self.total_execution_costs += cost_dollars
+
+        # Per-component breakdown (convert bps to dollars using notional)
+        # The cost_attribution already has dollar amounts via total_cost_dollars
+        # For component breakdown, use bps ratios
+        total_bps = cost_attribution.get('total_cost_bps', 0.0)
+        if total_bps > 0 and cost_dollars > 0:
+            ratio = cost_dollars / total_bps  # dollars per bps
+            self.cost_breakdown['spread_cost_dollars'] += cost_attribution.get('spread_cost_bps', 0) * ratio
+            self.cost_breakdown['market_impact_dollars'] += cost_attribution.get('market_impact_bps', 0) * ratio
+            self.cost_breakdown['slippage_dollars'] += cost_attribution.get('slippage_bps', 0) * ratio
+            self.cost_breakdown['commission_dollars'] += cost_attribution.get('commission_bps', 0) * ratio
+
+        # Per-symbol
+        self.cost_per_symbol[symbol] = self.cost_per_symbol.get(symbol, 0.0) + cost_dollars
+
+        # Per-strategy
+        if strategy_id:
+            self.cost_per_strategy[strategy_id] = self.cost_per_strategy.get(strategy_id, 0.0) + cost_dollars
 
     def _update_total_pnl(self):
         """Update total P&L"""

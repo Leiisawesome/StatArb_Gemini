@@ -731,6 +731,9 @@ class PositionBook(IPositionBook):
                         "quantity": float(fill.quantity),
                         "price": float(fill.price),
                         "commission": float(fill.commission),
+                        "slippage": float(fill.slippage),
+                        "order_id": fill.order_id or '',
+                        "strategy_id": fill.strategy_id or '',
                     },
                     output_data={
                         "event_type": event_type.value if hasattr(event_type, 'value') else str(event_type),
