@@ -1027,8 +1027,11 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
             vol_window = 20
             vov_window = 10
 
-            if 'ATR_14' in df.columns and df['ATR_14'].notna().sum() > vol_window:
-                vol = df['ATR_14'] / df['close'].clip(lower=0.01)
+            # P1-6 FIX: EnhancedTechnicalIndicators outputs 'atr' (not 'ATR_14').
+            # Accept both naming conventions for backward compatibility.
+            atr_col = 'atr' if 'atr' in df.columns else ('ATR_14' if 'ATR_14' in df.columns else None)
+            if atr_col and df[atr_col].notna().sum() > vol_window:
+                vol = df[atr_col] / df['close'].clip(lower=0.01)
             elif 'daily_vol' in df.columns and df['daily_vol'].notna().sum() > vol_window:
                 vol = df['daily_vol']
             else:
@@ -1052,8 +1055,10 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
             # 2. Volatility Expansion: is vol expanding from a compressed
             #    state?  Positive = expanding, zero = flat/contracting.
             # ----------------------------------------------------------
-            if 'ATR_14' in df.columns and df['ATR_14'].notna().sum() > vol_window:
-                atr = df['ATR_14']
+            # P1-6 FIX: Use 'atr' column (EnhancedTechnicalIndicators output)
+            atr_col2 = 'atr' if 'atr' in df.columns else ('ATR_14' if 'ATR_14' in df.columns else None)
+            if atr_col2 and df[atr_col2].notna().sum() > vol_window:
+                atr = df[atr_col2]
             else:
                 atr = vol  # fallback to whatever we computed above
 
@@ -1599,14 +1604,19 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
         """
         try:
             # Check core trading indicators are preserved
-            core_indicators = ['close', 'sma_20', 'bb_upper_20', 'bb_lower_20', 'rsi_14']
+            # P2-8 FIX: Updated column names to match actual indicator engine output.
+            # EnhancedTechnicalIndicators produces 'bb_upper'/'bb_lower' (not 'bb_upper_20'/'bb_lower_20')
+            # and 'rsi' (not 'rsi_14'). Accept both naming conventions.
+            core_indicators = ['close', 'sma_20', 'bb_upper', 'bb_lower', 'rsi',
+                              'bb_upper_20', 'bb_lower_20', 'rsi_14']  # Include legacy names
 
             for indicator in core_indicators:
                 if indicator in df.columns:
                     values = df[indicator].dropna()
                     if len(values) > 0:
                         # Check for reasonable price ranges
-                        if indicator in ['close', 'sma_20', 'bb_upper_20', 'bb_lower_20']:
+                        if indicator in ['close', 'sma_20', 'bb_upper', 'bb_lower',
+                                        'bb_upper_20', 'bb_lower_20']:
                             try:
                                 min_val = values.min()
                                 max_val = values.max()

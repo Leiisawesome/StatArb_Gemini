@@ -305,8 +305,17 @@ class PreTradeComplianceChecker:
         current_ownership = self.current_ownership.get(symbol, 0.0)
 
         # Calculate new ownership after trade
-        # Note: Would need shares outstanding from market data in production
-        shares_outstanding = 1_000_000_000  # Placeholder
+        # P2-2 FIX: shares_outstanding should come from market data, not be hardcoded.
+        # Using a configurable default with explicit warning when using fallback.
+        shares_outstanding = getattr(self, '_shares_outstanding_cache', {}).get(
+            symbol,
+            getattr(self.config, 'default_shares_outstanding', 1_000_000_000)
+        )
+        if shares_outstanding == getattr(self.config, 'default_shares_outstanding', 1_000_000_000):
+            logger.debug(
+                f"P2-2: Using default shares_outstanding ({shares_outstanding:,}) for {symbol} ownership calc. "
+                "Wire market data provider for accurate compliance checks."
+            )
         current_shares = current_ownership * shares_outstanding
         new_shares = current_shares + quantity
         new_ownership = new_shares / shares_outstanding

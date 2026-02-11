@@ -257,8 +257,22 @@ class RegimeManager(ISystemComponent, IRegimePolicy):
                 tasks.append(subscriber.on_regime_change(context))
         
         if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
-            logger.info(f"Notified {len(tasks)} subscribers of regime change to {context.primary_regime}")
+            # P2-10 FIX: Log subscriber exceptions instead of silently swallowing them.
+            # gather(return_exceptions=True) collects exceptions as return values,
+            # but previously they were never inspected.
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            error_count = 0
+            for i, result in enumerate(results):
+                if isinstance(result, Exception):
+                    error_count += 1
+                    subscriber_name = type(self.subscribers[i]).__name__ if i < len(self.subscribers) else 'unknown'
+                    logger.error(
+                        f"⚠️ P2-10: Regime subscriber '{subscriber_name}' failed: {result}"
+                    )
+            logger.info(
+                f"Notified {len(tasks)} subscribers of regime change to {context.primary_regime}"
+                f"{f' ({error_count} failed)' if error_count else ''}"
+            )
 
     def _get_config_attr(self, attr_name, default):
 

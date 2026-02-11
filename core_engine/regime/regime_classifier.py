@@ -365,7 +365,7 @@ class FeatureEngineer:
                             avg_corrs.append(avg_corr)
                         else:
                             avg_corrs.append(np.nan)
-                    except:
+                    except Exception:  # Avoid catching SystemExit, KeyboardInterrupt
                         avg_corrs.append(np.nan)
 
                 features[f'avg_correlation_{window}d'] = pd.Series(avg_corrs, index=returns.index)
@@ -512,8 +512,11 @@ class FeatureEngineer:
             )
 
             # Find features to drop
+            # P1-12 FIX: Use feature_correlation_threshold (renamed from duplicate correlation_threshold)
+            feat_corr_thresh = getattr(self.config, 'feature_correlation_threshold',
+                                       getattr(self.config, 'correlation_threshold', 0.95))
             to_drop = [column for column in upper_triangle.columns if
-                      any(upper_triangle[column] > self.config.correlation_threshold)]
+                      any(upper_triangle[column] > feat_corr_thresh)]
 
             # Drop correlated features
             features_cleaned = features.drop(columns=to_drop)

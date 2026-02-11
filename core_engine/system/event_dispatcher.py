@@ -122,6 +122,11 @@ class DeterministicEventDispatcher:
         self._queue_lock = threading.Lock()
 
         # Event handlers by type
+        # P2-22 NOTE: This dispatcher handles REGIME events alongside other event types.
+        # RegimeManager also has its own subscriber notification via notify_subscribers().
+        # Use this dispatcher for deterministic event ordering (timestamp-ordered processing).
+        # Use RegimeManager.subscribe() for direct async regime change callbacks.
+        # These two paths are complementary, not competing.
         self._handlers: Dict[EventType, List[EventHandler]] = defaultdict(list)
 
         # Backpressure condition (for blocking producers)
@@ -289,9 +294,22 @@ class DeterministicEventDispatcher:
             self._time_source.advance_market_time(event.market_timestamp)
 
             # Dispatch to handlers
+            # P2-23 FIX: Support both sync and async handlers. If an async handler
+            # is registered, schedule it on the running event loop.
+            import asyncio
+            import inspect
             for handler in self._handlers.get(event.event_type, []):
                 try:
-                    handler(event)
+                    if inspect.iscoroutinefunction(handler):
+                        # Async handler: schedule on event loop if available
+                        try:
+                            loop = asyncio.get_running_loop()
+                            loop.create_task(handler(event))
+                        except RuntimeError:
+                            # No running loop — run synchronously via asyncio.run
+                            asyncio.run(handler(event))
+                    else:
+                        handler(event)
                 except Exception as e:
                     logger.error(
                         f"Handler error for {event.event_type}: {e}",

@@ -496,9 +496,34 @@ class EnhancedTradingEngine(ISystemComponent):
         logger.info("🔗 Risk Manager linked to Trading Engine")
 
     def set_execution_engine(self, execution_engine: Any):
-        """Set execution engine reference"""
+        """
+        Set execution engine reference.
+
+        P0-3 FIX: Validates the engine type and warns loudly if the legacy
+        ExecutionEngine is wired instead of UnifiedExecutionEngine.
+        The legacy engine returns hardcoded success and does NOT update PositionBook.
+        """
+        # P0-3: Check if this is the deprecated legacy engine
+        engine_class_name = type(execution_engine).__name__
+        if engine_class_name == 'ExecutionEngine':
+            import warnings
+            warnings.warn(
+                "TradingEngine is wired to the DEPRECATED ExecutionEngine. "
+                "Production deployments MUST use UnifiedExecutionEngine for "
+                "proper position tracking and risk management integration.",
+                DeprecationWarning,
+                stacklevel=2
+            )
+            logger.warning(
+                "⚠️ P0-3 WARNING: TradingEngine wired to legacy ExecutionEngine. "
+                "Fills will NOT update PositionBook. Use UnifiedExecutionEngine."
+            )
+            self._using_legacy_engine = True
+        else:
+            self._using_legacy_engine = False
+
         self.execution_engine = execution_engine
-        logger.info("🔗 Execution Engine linked to Trading Engine")
+        logger.info(f"🔗 Execution Engine linked to Trading Engine (type={engine_class_name})")
 
     def set_data_manager(self, data_manager: Any):
         """Set data manager reference"""
@@ -647,6 +672,13 @@ class EnhancedTradingEngine(ISystemComponent):
     async def _execute_market_strategy(self, plan: TradePlan, slices: List[ExecutionSlice]) -> bool:
         """Execute market order strategy"""
         logger.info(f"📈 Executing MARKET strategy for {plan.symbol}")
+
+        # P0-3 FIX: Warn at execution time if legacy engine is in use
+        if getattr(self, '_using_legacy_engine', False):
+            logger.warning(
+                f"⚠️ P0-3: Executing {plan.symbol} via LEGACY engine — "
+                "positions will NOT be tracked. Wire UnifiedExecutionEngine."
+            )
 
         # Execute all slices as market orders
         for slice_obj in slices:

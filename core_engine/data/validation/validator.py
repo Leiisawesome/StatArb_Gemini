@@ -1160,7 +1160,7 @@ class DataValidator(ISystemComponent):
         if isinstance(timestamp, str):
             try:
                 timestamp = datetime.fromisoformat(timestamp)
-            except:
+            except Exception:  # Avoid bare except: don't catch SystemExit, KeyboardInterrupt
                 timestamp = datetime.now()
 
         data_age_seconds = (datetime.now() - timestamp).total_seconds() if isinstance(timestamp, datetime) else 0

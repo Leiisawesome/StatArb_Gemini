@@ -106,14 +106,16 @@ class CircuitBreakerConfig:
     max_orders_per_minute: int = 100
 
     # Loss Limits
-    daily_loss_limit_pct: float = -0.02  # -2% of portfolio
-    warning_threshold_pct: float = 0.80  # Warning at 80% of limit
+    # P2-1 FIX: These should be sourced from centralized config (component_config.py),
+    # not hardcoded. Defaults here are conservative fallbacks only.
+    daily_loss_limit_pct: float = -0.02  # -2% of portfolio (override via config)
+    warning_threshold_pct: float = 0.80  # Warning at 80% of limit (override via config)
 
     # Drawdown Limits
-    max_drawdown_from_high_pct: float = -0.05  # -5% from intraday high
+    max_drawdown_from_high_pct: float = -0.05  # -5% from intraday high (override via config)
 
     # Position Concentration
-    max_position_concentration: float = 0.20  # 20% max per position
+    max_position_concentration: float = 0.20  # 20% max per position (override via config)
 
     # External Safety Signals (NEW: Phase 3)
     external_kill_switch_path: str = ".emergency_stop"

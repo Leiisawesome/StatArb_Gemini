@@ -69,6 +69,10 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
         """Initialize hierarchical system orchestrator with modular composition"""
 
         # Initialize modular components using composition
+        # P2-19 NOTE: This ConfigurationManager is separate from UnifiedConfig in
+        # core_engine/config/unified_config.py. Until they are consolidated, the
+        # orchestrator config and component configs may diverge.
+        # TODO: Migrate to UnifiedConfig for single config SSOT.
         self.config_manager = ConfigurationManager(config)
         self.component_manager = ComponentManager()
         self.system_monitor = SystemMonitor()
@@ -484,8 +488,12 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
             self.system_status = SystemStatus.EMERGENCY
 
             # Emergency shutdown of RiskManager
+            # P1-13 FIX: Defensively handle both sync and async emergency_shutdown
             if self.central_risk_manager:
-                self.central_risk_manager.emergency_shutdown()
+                if asyncio.iscoroutinefunction(self.central_risk_manager.emergency_shutdown):
+                    await self.central_risk_manager.emergency_shutdown()
+                else:
+                    self.central_risk_manager.emergency_shutdown()
 
             # Stop all trading operations
             await self._emergency_stop_trading()
@@ -534,9 +542,13 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
             await self._emergency_stop_trading()
 
             # Notify risk manager
+            # P1-13 FIX: Defensively handle both sync and async emergency_shutdown
             if self.central_risk_manager:
                 try:
-                    self.central_risk_manager.emergency_shutdown()
+                    if asyncio.iscoroutinefunction(self.central_risk_manager.emergency_shutdown):
+                        await self.central_risk_manager.emergency_shutdown()
+                    else:
+                        self.central_risk_manager.emergency_shutdown()
                 except Exception as e:
                     logger.error(f"RiskManager emergency shutdown failed: {e}")
 
@@ -736,8 +748,9 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
                         'last_health_check': datetime.now().isoformat()
                     }
 
-            # Update internal performance metrics
-            self.performance_metrics = performance_data
+            # P0-9 FIX: performance_metrics is a read-only @property that delegates
+            # to system_monitor.get_performance_metrics(). Update the monitor's dict directly.
+            self.system_monitor.performance_metrics.update(performance_data)
 
             return {
                 'timestamp': datetime.now().isoformat(),
@@ -1217,7 +1230,8 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
             requester = risk_operation.get('requester', AuthorityLevel.OPERATIONAL)
 
             # Check if requester has sufficient authority
-            if requester.value >= required_authority.value:
+            # P0-8 FIX: Use numeric_priority instead of string .value for correct ordering
+            if requester.numeric_priority >= required_authority.numeric_priority:
                 # Direct authorization
                 authorization = {
                     'authorized': True,
@@ -1366,7 +1380,8 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
         """
         try:
             # Check if delegation is allowed (higher authority can delegate to lower)
-            if from_authority.value <= to_authority.value:
+            # P0-8 FIX: Use numeric_priority instead of string .value
+            if from_authority.numeric_priority <= to_authority.numeric_priority:
                 logger.warning(f"Cannot delegate from {from_authority.value} to {to_authority.value}")
                 return False
 
@@ -1405,7 +1420,8 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
         """
         try:
             # Check if requester has sufficient authority
-            if requester_authority.value >= required_authority.value:
+            # P0-8 FIX: Use numeric_priority instead of string .value
+            if requester_authority.numeric_priority >= required_authority.numeric_priority:
                 return True
 
             # Check if operation can be escalated
@@ -1449,9 +1465,12 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
             if operation in critical_operations:
                 return True  # Critical operations can always be escalated
             elif operation in high_risk_operations:
-                return current_authority.value >= AuthorityLevel.OPERATIONAL.value
+                # P0-8 FIX: Use numeric_priority instead of string .value
+                return current_authority.numeric_priority >= AuthorityLevel.OPERATIONAL.numeric_priority
             else:
-                return required_authority.value - current_authority.value <= 1  # Only one level up
+                # P0-8 FIX: Use numeric_priority for subtraction (was string - string)
+                # "One level up" = within 10 priority points (each level is 10 apart)
+                return required_authority.numeric_priority - current_authority.numeric_priority <= 10
 
         except Exception as e:
             logger.error(f"Escalation possibility check failed: {e}")
@@ -1902,37 +1921,10 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
             logger.error(f"Failed to get allowed operations: {e}")
             return set()
 
-    def _check_authorization_flow(self, operation: str, requester_authority: AuthorityLevel,
-                                required_authority: AuthorityLevel) -> Optional[bool]:
-        """
-        Check authorization flow for an operation
-
-        Args:
-            operation: Operation being requested
-            requester_authority: Authority level of requester
-            required_authority: Required authority level
-
-        Returns:
-            True if authorized, False if not, None if error
-        """
-        try:
-            # Define authority hierarchy (higher values = more authority)
-            authority_hierarchy = {
-                AuthorityLevel.READ_ONLY: 1,
-                AuthorityLevel.OPERATIONAL: 2,
-                AuthorityLevel.GOVERNANCE_CONTROL: 3,
-                AuthorityLevel.SYSTEM_CONTROL: 4
-            }
-
-            requester_level = authority_hierarchy.get(requester_authority, 0)
-            required_level = authority_hierarchy.get(required_authority, 0)
-
-            # Check if requester has sufficient authority
-            return requester_level >= required_level
-
-        except Exception as e:
-            logger.error(f"Authorization flow check failed: {e}")
-            return None
+    # P2-13 FIX: Removed duplicate _check_authorization_flow (was here at line ~1920).
+    # The canonical version (line ~1404) uses AuthorityLevel.numeric_priority (P0-8 fix)
+    # and includes escalation logic. This duplicate had an incomplete authority_hierarchy
+    # dict missing STRATEGIC and TACTICAL levels, causing silent authorization failures.
 
     async def _escalate_authorization(self, escalation_request: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -1960,7 +1952,8 @@ class HierarchicalSystemOrchestrator(ISystemComponent):
             target_level = escalation_levels.get(risk_severity, required_authority)
 
             # Check if escalation is possible
-            if current_authority.value >= target_level.value:
+            # P0-8 FIX: Use numeric_priority for correct hierarchical comparison
+            if current_authority.numeric_priority >= target_level.numeric_priority:
                 # Already at sufficient level
                 escalation_result = {
                     'escalated': False,

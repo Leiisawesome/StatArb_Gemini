@@ -129,8 +129,12 @@ class EnhancedStatisticalArbitrageStrategy(EnhancedBaseStrategy):
         self.active_spreads: Dict[str, SpreadMetrics] = {}
         self.hedge_ratios: Dict[Tuple[str, str], float] = {}
         self.spread_history: Dict[str, pd.Series] = {}
-        # DEPRECATED: entry_times is deprecated. Use PositionBook for position timestamps.
-        self.entry_times: Dict[str, datetime] = {}  # DEPRECATED
+        # P1-10 WARNING: entry_times is SHADOW STATE that violates Rule 7 A4.
+        # It tracks when entry signals were generated, but can diverge from actual
+        # positions if Risk Manager rejects the trade. Should be replaced with
+        # PositionBook timestamp queries.
+        # TODO(Rule 7 A4): Replace with PositionBook.get_position_entry_time() queries.
+        self.entry_times: Dict[str, datetime] = {}  # P1-10: Shadow state — see warning above
 
         # Market data cache
         self.price_data: Dict[str, pd.DataFrame] = {}

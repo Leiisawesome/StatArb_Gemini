@@ -631,7 +631,7 @@ class SpreadExhaustionScorer:
             try:
                 regime_name = regime_context.primary_regime.value if hasattr(regime_context, 'primary_regime') else 'normal_volatility'
                 base_score = regime_scores.get(regime_name, 50)
-            except:
+            except Exception:  # Avoid catching SystemExit, KeyboardInterrupt, etc.
                 base_score = 60
 
         # Correlation adjustment
@@ -904,7 +904,7 @@ class SpreadExhaustionScorer:
                 if abs(idx) <= len(data):
                     return data[column].iloc[idx]
             return default
-        except:
+        except Exception:  # Avoid catching SystemExit, KeyboardInterrupt, etc.
             return default
 
     def _score_to_confidence(self, score: float) -> float:

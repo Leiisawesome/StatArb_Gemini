@@ -236,7 +236,11 @@ class TradingSignal:
     """Trading signal from strategy"""
     strategy_id: str
     symbol: str
-    signal_type: str  # 'BUY', 'SELL', 'HOLD'
+    # P2-21 FIX: signal_type should ideally be a SignalType enum for type safety.
+    # Kept as str for backward compatibility, but callers should prefer
+    # SignalType enum values ('LONG_ENTRY', 'SHORT_ENTRY', 'EXIT_LONG', 'EXIT_SHORT')
+    # over ambiguous 'BUY'/'SELL' which conflate entry/exit intent.
+    signal_type: str  # Prefer SignalType enum values; legacy: 'BUY', 'SELL', 'HOLD'
     strength: float  # Signal strength 0-1
     price: Optional[float] = None
     quantity: Optional[float] = None

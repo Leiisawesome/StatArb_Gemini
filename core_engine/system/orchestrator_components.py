@@ -27,13 +27,38 @@ class ComponentLayer(Enum):
     SUPPORT = "support"                # Support components
 
 class AuthorityLevel(Enum):
-    """Authority levels for different operations"""
+    """
+    Authority levels for different operations.
+
+    P0-8 FIX: Added numeric_priority property so that comparisons (>=, -, <=)
+    work correctly for hierarchical authorization. String values are NOT
+    naturally orderable, so all authorization logic MUST use numeric_priority
+    instead of raw .value comparisons.
+
+    Higher numeric_priority = higher authority.
+    """
     SYSTEM_CONTROL = "system_control"        # SystemOrchestrator only
     GOVERNANCE_CONTROL = "governance_control" # RiskManager authority
     STRATEGIC = "strategic"                  # Strategic operations
     TACTICAL = "tactical"                    # Tactical operations
     OPERATIONAL = "operational"              # Component operations
     READ_ONLY = "read_only"                 # Monitoring only
+
+    @property
+    def numeric_priority(self) -> int:
+        """
+        Return a numeric priority for hierarchical comparison.
+        Higher value = higher authority.
+        """
+        _priority_map = {
+            "system_control": 60,
+            "governance_control": 50,
+            "strategic": 40,
+            "tactical": 30,
+            "operational": 20,
+            "read_only": 10,
+        }
+        return _priority_map.get(self.value, 0)
 
 @dataclass
 class ComponentRegistration:
@@ -93,6 +118,22 @@ class ComponentManager:
         """Register component with hierarchical control"""
 
         try:
+            # P1-11 FIX: Validate ISystemComponent interface compliance at registration.
+            # Components missing required lifecycle methods will fail at runtime otherwise.
+            from .interfaces import ISystemComponent as _ISC
+            if not isinstance(component, _ISC):
+                required_methods = ['initialize', 'start', 'stop', 'health_check']
+                missing = [m for m in required_methods if not hasattr(component, m)]
+                if missing:
+                    logger.warning(
+                        f"⚠️ P1-11: Component '{name}' does not implement ISystemComponent. "
+                        f"Missing methods: {missing}. This may cause runtime failures."
+                    )
+                else:
+                    logger.info(
+                        f"ℹ️ Component '{name}' has required methods but does not extend ISystemComponent ABC."
+                    )
+
             # Check if this component instance is already registered
             for reg_id, registration in self.component_registry.items():
                 if registration.component_instance is component:

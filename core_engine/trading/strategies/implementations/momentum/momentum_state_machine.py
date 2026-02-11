@@ -162,8 +162,11 @@ class MomentumStateMachine:
                 atr_col = 'atr' if 'atr' in enriched_data.columns else 'ATR_14'
                 atr_series = enriched_data[atr_col] if atr_col in enriched_data.columns else None
 
-                # Fallback: compute a simple ATR(14) from OHLC if not provided by the pipeline
-                # OR if the provided series is NaN at the current point (common in short windows).
+                # P2-11 NOTE: Fallback ATR calculation from OHLC is a defensive SSOT violation.
+                # The canonical ATR should come from EnhancedTechnicalIndicators ('atr' column).
+                # This fallback exists because short data windows can produce NaN from the
+                # indicator engine. Once warm-up handling is improved, this can be removed.
+                # TODO: Remove fallback once indicator warm-up produces valid ATR for all windows.
                 def _fallback_atr() -> Optional[pd.Series]:
                     try:
                         high = enriched_data["high"]

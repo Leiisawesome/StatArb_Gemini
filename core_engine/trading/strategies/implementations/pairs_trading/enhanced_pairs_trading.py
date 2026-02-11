@@ -108,9 +108,12 @@ class EnhancedPairsTradingStrategy(EnhancedBaseStrategy):
         # Strategy-specific state (analysis data - NOT position tracking)
         self.market_data: Dict[str, pd.DataFrame] = {}
         # Note: selected_pairs and active_pairs track pair analysis metrics
-        # Actual position tracking should use PositionBook (SSOT) and Risk Manager
+        # P1-9 WARNING: active_pairs is SHADOW STATE that can diverge from PositionBook
+        # if Risk Manager rejects a trade. Strategies MUST NOT use this as position truth.
+        # TODO(Rule 7 A4): Replace active_pairs with PositionBook queries via orchestrator.
+        # Until then, this tracks "signal intent" — the strategy's belief about active trades.
         self.selected_pairs: Dict[str, PairMetrics] = {}
-        self.active_pairs: Dict[str, PairMetrics] = {}
+        self.active_pairs: Dict[str, PairMetrics] = {}  # P1-9: Shadow state — see warning above
 
         # Pair analysis data
         self.correlation_matrix: Optional[pd.DataFrame] = None
@@ -537,7 +540,16 @@ class EnhancedPairsTradingStrategy(EnhancedBaseStrategy):
             return []
 
     async def _generate_exit_signals(self) -> List[StrategySignal]:
-        """Generate exit signals for active pairs"""
+        """
+        Generate exit signals for active pairs.
+
+        P2-12 WARNING (Rule 7 violation): This strategy currently determines exit
+        conditions internally. Per Rule 7, strategies should output intent signals
+        only — exit authority should reside in the Risk Manager or a dedicated
+        position manager. The exit signals generated here are RECOMMENDATIONS that
+        the execution layer can honor or override.
+        TODO(Rule 7): Migrate exit authority to Risk Manager / PositionManager.
+        """
 
         signals = []
 

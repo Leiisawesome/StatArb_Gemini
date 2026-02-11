@@ -67,6 +67,16 @@ class IRegimeSubscriber(ABC):
     
     Components that need to be notified of regime changes should implement
     this interface and register with the RegimeManager/Sensor.
+
+    P2-14 CLARIFICATION: This is the LIGHTWEIGHT subscriber interface.
+    Use this when a component only needs change notifications (push model).
+    For components that also need to query regime state and adapt behavior,
+    use IRegimeAware instead (which extends this with set_regime_engine
+    and adaptation methods).
+
+    P2-15 NOTE: on_regime_change receives MarketRegimeState (from RegimeManager)
+    while IRegimeAware.on_regime_change receives RegimeContext (a simplified
+    distribution format). RegimeManager handles the conversion internally.
     """
     
     @abstractmethod
@@ -193,10 +203,20 @@ class RegimeContext:
 
 class IRegimeAware(ABC):
     """
-    Interface for components that require regime awareness
+    Interface for components that require FULL regime awareness.
 
     Components implementing this interface receive regime context updates
     and can adapt their behavior based on current market conditions.
+
+    P2-14 CLARIFICATION: This is the FULL regime-aware interface.
+    It extends the pattern of IRegimeSubscriber with additional capabilities:
+    - set_regime_engine: Allows components to query regime state (pull model)
+    - on_regime_change: Receives RegimeContext (simplified) for adaptation
+    - adapt_to_regime: Apply regime-specific parameter adjustments
+
+    P2-15 NOTE: on_regime_change here receives RegimeContext (not MarketRegimeState).
+    RegimeContext is the public distribution format with essential fields only.
+    MarketRegimeState is the internal, comprehensive state used by RegimeManager.
 
     MANDATORY for all components that need regime-adjusted operations:
     - Data processing components

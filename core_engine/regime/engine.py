@@ -131,6 +131,12 @@ class RealTimeRegimeSensor(ISystemComponent, IRegimePolicy):
         # ------------------------------------------------------------------
         self._fast_state: Dict[str, Dict[str, Any]] = {}
 
+        # P0-5 FIX: Initialize subscribers list (was missing, causing AttributeError)
+        self.subscribers: List = []
+
+        # P0-6 FIX: Initialize regime history deque (was missing, causing AttributeError)
+        self._regime_history: deque = deque(maxlen=1000)
+
         self.logger.info(f"🚀 Real-Time Regime Sensor initialized with ID: {self.sensor_id}")
 
     def _fast_regime_enabled(self) -> bool:
@@ -218,8 +224,11 @@ class RealTimeRegimeSensor(ISystemComponent, IRegimePolicy):
         # Absolute volatility (annualized) is needed for realistic "extreme_volatility" detection.
         # Using only vol_ratio fails when both fast/slow vols rise together (ratio ~ 1),
         # which is common in true high-volatility regimes.
-        # Assumption: intraday minute bars (~390 bars/day, ~252 trading days/year).
-        ann_factor = math.sqrt(390.0 * 252.0)
+        # P2-9 FIX: Annualization factor is configurable via config instead of hardcoded.
+        # Default assumes intraday minute bars (~390 bars/day, ~252 trading days/year).
+        bars_per_day = getattr(self.config, 'bars_per_day', 390)
+        trading_days_per_year = getattr(self.config, 'trading_days_per_year', 252)
+        ann_factor = math.sqrt(float(bars_per_day) * float(trading_days_per_year))
         ann_vol = float(vol_fast * ann_factor)
 
         # Direction
@@ -911,7 +920,10 @@ class RealTimeRegimeSensor(ISystemComponent, IRegimePolicy):
         # Calculate volatility (rolling std of returns, annualized)
         vol_window = min(self.config.volatility_window, len(returns))
         if vol_window > 1:
-            volatility = np.std(returns[-vol_window:]) * np.sqrt(252 * 390)  # Annualized intraday vol
+            # P2-9 FIX: Use configurable annualization factor
+            _bars_per_day = getattr(self.config, 'bars_per_day', 390)
+            _trading_days = getattr(self.config, 'trading_days_per_year', 252)
+            volatility = np.std(returns[-vol_window:]) * np.sqrt(_trading_days * _bars_per_day)
         else:
             volatility = 0.0
 
@@ -1259,48 +1271,44 @@ class RealTimeRegimeSensor(ISystemComponent, IRegimePolicy):
                 return current_confirmed
         return current_confirmed
 
-    def process_market_data(self, market_data: Any) -> Dict[str, Any]:
+    def _process_market_data_fast(self, market_data: pd.DataFrame) -> Dict[str, Any]:
         """
-        Process market data for regime analysis (Simplified for Sensor)
+        P1-8 FIX: Renamed from duplicate `process_market_data` to avoid
+        shadowing the comprehensive first definition (line 642) which handles
+        both dict and DataFrame inputs.
 
-        Args:
-            market_data: Bar data or DataFrame
-
-        Returns:
-            Dict with processing results
+        This fast path uses _evaluate_fast_single_symbol for DataFrame processing.
+        Called internally from the main process_market_data when fast evaluation is available.
         """
         try:
-            if isinstance(market_data, pd.DataFrame):
-                # Bar-by-bar processing
-                symbol = market_data['symbol'].iloc[0] if 'symbol' in market_data.columns else 'UNKNOWN'
-                last_regime = None
-                
-                for idx, row in market_data.iterrows():
-                    regime_state = self._evaluate_fast_single_symbol(pd.DataFrame([row]), symbol)
-                    
-                    regime_changed = False
-                    if self.current_regime and regime_state.primary_regime != self.current_regime.primary_regime:
-                        regime_changed = True
-                    
-                    self.current_regime = regime_state
-                    self._regime_history.append(regime_state)
-                    
-                    # Persist
-                    if symbol not in self.regime_by_timestamp:
-                        self.regime_by_timestamp[symbol] = {}
-                    self.regime_by_timestamp[symbol][row.get('timestamp', datetime.now())] = regime_state
-                    
-                    last_regime = regime_state
+            symbol = market_data['symbol'].iloc[0] if 'symbol' in market_data.columns else 'UNKNOWN'
+            last_regime = None
 
-                return {
-                    'market_data_processed': True,
-                    'symbol': symbol,
-                    'regime_detected': last_regime.primary_regime.value if last_regime else None,
-                    'processing_timestamp': datetime.now()
-                }
-            return {'market_data_processed': False, 'error': 'Unsupported data format'}
+            for idx, row in market_data.iterrows():
+                regime_state = self._evaluate_fast_single_symbol(pd.DataFrame([row]), symbol)
+
+                regime_changed = False
+                if self.current_regime and regime_state.primary_regime != self.current_regime.primary_regime:
+                    regime_changed = True
+
+                self.current_regime = regime_state
+                self._regime_history.append(regime_state)
+
+                # Persist
+                if symbol not in self.regime_by_timestamp:
+                    self.regime_by_timestamp[symbol] = {}
+                self.regime_by_timestamp[symbol][row.get('timestamp', datetime.now())] = regime_state
+
+                last_regime = regime_state
+
+            return {
+                'market_data_processed': True,
+                'symbol': symbol,
+                'regime_detected': last_regime.primary_regime.value if last_regime else None,
+                'processing_timestamp': datetime.now()
+            }
         except Exception as e:
-            self.logger.error(f"Error in sensor process_market_data: {e}")
+            self.logger.error(f"Error in fast process_market_data: {e}")
             return {'market_data_processed': False, 'error': str(e)}
 
 # === Backward Compatibility Alias ===

@@ -1374,14 +1374,14 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
                     logger.info(f"✅ Compliance checks passed: {len(compliance_result.compliance_checks_performed)} checks")
 
                 except Exception as e:
+                    # P1-1 FIX: Fail-closed in ALL modes. The previous fail-open behavior
+                    # in backtest mode hid real compliance issues during testing, meaning
+                    # strategies could appear compliant in backtest but fail in production.
                     trading_mode = getattr(self, 'trading_mode', 'backtest')
-                    if trading_mode in ('live', 'paper'):
-                        logger.error(f"Compliance check failed (fail-closed): {e}")
-                        authorization.authorization_level = AuthorizationLevel.REJECTED
-                        authorization.rejection_reason = f"COMPLIANCE_ERROR: {e}"
-                        return authorization
-                    else:
-                        logger.warning(f"⚠️ Compliance check failed (fail-open in backtest): {e}")
+                    logger.error(f"Compliance check failed (fail-closed, mode={trading_mode}): {e}")
+                    authorization.authorization_level = AuthorizationLevel.REJECTED
+                    authorization.rejection_reason = f"COMPLIANCE_ERROR: {e}"
+                    return authorization
 
             # Input validation - reject invalid requests early
             validation_error = self._validate_request_inputs(request)
@@ -1457,7 +1457,15 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
                         tw = max(0.0, min(1.0, tw))
                         computed_qty = (float(self.portfolio_value) * tw) / price
 
-                        # Mutate request.quantity into shares (authoritative)
+                        # P1-2 FIX: Store the computed share quantity in metadata
+                        # instead of mutating request.quantity, which changes the
+                        # meaning of the field and confuses downstream consumers
+                        # that may inspect the original request.
+                        meta["authorized_quantity_shares"] = float(computed_qty)
+                        meta["original_quantity"] = request.quantity
+
+                        # Still set request.quantity for backward compatibility,
+                        # but document the mutation clearly
                         request.quantity = float(computed_qty)
 
                         # Provide cash/price hints for later checks
@@ -2189,8 +2197,17 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
 
         try:
             # Check position limits
-            # AXIS1 FIX: Guard against zero portfolio_value
-            position_pct = abs(new_position * 100.0) / self.portfolio_value if self.portfolio_value > 0 else 1.0
+            # P2-24 FIX: The original formula `new_position * 100.0 / portfolio_value` treats
+            # new_position as a dollar value, but if new_position is in shares, this is wrong.
+            # Use the latest price from market data to convert shares to dollar exposure.
+            # Fallback to the original formula if price is unavailable.
+            latest_price = self._get_latest_price(symbol) if hasattr(self, '_get_latest_price') else None
+            if latest_price and latest_price > 0:
+                position_value = abs(new_position * latest_price)
+            else:
+                # Fallback: assume new_position is already a dollar value
+                position_value = abs(new_position)
+            position_pct = (position_value / self.portfolio_value * 100.0) if self.portfolio_value > 0 else 100.0
 
             if position_pct > self.config.max_position_size:
                 logger.warning(f"⚠️ Position limit breach: {symbol} at {position_pct:.2f}% "

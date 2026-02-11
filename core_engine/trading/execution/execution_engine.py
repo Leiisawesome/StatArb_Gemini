@@ -637,9 +637,30 @@ class ExecutionEngine:
 
     async def execute_order(self, order: Any) -> Any:
         """
-        Backward compatibility method for single order execution.
-        Used by the legacy-style TradingEngine calls.
+        DEPRECATED: Legacy backward-compatibility shim for single order execution.
+
+        WARNING: This engine is NOT wired to PositionBook or CentralRiskManager.
+        Orders executed here will NOT update the system's position state.
+        Callers should migrate to UnifiedExecutionEngine for production use.
+
+        P0-2 FIX: Raises DeprecationWarning and logs loudly to prevent silent
+        phantom fills that bypass position tracking.
         """
+        import warnings
+        warnings.warn(
+            "ExecutionEngine.execute_order() is DEPRECATED. "
+            "Use UnifiedExecutionEngine for production execution. "
+            "This legacy path does NOT update PositionBook.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        logger.warning(
+            "⚠️ LEGACY EXECUTION PATH: execute_order() called on deprecated "
+            "ExecutionEngine. Positions will NOT be updated. "
+            f"Order: {getattr(order, 'order_id', 'unknown')} "
+            f"Symbol: {getattr(order, 'symbol', 'unknown')}"
+        )
+
         request = ExecutionRequest(
             request_id=order.order_id,
             symbol=order.symbol,
@@ -656,14 +677,19 @@ class ExecutionEngine:
         # Importing locally to avoid circular dependencies if any
         from core_engine.type_definitions import ExecutionResult as TypeDefExecutionResult
 
+        # P0-2 FIX: Use actual order price instead of hardcoded 100.0
+        # Mark success=False when no price is available to prevent phantom fills
+        fill_price = float(order.price) if order.price else 0.0
+        has_valid_price = order.price is not None and float(order.price) > 0
+
         return TypeDefExecutionResult(
             order_id=order.order_id,
             symbol=order.symbol,
             side=order.side,
             quantity=float(order.quantity),
-            price=float(order.price) if order.price else 100.0,
+            price=fill_price,
             commission=0.0,
-            success=True
+            success=has_valid_price  # P0-2: Don't claim success without a real price
         )
 
     async def cancel_order(self, order_id: str) -> bool:

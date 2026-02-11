@@ -757,16 +757,32 @@ class PositionBook(IPositionBook):
                     pos.market_value = abs(pos.quantity) * pos.current_price
                     pos.unrealized_pnl = self._calculate_unrealized_pnl(pos)
 
-    def set_cash_balance(self, amount: Union[Decimal, float]) -> None:
+    def set_cash_balance(self, amount: Union[Decimal, float], reason: str = "manual_set") -> None:
         """
         Set cash balance directly (use sparingly, mainly for initialization).
 
+        P2-3 FIX: Added audit trail entry for CQRS compliance. Every cash balance
+        change is now recorded in the update history.
+
         Args:
             amount: New cash balance
+            reason: Reason for the cash balance change (for audit trail)
         """
         with self._lock:
+            old_balance = self._cash_balance
             self._cash_balance = Decimal(str(amount))
-            logger.info(f"💰 Cash balance set to ${self._cash_balance:,.2f}")
+            logger.info(f"💰 Cash balance set to ${self._cash_balance:,.2f} (was ${old_balance:,.2f})")
+
+            # P2-3: Add audit trail entry
+            from datetime import datetime
+            audit_entry = {
+                'event': 'cash_balance_set',
+                'old_balance': float(old_balance),
+                'new_balance': float(self._cash_balance),
+                'reason': reason,
+                'timestamp': datetime.now().isoformat()
+            }
+            self._update_history.append(audit_entry)
 
     def reset(self) -> None:
         """Reset the position book to initial state"""
@@ -786,16 +802,18 @@ class PositionBook(IPositionBook):
     # =========================================================================
 
     def subscribe(self, handler: Callable[[PositionUpdate], None]) -> None:
-        """Subscribe to position update events"""
-        if handler not in self._subscribers:
-            self._subscribers.append(handler)
-            logger.debug(f"Subscriber added: {handler}")
+        """Subscribe to position update events (P2-4: thread-safe)"""
+        with self._lock:  # P2-4 FIX: Protect subscriber list modification
+            if handler not in self._subscribers:
+                self._subscribers.append(handler)
+                logger.debug(f"Subscriber added: {handler}")
 
     def unsubscribe(self, handler: Callable[[PositionUpdate], None]) -> None:
-        """Unsubscribe from position update events"""
-        if handler in self._subscribers:
-            self._subscribers.remove(handler)
-            logger.debug(f"Subscriber removed: {handler}")
+        """Unsubscribe from position update events (P2-4: thread-safe)"""
+        with self._lock:  # P2-4 FIX: Protect subscriber list modification
+            if handler in self._subscribers:
+                self._subscribers.remove(handler)
+                logger.debug(f"Subscriber removed: {handler}")
 
     # =========================================================================
     # PRIVATE METHODS

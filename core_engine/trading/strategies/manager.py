@@ -1735,7 +1735,7 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                                 elif isinstance(ts, str):
                                     try:
                                         signal_timestamp = datetime.fromisoformat(ts.replace('Z', '+00:00'))
-                                    except:
+                                    except Exception:  # Fix: avoid catching SystemExit, KeyboardInterrupt, etc.
                                         pass
                         elif hasattr(raw_signal, 'metadata') and raw_signal.metadata:
                             if 'timestamp' in raw_signal.metadata:
@@ -1745,7 +1745,7 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                                 elif isinstance(ts, str):
                                     try:
                                         signal_timestamp = datetime.fromisoformat(ts.replace('Z', '+00:00'))
-                                    except:
+                                    except Exception:  # Fix: avoid catching SystemExit, KeyboardInterrupt, etc.
                                         pass
 
                         # Use preserved timestamp or default to now
@@ -2448,7 +2448,7 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                     sig_type = signal.signal_type.name
                 else:
                     sig_type = str(signal.signal_type)
-            except:
+            except Exception:  # Fix: avoid catching SystemExit, KeyboardInterrupt, etc.
                 sig_type = str(signal.signal_type)
 
             signal_type_distribution[sig_type] = signal_type_distribution.get(sig_type, 0) + 1
@@ -2496,7 +2496,7 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                 if isinstance(timestamp, str):
                     try:
                         timestamp = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
-                    except:
+                    except Exception:  # Fix: avoid catching SystemExit, KeyboardInterrupt, etc.
                         pass
 
             timestamp_str = timestamp.strftime('%Y-%m-%d %H:%M:%S') if timestamp else 'N/A'
@@ -2524,7 +2524,7 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                     if isinstance(timestamp, str):
                         try:
                             timestamp = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
-                        except:
+                        except Exception:  # Fix: avoid catching SystemExit, KeyboardInterrupt, etc.
                             pass
 
                 timestamp_str = timestamp.strftime('%Y-%m-%d %H:%M:%S') if timestamp else 'N/A'

@@ -797,6 +797,11 @@ class RegimeDetector(ISystemComponent, IRegimePolicy):
         self.initialization_time: Optional[datetime] = None
         self.detection_count = 0
 
+        # Detection history
+        self.detection_history: List[RegimeDetection] = []
+        self.current_regime: Optional[RegimeDetection] = None
+        self.regime_transitions: List[RegimeTransition] = []
+
         # Initialize detectors (simplified - uses centralized config)
         self.detectors = {}
 
@@ -815,6 +820,8 @@ class RegimeDetector(ISystemComponent, IRegimePolicy):
         if DetectionMethod.VOLATILITY_BASED in self._get_config_attr("methods", []):
             self.detectors[DetectionMethod.VOLATILITY_BASED] = VolatilityBasedDetector(self.config)
 
+        logger.info(f"Regime detector initialized with {len(self.detectors)} methods")
+
     def get_capabilities(self) -> Dict[str, Any]:
         """Returns metadata about what this policy can detect."""
         return {
@@ -823,13 +830,6 @@ class RegimeDetector(ISystemComponent, IRegimePolicy):
             "latency": "High (Batch/Historical)",
             "requires_fitting": True
         }
-
-        # Detection history
-        self.detection_history: List[RegimeDetection] = []
-        self.current_regime: Optional[RegimeDetection] = None
-        self.regime_transitions: List[RegimeTransition] = []
-
-        logger.info(f"Regime detector initialized with {len(self.detectors)} methods")
 
     def _get_config_attr(self, attr_name, default):
         """Safely get config attribute with default fallback"""

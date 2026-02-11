@@ -4034,6 +4034,28 @@ class InstitutionalBacktestEngine:
                     regime_result = None
 
             # ================================================================
+            # EOD GUARD: Skip all signal execution and generation after EOD liquidation
+            # ================================================================
+            # Once EOD liquidation has fired for today, no new trades should be opened.
+            # This prevents the bug where a signal generated on the EOD bar (or the bar
+            # immediately after) opens a new position that won't be closed until next day.
+            _eod_guard_active = False
+            if hasattr(self, '_eod_flags'):
+                _ts_for_eod = pd.Timestamp(timestamp)
+                if _ts_for_eod.tzinfo is not None:
+                    _ts_for_eod = _ts_for_eod.tz_convert('America/New_York')
+                _eod_key_guard = f"eod_liquidated_{_ts_for_eod.date()}"
+                if self._eod_flags.get(_eod_key_guard, False):
+                    _eod_guard_active = True
+                    # Discard any pending signals — they were generated before/during EOD
+                    if self.pending_signals:
+                        logger.debug(
+                            f"⏰ EOD guard: Discarding {len(self.pending_signals)} pending signals "
+                            f"after EOD liquidation at {timestamp}"
+                        )
+                        self.pending_signals = []
+
+            # ================================================================
             # PT-style sequencing: execute prior-bar pending signals at THIS bar open
             # ================================================================
             # This mirrors the live bar lifecycle:
@@ -4088,6 +4110,12 @@ class InstitutionalBacktestEngine:
                     use_pre_calculated = True
 
             signals_df = None
+
+            # EOD GUARD: Skip signal generation entirely after EOD liquidation.
+            # This prevents opening new positions in the final minutes of the day.
+            if _eod_guard_active:
+                bar_results['signals_generated'] = 0
+                return bar_results
 
             # Always create bar_df from current bar (needed for price lookup in trade authorization)
             bar_dict = bar.to_dict()

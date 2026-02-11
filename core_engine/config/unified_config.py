@@ -146,7 +146,13 @@ class UnifiedConfig:
             if key.startswith(prefix_upper):
                 # Remove prefix and convert to nested dict
                 config_key = key[len(prefix_upper):].lower()
-                self._set_nested_config(config, config_key.split('_'), value)
+                # P2-18 FIX: Use double-underscore (__) as the nesting separator
+                # instead of single underscore (_). Single underscore splits keys
+                # like 'max_position_size' into ['max', 'position', 'size'] which
+                # creates incorrect nesting. Double-underscore is the standard
+                # convention for ENV-to-nested-config mapping.
+                # Example: STATARB__RISK__MAX_POSITION_SIZE -> risk.max_position_size
+                self._set_nested_config(config, config_key.split('__'), value)
 
         return config
 

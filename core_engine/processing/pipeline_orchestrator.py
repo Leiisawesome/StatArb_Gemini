@@ -1178,6 +1178,19 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
         )
         phase2_time = (datetime.now() - phase2_start).total_seconds()
 
+        # P2-6 FIX: Clean NaN/Inf values between Phase 2 and Phase 3.
+        # Indicator warm-up periods produce leading NaN rows that can corrupt
+        # feature engineering calculations (e.g., rolling windows, z-scores).
+        if indicators_df is not None and not indicators_df.empty:
+            # Replace inf with NaN, then forward-fill NaN in numeric columns
+            import numpy as np
+            numeric_cols = indicators_df.select_dtypes(include=[np.number]).columns
+            indicators_df[numeric_cols] = indicators_df[numeric_cols].replace(
+                [np.inf, -np.inf], np.nan
+            )
+            # Forward-fill then backward-fill to handle leading NaNs
+            indicators_df[numeric_cols] = indicators_df[numeric_cols].ffill().bfill()
+
         # Phase 3: Engineer features
         phase3_start = datetime.now()
         # Pass context directly to avoid stateful adaptation
@@ -1409,12 +1422,28 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
             return data.copy()
 
         try:
-            # Generate signals through EnhancedSignalGenerator (Rule 3.4)
-            # Note: This returns List[TradingSignal], but we need DataFrame for pipeline
-            # The TradingSignal objects are used separately by strategies
-            # Here we just return the features DataFrame (which is what strategies consume)
-            _ = self.signal_generator.generate_signals(data)  # Generate but don't use for DataFrame
-            return data.copy()  # Return features DataFrame (signals handled separately)
+            # P1-7 FIX: Capture signal generator output and attach signal scores
+            # to the DataFrame so downstream strategies can consume them.
+            # Previously, the List[TradingSignal] was discarded entirely.
+            trading_signals = self.signal_generator.generate_signals(data)
+            result_df = data.copy()
+
+            # Attach signal metadata to the DataFrame for strategy consumption
+            if trading_signals:
+                for signal in trading_signals:
+                    symbol = getattr(signal, 'symbol', None)
+                    strength = getattr(signal, 'strength', getattr(signal, 'confidence', 0.0))
+                    signal_type = getattr(signal, 'signal_type', 'unknown')
+                    if symbol:
+                        # Add signal columns for each symbol's signals
+                        mask = result_df.get('symbol', pd.Series()) == symbol
+                        if mask.any():
+                            result_df.loc[mask, 'signal_strength'] = strength
+                            result_df.loc[mask, 'signal_type'] = str(signal_type)
+
+                logger.debug(f"📡 Attached {len(trading_signals)} signal(s) to DataFrame")
+
+            return result_df
 
         except Exception as e:
             logger.error(f"Signal generation failed: {e}")

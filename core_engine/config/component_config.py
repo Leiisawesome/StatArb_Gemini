@@ -1335,8 +1335,11 @@ class RegimeConfig:
     feature_selection_method: str = "mutual_info"
     """Feature selection method. Default: 'mutual_info'"""
 
-    correlation_threshold: float = 0.95
-    """Correlation threshold for feature removal. Default: 0.95"""
+    # P1-12 FIX: Renamed from `correlation_threshold` (which is already defined at line 1078
+    # for regime analysis with default 0.7). This second definition for ML feature selection
+    # was silently overwriting the first, destroying the regime correlation threshold.
+    feature_correlation_threshold: float = 0.95
+    """Correlation threshold for feature removal in ML pipeline. Default: 0.95"""
 
     # Cross-validation parameters
     cross_validation_method: str = "kfold"

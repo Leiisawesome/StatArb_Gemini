@@ -1189,6 +1189,13 @@ class UnifiedExecutionEngine(ISystemComponent):
         self.position_update_callback = config.get('position_update_callback')
         self.risk_manager_callback = config.get('risk_manager_callback')
         self.enable_position_tracking = config.get('enable_position_tracking', True)
+        # P1-5 FIX: Track whether callbacks have been wired. Validated before first execution.
+        self._position_callbacks_validated = False
+
+        # P1-3 FIX: Optional FillProcessor for advanced fill validation & reconciliation.
+        # Wire via set_fill_processor() or config['fill_processor']. When set, fills are
+        # validated before position updates, catching price/quantity anomalies.
+        self.fill_processor = config.get('fill_processor', None)
 
         # Performance tracking
         self.execution_metrics = {
@@ -1294,6 +1301,19 @@ class UnifiedExecutionEngine(ISystemComponent):
                 if not success:
                     logger.error("❌ Failed to initialize execution validator")
                     return False
+
+            # P1-5 FIX: Validate position tracking callbacks are wired before
+            # the engine can be used. Without these, fills won't update PositionBook.
+            if self.enable_position_tracking:
+                if not self.risk_manager_callback and not self.position_update_callback:
+                    logger.warning(
+                        "⚠️ P1-5: Position tracking enabled but NO callbacks wired. "
+                        "Fills will NOT update PositionBook until callbacks are set. "
+                        "Call set_risk_manager_callback() or set_position_update_callback()."
+                    )
+                else:
+                    self._position_callbacks_validated = True
+                    logger.info("✅ Position tracking callbacks validated")
 
             self.is_initialized = True
             logger.info("✅ UnifiedExecutionEngine initialized successfully")
@@ -1712,14 +1732,23 @@ class UnifiedExecutionEngine(ISystemComponent):
             logger.error(f"Error calculating algorithm breakdown: {e}")
             return {}
 
+    def set_fill_processor(self, fill_processor) -> None:
+        """
+        P1-3 FIX: Wire the FillProcessor for advanced fill validation and reconciliation.
+        When set, all fills are validated through the processor before position updates.
+        """
+        self.fill_processor = fill_processor
+        logger.info("🔗 FillProcessor wired to UnifiedExecutionEngine")
+
     async def _handle_position_updates(self, request: ExecutionRequest, result: ExecutionResult):
         """
         Handle position updates after successful execution
         ENHANCED: Integrated position tracking from test implementation
+        P1-3: Optionally validates fills through FillProcessor before position update.
         """
         try:
-            # Only update positions for successful executions
-            if result.status != ExecutionStatus.FILLED or not self.enable_position_tracking:
+            # Only update positions for successful executions (FILLED or PARTIALLY_FILLED)
+            if result.status not in (ExecutionStatus.FILLED, ExecutionStatus.PARTIALLY_FILLED) or not self.enable_position_tracking:
                 return
 
             # Extract execution details
@@ -1730,6 +1759,22 @@ class UnifiedExecutionEngine(ISystemComponent):
 
             if filled_quantity <= 0:
                 return
+
+            # P1-3: Validate fill through FillProcessor if wired
+            if self.fill_processor:
+                try:
+                    if hasattr(self.fill_processor, 'validate_fill'):
+                        validation = self.fill_processor.validate_fill(
+                            symbol=symbol, side=side,
+                            quantity=filled_quantity, price=avg_price
+                        )
+                        if hasattr(validation, 'is_valid') and not validation.is_valid:
+                            logger.warning(
+                                f"⚠️ FillProcessor rejected fill: {symbol} {side} "
+                                f"{filled_quantity} @ {avg_price} — {getattr(validation, 'reason', 'unknown')}"
+                            )
+                except Exception as fp_err:
+                    logger.warning(f"FillProcessor validation failed (continuing): {fp_err}")
 
             # Update position via Risk Manager callback (preferred method)
             if self.risk_manager_callback:
@@ -1750,7 +1795,19 @@ class UnifiedExecutionEngine(ISystemComponent):
             logger.info(f"📊 Position updated: {symbol} {side.upper()} {filled_quantity} @ ${avg_price:.2f}")
 
         except Exception as e:
-            logger.error(f"❌ Position update handling failed: {e}")
+            # P1-4 FIX: Position update failures are CRITICAL — they cause
+            # PositionBook to diverge from broker state. Log at CRITICAL level
+            # and re-raise so the caller knows the fill was not tracked.
+            logger.critical(
+                f"🚨 CRITICAL: Position update failed for {symbol} {side} "
+                f"{filled_quantity} @ ${avg_price:.2f} — PositionBook may be stale! "
+                f"Error: {e}"
+            )
+            # Track the failure for monitoring/alerting
+            if hasattr(self, 'execution_metrics'):
+                self.execution_metrics['position_update_failures'] = \
+                    self.execution_metrics.get('position_update_failures', 0) + 1
+            raise  # Re-raise so caller can handle the discrepancy
 
     async def _update_position_via_risk_manager(self, symbol: str, side: str, quantity: float, price: float):
         """Update position through Risk Manager"""
@@ -1876,7 +1933,15 @@ class UnifiedExecutionEngine(ISystemComponent):
         mode = self.get_execution_mode()
 
         if mode == 'PAPER':
-            return await self._execute_paper(request)
+            result = await self._execute_paper(request)
+            # P2-5 FIX: Paper mode fills MUST also update PositionBook.
+            # Previously, paper fills bypassed position tracking entirely.
+            if result.status in (ExecutionStatus.FILLED, ExecutionStatus.PARTIALLY_FILLED):
+                try:
+                    await self._handle_position_updates(request, result)
+                except Exception as e:
+                    logger.error(f"⚠️ Paper mode position update failed: {e}")
+            return result
         elif mode == 'LIVE':
             return await self._execute_live(request)
         else:

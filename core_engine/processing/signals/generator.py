@@ -124,6 +124,12 @@ class TradingSignal:
 @dataclass
 class SignalConfig:
     """
+    P2-7 WARNING: This local SignalConfig shadows the centralized SignalConfig
+    from core_engine/config/component_config.py. Ideally, all signal configuration
+    should be sourced from the centralized config. This local class is kept for
+    backward compatibility but should be migrated to use the centralized version.
+    TODO: Replace with centralized SignalConfig from component_config.py.
+
     Configuration for signal generation
     Updated with test findings for better signal quality
     """
@@ -789,10 +795,14 @@ class EnhancedSignalGenerator(ISystemComponent, IRegimeAware):
             signals_df.loc[overbought_condition, 'sell_score'] += 0.4 * (1 + rsi_strength_sell[overbought_condition])
 
         # Enhanced Bollinger Bands signals
-        if 'bb_upper_20' in df.columns and 'bb_lower_20' in df.columns:
+        # P0-4 FIX: EnhancedTechnicalIndicators produces 'bb_upper'/'bb_lower' (not 'bb_upper_20'/'bb_lower_20')
+        # Accept both naming conventions for backward compatibility
+        bb_upper_col = 'bb_upper' if 'bb_upper' in df.columns else ('bb_upper_20' if 'bb_upper_20' in df.columns else None)
+        bb_lower_col = 'bb_lower' if 'bb_lower' in df.columns else ('bb_lower_20' if 'bb_lower_20' in df.columns else None)
+        if bb_upper_col and bb_lower_col:
             price = df['close']
-            bb_upper = df['bb_upper_20']
-            bb_lower = df['bb_lower_20']
+            bb_upper = df[bb_upper_col]
+            bb_lower = df[bb_lower_col]
 
             below_bb_lower = price < bb_lower
             above_bb_upper = price > bb_upper

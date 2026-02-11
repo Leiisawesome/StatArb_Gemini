@@ -255,7 +255,15 @@ class MarketRegimeState:
 
 @dataclass
 class RegimeConfig:
-    """Regime detection configuration"""
+    """
+    P2-20 WARNING: This is a LIGHTWEIGHT RegimeConfig for the local RegimeEngine
+    class below. The CANONICAL RegimeConfig is in core_engine/config/component_config.py
+    with 400+ lines of comprehensive configuration.
+
+    This class exists for backward compatibility with the simplified RegimeEngine.
+    New code should import RegimeConfig from core_engine.config.component_config.
+    TODO: Remove this class and consolidate all usage to component_config.RegimeConfig.
+    """
     lookback_window: int = 20  # Days for regime analysis
     volatility_threshold: float = 0.02  # 2% daily volatility threshold
     trend_threshold: float = 0.05  # 5% trend threshold
@@ -354,10 +362,11 @@ class RegimeEngine:
             return RegimeState.LOW_VOLATILITY
 
         # Trend-based classification
+        # P0-9 FIX: RegimeState.BULL/BEAR don't exist; use BULL_MARKET/BEAR_MARKET
         if price_change > self.config.trend_threshold:
-            return RegimeState.BULL
+            return RegimeState.BULL_MARKET
         elif price_change < -self.config.trend_threshold:
-            return RegimeState.BEAR
+            return RegimeState.BEAR_MARKET
         else:
             return RegimeState.SIDEWAYS
 

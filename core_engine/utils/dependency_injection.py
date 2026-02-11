@@ -36,11 +36,20 @@ class DependencyInjectionContainer:
 
     Provides centralized component registration and resolution.
     Supports singleton, transient, and scoped component lifecycles.
+
+    P2-16 NOTE: This DI container is currently disconnected from the
+    HierarchicalSystemOrchestrator. The orchestrator manages its own component
+    registry via ComponentManager. Until these are unified, use the orchestrator
+    for production component lifecycle and this DI container for utility wiring.
+    TODO: Unify DI container with orchestrator's ComponentManager.
     """
 
     def __init__(self):
+        import threading
         self._registrations: Dict[Type, ComponentRegistration] = {}
         self._scoped_instances: Dict[str, Dict[Type, Any]] = {}
+        # P2-17 FIX: Add lock for thread-safe singleton resolution
+        self._lock = threading.Lock()
 
     def register(self, interface: Type[T], implementation: Optional[Type[T]] = None,
                 scope: ComponentScope = ComponentScope.SINGLETON,
@@ -100,27 +109,34 @@ class DependencyInjectionContainer:
 
         registration = self._registrations[interface]
 
-        # Return existing singleton instance
+        # P2-17 FIX: Thread-safe singleton resolution with double-checked locking
+        # Return existing singleton instance (fast path, no lock needed)
         if registration.scope == ComponentScope.SINGLETON and registration.instance is not None:
             return registration.instance
 
-        # Return existing scoped instance
+        # Return existing scoped instance (fast path)
         if registration.scope == ComponentScope.SCOPED and scope_name:
             if scope_name in self._scoped_instances and interface in self._scoped_instances[scope_name]:
                 return self._scoped_instances[scope_name][interface]
 
-        # Create new instance
-        instance = self._create_instance(registration)
+        # Slow path: acquire lock for creation
+        with self._lock:
+            # Double-check after acquiring lock
+            if registration.scope == ComponentScope.SINGLETON and registration.instance is not None:
+                return registration.instance
 
-        # Store singleton instance
-        if registration.scope == ComponentScope.SINGLETON:
-            registration.instance = instance
+            # Create new instance
+            instance = self._create_instance(registration)
 
-        # Store scoped instance
-        elif registration.scope == ComponentScope.SCOPED and scope_name:
-            if scope_name not in self._scoped_instances:
-                self._scoped_instances[scope_name] = {}
-            self._scoped_instances[scope_name][interface] = instance
+            # Store singleton instance
+            if registration.scope == ComponentScope.SINGLETON:
+                registration.instance = instance
+
+            # Store scoped instance
+            elif registration.scope == ComponentScope.SCOPED and scope_name:
+                if scope_name not in self._scoped_instances:
+                    self._scoped_instances[scope_name] = {}
+                self._scoped_instances[scope_name][interface] = instance
 
         return instance
 
