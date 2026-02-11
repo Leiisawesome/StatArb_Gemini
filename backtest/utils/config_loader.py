@@ -188,6 +188,11 @@ def _papertest_to_backtest_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
             if "strategy_type" in s and "type" not in s:
                 s["type"] = s["strategy_type"]
 
+    # Pipeline trace settings (Signal-to-PnL trace framework)
+    trace = pt.get("trace", {}) or {}
+    if trace.get("enable_pipeline_trace"):
+        out["enable_pipeline_trace"] = True
+
     # NOTE: We intentionally do not merge arbitrary flat keys here.
     # If you need a flat override, put it into the canonical papertest schema
     # (or add a dedicated override adapter).

@@ -714,6 +714,39 @@ class PositionBook(IPositionBook):
 
             self._update_history.append(update)
 
+            # --- CP6: Pipeline Trace - Position Book Update ---
+            from core_engine.utils.pipeline_trace import get_tracer, CP6_POSITION_UPDATE
+            _cp6_tracer = get_tracer()
+            if _cp6_tracer.enabled:
+                _cp6_tracer.emit(
+                    trace_id=fill.order_id or fill.fill_id,
+                    checkpoint=CP6_POSITION_UPDATE,
+                    component="PositionBook",
+                    method="on_fill",
+                    symbol=symbol,
+                    bar_timestamp=str(fill.timestamp),
+                    input_data={
+                        "fill_id": fill.fill_id,
+                        "side": fill.side.value,
+                        "quantity": float(fill.quantity),
+                        "price": float(fill.price),
+                        "commission": float(fill.commission),
+                    },
+                    output_data={
+                        "event_type": event_type.value if hasattr(event_type, 'value') else str(event_type),
+                        "new_quantity": float(update.new_quantity),
+                        "new_avg_price": float(update.new_avg_price),
+                        "realized_pnl": float(realized_pnl),
+                        "cash_change": float(cash_change),
+                        "previous_quantity": float(prev_quantity),
+                        "total_realized_pnl": float(self._total_realized_pnl),
+                    },
+                    metadata={
+                        "positions_count": len(self._positions),
+                        "cash_balance": float(self._cash_balance),
+                    },
+                )
+
         # Publish event (outside lock to avoid deadlock)
         self._publish_event(update)
 

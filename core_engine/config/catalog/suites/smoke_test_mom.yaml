@@ -121,3 +121,7 @@ papertest:
     seed: 42
     use_historical_execution_simulator: true
 
+  # End-to-end pipeline tracing (Signal-to-PnL trace framework)
+  trace:
+    enable_pipeline_trace: true
+

@@ -146,8 +146,10 @@ class BaseExperiment(ABC):
                 for key, value in result.custom_metrics.items():
                     if isinstance(value, float):
                         print(f"  {key:<20} {value:>10.4f}")
+                    elif isinstance(value, dict):
+                        print(f"  {key:<20} {json.dumps(value, default=str)}")
                     else:
-                        print(f"  {key:<20} {value:>10}")
+                        print(f"  {key:<20} {value!s:>10}")
 
             # Print trade list if available
             if result.engine_results and 'execution_history' in result.engine_results:

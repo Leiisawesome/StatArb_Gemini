@@ -48,6 +48,27 @@ from core_engine.trading.position_book import PositionBook, IPositionBook
 
 logger = logging.getLogger(__name__)
 
+
+def _signal_to_dict(s) -> dict:
+    """Convert a Signal object to a canonical dict for DataFrame construction.
+
+    Canonical field name is ``signal_type`` (not ``signal``).
+    Downstream consumers already handle both, but we standardise here.
+    """
+    return {
+        'strategy_id': getattr(s, 'strategy_id', 'backtest_strategy'),
+        'symbol': s.symbol,
+        'signal_type': s.signal_type.value if hasattr(s.signal_type, 'value') else s.signal_type,
+        'confidence': s.confidence,
+        'strength': getattr(s, 'strength', 0.5),
+        'timestamp': getattr(s, 'timestamp', None),
+        'target_weight': getattr(s, 'target_weight', None),
+        'quantity_type': getattr(s, 'quantity_type', 'ABSOLUTE'),
+        'target_quantity': getattr(s, 'target_quantity', 0),
+        'additional_data': getattr(s, 'additional_data', {}),
+    }
+
+
 class InstitutionalBacktestEngine:
     """
     Institutional-Grade Backtest Engine
@@ -161,8 +182,6 @@ class InstitutionalBacktestEngine:
         self.metrics_calculator = None # BRICK #10 (order=32)
         self.performance_analyzer = None # BRICK #11 (order=33)
         self.analytics_manager = None  # BRICK #12 (order=35)
-        self.performance_reporter = None  # Helper for report generation
-
         # Historical data for strategies
         self.historical_market_data: Dict[str, pd.DataFrame] = {}
 
@@ -1788,42 +1807,6 @@ class InstitutionalBacktestEngine:
         # Access cash via: self.risk_manager.available_cash
         # Update positions via: await self.risk_manager.update_position()
 
-    async def _initialize_indicators_engine(self) -> None:
-        """
-        DEPRECATED: Replaced by ProcessingPipelineOrchestrator (Rule 3 Compliance)
-
-        This method is no longer called. EnhancedTechnicalIndicators is now
-        instantiated and managed by ProcessingPipelineOrchestrator, ensuring:
-        - Single-pass processing (no duplicate calculations)
-        - Consistent indicator calculations across all strategies
-        - Built-in data validation
-
-        Keep for backward compatibility but not invoked in initialization flow.
-        """
-        pass  # Replaced by ProcessingPipelineOrchestrator
-
-    async def _initialize_feature_engineer(self) -> None:
-        """
-        DEPRECATED: Replaced by ProcessingPipelineOrchestrator (Rule 3 Compliance)
-
-        This method is no longer called. EnhancedFeatureEngineer is now
-        instantiated and managed by ProcessingPipelineOrchestrator.
-
-        Keep for backward compatibility but not invoked in initialization flow.
-        """
-        pass  # Replaced by ProcessingPipelineOrchestrator
-
-    async def _initialize_signal_generator(self) -> None:
-        """
-        DEPRECATED: Replaced by ProcessingPipelineOrchestrator (Rule 3 Compliance)
-
-        This method is no longer called. EnhancedSignalGenerator is now
-        instantiated and managed by ProcessingPipelineOrchestrator.
-
-        Keep for backward compatibility but not invoked in initialization flow.
-        """
-        pass  # Replaced by ProcessingPipelineOrchestrator
-
     # ============================================================
     # PHASE 5: EXECUTION INTEGRATION (Rule 7 - Phases 8-11)
     # ============================================================
@@ -2918,47 +2901,6 @@ class InstitutionalBacktestEngine:
     # SPRINT 0.3: REJECTION STATISTICS REPORTING
     # ============================================================
 
-    def get_rejection_statistics(self) -> Dict[str, Any]:
-        """
-        Get order rejection statistics (Sprint 0.3)
-
-        Returns comprehensive rejection analytics including:
-        - Total rejection count
-        - Rejection reasons breakdown
-        - Rejection rate by symbol
-        - Retry success rate
-
-        Returns:
-            Dict with rejection statistics
-        """
-        if not hasattr(self, 'rejection_stats'):
-            return {
-                'total_rejections': 0,
-                'rejection_rate': 0.0,
-                'message': 'No rejections recorded'
-            }
-
-        total_trades_attempted = len(self.execution_history) + self.rejection_stats['total_rejections']
-        rejection_rate = self.rejection_stats['total_rejections'] / total_trades_attempted if total_trades_attempted > 0 else 0.0
-
-        # Calculate retry statistics
-        retry_stats = {}
-        for trade in self.execution_history:
-            if trade.get('had_rejections', False):
-                retry_count = trade.get('retry_count', 0)
-                retry_stats[retry_count] = retry_stats.get(retry_count, 0) + 1
-
-        return {
-            'total_rejections': self.rejection_stats['total_rejections'],
-            'total_trades_attempted': total_trades_attempted,
-            'rejection_rate': rejection_rate,
-            'rejection_reasons': self.rejection_stats['rejection_reasons'],
-            'rejected_trades_count': len(self.rejection_stats['rejected_trades']),
-            'retry_stats': retry_stats,
-            'most_common_rejection': max(self.rejection_stats['rejection_reasons'].items(),
-                                        key=lambda x: x[1])[0] if self.rejection_stats['rejection_reasons'] else None
-        }
-
     # ============================================================
     # REPORT GENERATION METHODS
     # ============================================================
@@ -3338,6 +3280,10 @@ class InstitutionalBacktestEngine:
 
                 is_multi_symbol = len(self.config.symbols) > 1
 
+                # --- CP0: Pipeline Trace - Raw Market Data (batch, pre-enrichment) ---
+                from core_engine.utils.pipeline_trace import get_tracer, CP0_MARKET_DATA, CP1_ENRICHMENT
+                _cp01_tracer = get_tracer()
+
                 if is_multi_symbol:
                     logger.info(f"   📊 Multi-symbol mode: calculating indicators for {len(self.config.symbols)} symbols")
 
@@ -3351,6 +3297,25 @@ class InstitutionalBacktestEngine:
                         if 'timestamp' not in sym_data.columns:
                             sym_data = sym_data.reset_index()
 
+                        # --- CP0: Raw market data per symbol (before enrichment) ---
+                        if _cp01_tracer.enabled:
+                            _cp01_tracer.emit(
+                                trace_id=f"precalc_raw_{sym}",
+                                checkpoint=CP0_MARKET_DATA,
+                                component="InstitutionalBacktestEngine",
+                                method="run_backtest(pre_calc)",
+                                symbol=sym,
+                                bar_timestamp=str(sym_data['timestamp'].iloc[-1]) if 'timestamp' in sym_data.columns and len(sym_data) > 0 else "batch",
+                                input_data=sym_data,
+                                output_data=sym_data,
+                                metadata={
+                                    "phase": "pre_calculation",
+                                    "bars": len(sym_data),
+                                    "columns": sorted(sym_data.columns.tolist()),
+                                    "mode": "multi_symbol",
+                                },
+                            )
+
                         # Calculate indicators for this symbol
                         if self.indicators_engine:
                             sym_indicators = self.indicators_engine.calculate_indicators(sym_data)
@@ -3361,6 +3326,30 @@ class InstitutionalBacktestEngine:
                                 sym_features = self.feature_engineer.create_features(sym_indicators)
                                 self.pre_calculated_features_per_symbol[sym] = sym_features
                                 logger.info(f"   ✅ {sym}: {len(sym_features)} bars with indicators+features")
+
+                                # --- CP1: Enrichment complete for this symbol ---
+                                if _cp01_tracer.enabled:
+                                    import numpy as _cp1_np
+                                    _cp1_nan = int(sym_features.select_dtypes(include=[_cp1_np.number]).isna().sum().sum()) if not sym_features.empty else 0
+                                    _cp01_tracer.emit(
+                                        trace_id=f"precalc_enrich_{sym}",
+                                        checkpoint=CP1_ENRICHMENT,
+                                        component="InstitutionalBacktestEngine",
+                                        method="run_backtest(pre_calc)",
+                                        symbol=sym,
+                                        bar_timestamp=str(sym_features['timestamp'].iloc[-1]) if 'timestamp' in sym_features.columns and len(sym_features) > 0 else "batch",
+                                        input_data=sym_data,
+                                        output_data=sym_features,
+                                        metadata={
+                                            "phase": "pre_calculation",
+                                            "raw_bars": len(sym_data),
+                                            "enriched_bars": len(sym_features),
+                                            "indicator_columns": sorted(sym_indicators.columns.tolist()) if sym_indicators is not None else [],
+                                            "feature_columns": sorted(sym_features.columns.tolist()),
+                                            "nan_count": _cp1_nan,
+                                            "mode": "multi_symbol",
+                                        },
+                                    )
 
                     # For backward compatibility, set primary symbol's data
                     primary_symbol = self.config.symbols[0]
@@ -3376,6 +3365,26 @@ class InstitutionalBacktestEngine:
                     # Store full data count for reference
                     full_data_count = len(data_for_processing)
 
+                    # --- CP0: Raw market data (single symbol, before enrichment) ---
+                    _single_sym = self.config.symbols[0] if self.config.symbols else "UNKNOWN"
+                    if _cp01_tracer.enabled:
+                        _cp01_tracer.emit(
+                            trace_id=f"precalc_raw_{_single_sym}",
+                            checkpoint=CP0_MARKET_DATA,
+                            component="InstitutionalBacktestEngine",
+                            method="run_backtest(pre_calc)",
+                            symbol=_single_sym,
+                            bar_timestamp=str(data_for_processing['timestamp'].iloc[-1]) if 'timestamp' in data_for_processing.columns and len(data_for_processing) > 0 else "batch",
+                            input_data=data_for_processing,
+                            output_data=data_for_processing,
+                            metadata={
+                                "phase": "pre_calculation",
+                                "bars": len(data_for_processing),
+                                "columns": sorted(data_for_processing.columns.tolist()),
+                                "mode": "single_symbol",
+                            },
+                        )
+
                     # Step 1: Calculate all indicators (using full history for proper context)
                     self.pre_calculated_indicators = None
                     if self.indicators_engine:
@@ -3386,6 +3395,30 @@ class InstitutionalBacktestEngine:
                     self.pre_calculated_features = None
                     if self.feature_engineer and self.pre_calculated_indicators is not None:
                         self.pre_calculated_features = self.feature_engineer.create_features(self.pre_calculated_indicators)
+
+                    # --- CP1: Enrichment complete (single symbol) ---
+                    if _cp01_tracer.enabled and self.pre_calculated_features is not None and not self.pre_calculated_features.empty:
+                        import numpy as _cp1_np
+                        _cp1_nan = int(self.pre_calculated_features.select_dtypes(include=[_cp1_np.number]).isna().sum().sum())
+                        _cp01_tracer.emit(
+                            trace_id=f"precalc_enrich_{_single_sym}",
+                            checkpoint=CP1_ENRICHMENT,
+                            component="InstitutionalBacktestEngine",
+                            method="run_backtest(pre_calc)",
+                            symbol=_single_sym,
+                            bar_timestamp=str(self.pre_calculated_features['timestamp'].iloc[-1]) if 'timestamp' in self.pre_calculated_features.columns and len(self.pre_calculated_features) > 0 else "batch",
+                            input_data=data_for_processing,
+                            output_data=self.pre_calculated_features,
+                            metadata={
+                                "phase": "pre_calculation",
+                                "raw_bars": len(data_for_processing),
+                                "enriched_bars": len(self.pre_calculated_features),
+                                "indicator_columns": sorted(self.pre_calculated_indicators.columns.tolist()) if self.pre_calculated_indicators is not None else [],
+                                "feature_columns": sorted(self.pre_calculated_features.columns.tolist()),
+                                "nan_count": _cp1_nan,
+                                "mode": "single_symbol",
+                            },
+                        )
 
                     # IMPORTANT: do NOT drop warmup history from pre_calculated_features.
                     # Strategies (and parity with papertest) require warmup bars as historical context
@@ -4303,31 +4336,20 @@ class InstitutionalBacktestEngine:
                                     columns=['open', 'high', 'low', 'close', 'volume']
                                 )
 
+                        # NOTE: CP0 (raw market data) and CP1 (enrichment) are emitted
+                        # during the pre-calculation phase in run_backtest(), before the
+                        # bar loop starts.  The enriched_data_per_symbol here is a slice
+                        # of the already pre-calculated indicator DataFrame.
                         signals_result = await self.strategy_manager.generate_signals(
                             self.config.symbols,
                             enriched_data_per_symbol,
                             current_positions,
                             position_details=position_details  # Pass rich position context
                         )
-
                         # Strategy returns List[Signal], convert to DataFrame
                         if signals_result is not None and len(signals_result) > 0:
-                            # Convert list of Signal objects to DataFrame with explicit field extraction
-                            signals_df = pd.DataFrame([{
-                                'strategy_id': getattr(s, 'strategy_id', 'backtest_strategy'),
-                                'symbol': s.symbol,
-                                'signal_type': s.signal_type.value if hasattr(s.signal_type, 'value') else s.signal_type,
-                                'confidence': s.confidence,
-                                'strength': getattr(s, 'strength', 0.5),
-                                'timestamp': getattr(s, 'timestamp', None),
-                                'target_weight': getattr(s, 'target_weight', None),
-                                'quantity_type': getattr(s, 'quantity_type', 'ABSOLUTE'),
-                                'target_quantity': getattr(s, 'target_quantity', 0),
-                                'additional_data': getattr(s, 'additional_data', {})
-                            } for s in signals_result])
+                            signals_df = pd.DataFrame([_signal_to_dict(s) for s in signals_result])
                             bar_results['signals_generated'] = len(signals_df)
-                            # Debug trace (parity): record signals with bar timestamps.
-                            # (Parity debug traces removed) 
                     else:
                         # No matching timestamp found in pre_calculated_features
                         # Fall back to on-the-fly calculation
@@ -4340,13 +4362,7 @@ class InstitutionalBacktestEngine:
 
             # Fallback to on-the-fly calculation if pre-calculated data not available
             if not use_pre_calculated:
-                # Create DataFrame for current bar
-                bar_dict = bar.to_dict()
-                if 'timestamp' in bar_dict:
-                    bar_dict.pop('timestamp')
-                bar_df = pd.DataFrame([bar_dict], index=[timestamp])
-                bar_df.index.name = 'timestamp'
-                bar_df = bar_df.reset_index()
+                # bar_df already created above (before the pre-calc branch)
 
                 # Accumulate historical market data for strategies
                 for symbol in self.config.symbols:
@@ -4394,37 +4410,27 @@ class InstitutionalBacktestEngine:
                                         'is_profitable': pnl_pct > 0  # Fix: use pnl_pct, not unrealized_pnl
                                     }
 
-                        # For multi-symbol strategies (e.g., pairs trading), pass all symbols' historical data
-                        # Each symbol gets its accumulated historical data, not just the current bar
+                        # Build enriched_data_per_symbol from on-the-fly features_df
+                        # (not raw market_data — strategies expect enriched columns)
                         enriched_data_per_symbol = {}
                         for sym in self.config.symbols:
-                            if sym in self.market_data and len(self.market_data[sym]) > 0:
-                                # Use actual historical data for this symbol up to current timestamp
+                            if features_df is not None and not features_df.empty:
+                                # Use the freshly-computed features (OHLCV + indicators + features)
+                                enriched_data_per_symbol[sym] = features_df.copy()
+                            elif sym in self.market_data and len(self.market_data[sym]) > 0:
+                                # Last resort: raw market_data (strategies may lack needed columns)
+                                logger.warning(f"[WARN] No enriched features for {sym} in on-the-fly path, using raw data")
                                 sym_data = self.market_data[sym].copy()
-
-                                # Ensure timestamp index for filtering
-                                # market_data may have timestamp as column, not index
                                 if 'timestamp' in sym_data.columns and not isinstance(sym_data.index, pd.DatetimeIndex):
                                     sym_data = sym_data.set_index('timestamp')
-
-                                # Filter data up to current bar timestamp
                                 if timestamp is not None:
                                     ts_compare = pd.Timestamp(timestamp)
-                                    # Handle timezone compatibility
-                                    if hasattr(sym_data.index, 'tz') and sym_data.index.tz is not None:
-                                        if ts_compare.tz is None:
-                                            ts_compare = ts_compare.tz_localize(sym_data.index.tz)
-                                    elif hasattr(sym_data.index, 'tz') and sym_data.index.tz is None:
-                                        if ts_compare.tz is not None:
-                                            ts_compare = ts_compare.tz_localize(None)
-                                    # AXIS2 FIX: Strict < to EXCLUDE current bar
+                                    if hasattr(sym_data.index, 'tz') and sym_data.index.tz is not None and ts_compare.tz is None:
+                                        ts_compare = ts_compare.tz_localize(sym_data.index.tz)
                                     sym_data = sym_data[sym_data.index < ts_compare]
-
                                 enriched_data_per_symbol[sym] = sym_data
                             else:
-                                # AXIS4 FIX: Do not fall back to a different symbol's features.
-                                # Provide empty contract-compliant DataFrame instead.
-                                logger.warning(f"⚠️  No market_data for {sym} in on-the-fly path")
+                                logger.warning(f"[WARN] No data for {sym} in on-the-fly path")
                                 enriched_data_per_symbol[sym] = pd.DataFrame(
                                     columns=['open', 'high', 'low', 'close', 'volume']
                                 )
@@ -4439,20 +4445,8 @@ class InstitutionalBacktestEngine:
                         # Strategy returns List[Signal], convert to DataFrame
                         if signals_result is not None:
                             if isinstance(signals_result, list) and len(signals_result) > 0:
-                                # Convert list of Signal objects to DataFrame
-                                signals_df = pd.DataFrame([{
-                                    'strategy_id': getattr(s, 'strategy_id', 'backtest_strategy'),
-                                    'symbol': s.symbol,
-                                    'signal': s.signal_type.value if hasattr(s.signal_type, 'value') else s.signal_type,
-                                    'confidence': s.confidence,
-                                    'strength': getattr(s, 'strength', 0.5),
-                                    'timestamp': getattr(s, 'timestamp', None),
-                                    'target_quantity': getattr(s, 'target_quantity', 0),
-                                    'target_weight': getattr(s, 'target_weight', None),  # CRITICAL FIX: Extract target_weight
-                                    'quantity_type': getattr(s, 'quantity_type', 'ABSOLUTE'),  # CRITICAL FIX: Extract quantity_type
-                                    'additional_data': getattr(s, 'additional_data', {})
-                                } for s in signals_result])
-                                logger.info(f"   ✅ Generated {len(signals_df)} signals from fallback enriched features")
+                                signals_df = pd.DataFrame([_signal_to_dict(s) for s in signals_result])
+                                logger.info(f"   [OK] Generated {len(signals_df)} signals from fallback enriched features")
                             elif isinstance(signals_result, pd.DataFrame) and not signals_result.empty:
                                 signals_df = signals_result
                     except Exception as e:
@@ -4460,39 +4454,17 @@ class InstitutionalBacktestEngine:
                         # Final fallback to pipeline signal generator only as last resort
                         logger.warning(f"   Falling back to pipeline signal generator (not ideal)")
                         signals_result = self.signal_generator.generate_signals(features_df) if self.signal_generator and features_df is not None else None
-                        if isinstance(signals_result, list):
-                            signals_df = pd.DataFrame([{
-                                'strategy_id': getattr(s, 'strategy_id', 'backtest_strategy'),
-                                'symbol': s.symbol,
-                                'signal': s.signal_type.value if hasattr(s.signal_type, 'value') else s.signal_type,
-                                'confidence': s.confidence,
-                                'strength': getattr(s, 'strength', 0.5),
-                                'timestamp': getattr(s, 'timestamp', None),
-                                'target_quantity': getattr(s, 'target_quantity', 0),
-                                'target_weight': getattr(s, 'target_weight', None),
-                                'quantity_type': getattr(s, 'quantity_type', 'ABSOLUTE'),
-                                'additional_data': getattr(s, 'additional_data', {})
-                            } for s in signals_result]) if signals_result else None
-                        else:
+                        if isinstance(signals_result, list) and signals_result:
+                            signals_df = pd.DataFrame([_signal_to_dict(s) for s in signals_result])
+                        elif isinstance(signals_result, pd.DataFrame):
                             signals_df = signals_result
                 else:
                     # No strategy manager, use pipeline signal generator as fallback
-                    logger.warning(f"⚠️  No strategy manager available, using pipeline signal generator")
+                    logger.warning("[WARN] No strategy manager available, using pipeline signal generator")
                     signals_result = self.signal_generator.generate_signals(features_df) if self.signal_generator and features_df is not None else None
-                    if isinstance(signals_result, list):
-                        signals_df = pd.DataFrame([{
-                            'strategy_id': getattr(s, 'strategy_id', 'backtest_strategy'),
-                            'symbol': s.symbol,
-                            'signal': s.signal_type.value if hasattr(s.signal_type, 'value') else s.signal_type,
-                            'confidence': s.confidence,
-                            'strength': getattr(s, 'strength', 0.5),
-                            'timestamp': getattr(s, 'timestamp', None),
-                            'target_quantity': getattr(s, 'target_quantity', 0),
-                            'target_weight': getattr(s, 'target_weight', None),
-                            'quantity_type': getattr(s, 'quantity_type', 'ABSOLUTE'),
-                            'additional_data': getattr(s, 'additional_data', {})
-                        } for s in signals_result]) if signals_result else None
-                    else:
+                    if isinstance(signals_result, list) and signals_result:
+                        signals_df = pd.DataFrame([_signal_to_dict(s) for s in signals_result])
+                    elif isinstance(signals_result, pd.DataFrame):
                         signals_df = signals_result
 
                 if signals_df is not None and not signals_df.empty:
@@ -5587,23 +5559,59 @@ class InstitutionalBacktestEngine:
                     # Use simulate_fill_with_rejection for realistic order rejection modeling
                     if quantity <= 0:
                         continue
+
+                    _auth_id = getattr(auth_trade.get('authorization', {}), 'authorization_id', '')
+                    _strategy_id = auth_trade.get('strategy_id', 'backtest_strategy')
+
                     execution_result = self.execution_simulator.simulate_fill_with_rejection(
                         symbol=symbol,
                         side=side.lower(),
                         quantity=quantity,
                         decision_price=decision_price,  # G4 FIX: bar N close (when signal was generated), NOT current_price (bar N+1 open)
                         market_data=market_data,
-                        authorization_id=getattr(auth_trade.get('authorization', {}), 'authorization_id', ''),
-                        strategy_id=auth_trade.get('strategy_id', 'backtest_strategy'),
+                        authorization_id=_auth_id,
+                        strategy_id=_strategy_id,
                         regime_context=regime_dict,
                         liquidity_score=liquidity_score,
                         max_retries=3  # Allow up to 3 retries with modifications
                     )
 
+                    # --- CP4: Pipeline Trace - Order Creation (backtest path) ---
+                    from core_engine.utils.pipeline_trace import get_tracer, CP4_ORDER_CREATE, CP5_FILL
+                    _cp45_tracer = get_tracer()
+                    if _cp45_tracer.enabled:
+                        _cp45_tracer.emit(
+                            trace_id=_auth_id or f"order_{symbol}_{bar_timestamp}",
+                            checkpoint=CP4_ORDER_CREATE,
+                            component="InstitutionalBacktestEngine",
+                            method="simulate_execution",
+                            symbol=symbol,
+                            bar_timestamp=str(bar_timestamp),
+                            input_data={
+                                "authorization_id": _auth_id,
+                                "symbol": symbol,
+                                "side": side,
+                                "quantity": float(quantity),
+                                "decision_price": float(decision_price),
+                                "execution_price": float(current_price),
+                                "strategy_id": _strategy_id,
+                            },
+                            output_data={
+                                "success": execution_result['success'],
+                                "retry_count": execution_result['retry_count'],
+                                "rejection_count": len(execution_result['rejection_history']),
+                                "final_quantity": float(execution_result.get('final_quantity', 0)),
+                            },
+                            metadata={
+                                "regime": str(regime_dict.get('regime', 'unknown')) if regime_dict else "unknown",
+                                "liquidity_score": float(liquidity_score) if liquidity_score is not None else None,
+                            },
+                        )
+
                     # Check if execution was successful
                     if not execution_result['success']:
                         # Order was rejected and retries exhausted
-                        logger.warning(f"❌ Order REJECTED after {execution_result['retry_count']} retries: {symbol} {side} {quantity}")
+                        logger.warning(f"[FAIL] Order REJECTED after {execution_result['retry_count']} retries: {symbol} {side} {quantity}")
                         logger.warning(f"   Rejection history: {len(execution_result['rejection_history'])} rejections")
                         logger.warning(f"   Failure reason: {execution_result.get('failure_reason', 'Unknown')}")
 
@@ -5641,7 +5649,42 @@ class InstitutionalBacktestEngine:
 
                     # Log if quantity was reduced
                     if actual_quantity < quantity:
-                        logger.info(f"📊 Quantity reduced during retry: {quantity} → {actual_quantity} ({symbol})")
+                        logger.info(f"[INFO] Quantity reduced during retry: {quantity} -> {actual_quantity} ({symbol})")
+
+                    # --- CP5: Pipeline Trace - Fill (backtest path) ---
+                    if _cp45_tracer.enabled:
+                        _cp45_tracer.emit(
+                            trace_id=simulated_fill.fill_id or _auth_id or f"fill_{symbol}_{bar_timestamp}",
+                            checkpoint=CP5_FILL,
+                            component="InstitutionalBacktestEngine",
+                            method="simulate_execution",
+                            symbol=symbol,
+                            bar_timestamp=str(bar_timestamp),
+                            input_data={
+                                "fill_id": simulated_fill.fill_id,
+                                "symbol": symbol,
+                                "side": side,
+                                "quantity": float(actual_quantity),
+                                "decision_price": float(simulated_fill.decision_price),
+                                "market_price": float(simulated_fill.market_price),
+                                "price": float(simulated_fill.fill_price),
+                                "fill_price": float(simulated_fill.fill_price),
+                            },
+                            output_data={
+                                "total_cost_bps": float(simulated_fill.costs.total_cost_bps),
+                                "spread_cost_bps": float(simulated_fill.costs.spread_cost_bps),
+                                "market_impact_bps": float(simulated_fill.costs.market_impact_bps),
+                                "slippage_bps": float(simulated_fill.costs.slippage_bps),
+                                "commission_bps": float(simulated_fill.costs.commission_bps),
+                                "total_cost_dollars": float(simulated_fill.costs.total_cost_dollars),
+                                "implementation_shortfall_bps": float(simulated_fill.implementation_shortfall_bps),
+                            },
+                            metadata={
+                                "arrival_cost_bps": float(simulated_fill.arrival_cost_bps),
+                                "permanent_impact_bps": float(simulated_fill.costs.permanent_impact_bps),
+                                "temporary_impact_bps": float(simulated_fill.costs.temporary_impact_bps),
+                            },
+                        )
 
                     # ✅ CRITICAL FIX (Rule 4): Update positions via CentralRiskManager (not deprecated position_tracker)
                     position_update = {}
@@ -5881,32 +5924,4 @@ class InstitutionalBacktestEngine:
             f")"
         )
 
-# ============================================================
-# Helper function for quick engine creation
-# ============================================================
-
-async def create_backtest_engine(config_path: Path) -> InstitutionalBacktestEngine:
-    """
-    Convenience function to create and initialize backtest engine
-
-    Args:
-        config_path: Path to backtest configuration JSON
-
-    Returns:
-        Initialized backtest engine
-
-    Usage:
-        engine = await create_backtest_engine(Path("my_backtest.json"))
-        results = await engine.run_backtest()
-    """
-    # Load configuration
-    config = BacktestConfig.from_json(config_path)
-
-    # Create engine
-    engine = InstitutionalBacktestEngine(config)
-
-    # Initialize
-    await engine.initialize()
-
-    return engine
 

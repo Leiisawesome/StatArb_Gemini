@@ -1205,6 +1205,31 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
         # Merge liquidity features
         features_df = self._merge_liquidity_features(features_df, symbol)
 
+        # --- CP1: Pipeline Trace - Feature/Indicator Enrichment ---
+        from core_engine.utils.pipeline_trace import get_tracer, CP1_ENRICHMENT
+        _cp1_tracer = get_tracer()
+        if _cp1_tracer.enabled:
+            import numpy as _cp1_np
+            _cp1_nan_count = int(features_df.select_dtypes(include=[_cp1_np.number]).isna().sum().sum()) if features_df is not None and not features_df.empty else 0
+            _cp1_tracer.emit(
+                trace_id=f"enrich_{symbol}",
+                checkpoint=CP1_ENRICHMENT,
+                component="ProcessingPipelineOrchestrator",
+                method="_process_pipeline_stages",
+                symbol=symbol,
+                bar_timestamp=features_df.index[-1] if features_df is not None and not features_df.empty and hasattr(features_df.index, '__len__') and len(features_df) > 0 else "unknown",
+                input_data=symbol_data,
+                output_data=features_df,
+                metadata={
+                    "indicator_columns": sorted(indicators_df.columns.tolist()) if indicators_df is not None else [],
+                    "feature_columns": sorted(features_df.columns.tolist()) if features_df is not None else [],
+                    "nan_count": _cp1_nan_count,
+                    "phase2_time_s": phase2_time,
+                    "phase3_time_s": phase3_time,
+                },
+                elapsed_ms=(phase2_time + phase3_time) * 1000,
+            )
+
         # Phase 4: Generate signals
         phase4_start = datetime.now()
         signals_df = await self._generate_signals(features_df)

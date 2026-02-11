@@ -47,8 +47,19 @@ class SmokeTest(BaseExperiment):
         start_time = time.time()
         experiment_name = self.config.get('experiment_name', 'Smoke_Test')
 
+        # --- Configure pipeline tracer if enabled in config ---
+        if self.config.get('enable_pipeline_trace', False):
+            from core_engine.utils.pipeline_trace import get_tracer
+            _tracer = get_tracer()
+            _tracer.configure(
+                enabled=True,
+                output_dir=str(self.output_dir),
+                session_id=f"trace-{experiment_name.lower().replace(' ', '_')}",
+            )
+            self.logger.info("Pipeline trace enabled: checkpoints will be recorded")
+
         try:
-            self.logger.info(f"🔧 Starting smoke test: {experiment_name}")
+            self.logger.info(f"[SETUP] Starting smoke test: {experiment_name}")
 
             isolate_strategy_backtests = bool(self.config.get('isolate_strategy_backtests', False))
             strategies = self.config.get('strategies', []) or []
@@ -96,12 +107,22 @@ class SmokeTest(BaseExperiment):
                 success=True
             )
 
-            self.logger.info(f"✅ Smoke test completed in {duration:.2f}s")
+            # --- Finalize pipeline tracer ---
+            if self.config.get('enable_pipeline_trace', False):
+                from core_engine.utils.pipeline_trace import get_tracer
+                _tracer = get_tracer()
+                if _tracer.enabled:
+                    _tracer.print_funnel()
+                    result.custom_metrics['trace_funnel'] = _tracer.get_funnel_summary()
+                    result.custom_metrics['trace_stats'] = _tracer.stats
+                    _tracer.close()
+
+            self.logger.info(f"[OK] Smoke test completed in {duration:.2f}s")
             return result
 
         except Exception as e:
             duration = time.time() - start_time
-            self.logger.error(f"❌ Smoke test failed: {e}")
+            self.logger.error(f"[FAIL] Smoke test failed: {e}")
 
             return ExperimentResult(
                 experiment_name=experiment_name,
@@ -215,7 +236,7 @@ class SmokeTest(BaseExperiment):
         has_explicit_alloc = any('allocation_pct' in s for s in strategies)
         if has_explicit_alloc and abs(total_alloc - 1.0) > 0.05:
             self.logger.warning(
-                f"⚠️ allocation_pct values sum to {total_alloc:.3f} (expected ~1.0). "
+                f"[WARN] allocation_pct values sum to {total_alloc:.3f} (expected ~1.0). "
                 f"Capital will be normalized but results may not match expectations."
             )
 
@@ -541,11 +562,11 @@ async def run_smoke_test(config: Dict[str, Any] = None):
             override = os.environ.get("SMOKE_TEST_CONFIG")
             config_path = Path(override) if override else (Path(__file__).parent.parent / 'configs' / 'smoke_test.yaml')
             config = load_config(str(config_path))
-            print(f"✅ Loaded configuration from {config_path}")
+            print(f"[OK] Loaded configuration from {config_path}")
             print(f"   Symbols: {config.get('symbols', [])}")
             print(f"   Period: {config.get('start_date')} → {config.get('end_date')}")
         except Exception as e:
-            print(f"⚠️  Could not load smoke_test.yaml: {e}")
+            print(f"[WARN] Could not load smoke_test.yaml: {e}")
             print(f"   Using default configuration")
             config = {
                 'experiment_name': 'Smoke_Test_Default',

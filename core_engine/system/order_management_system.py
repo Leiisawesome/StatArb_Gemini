@@ -345,6 +345,35 @@ class OrderManagementSystem(ISystemComponent):
             f"{symbol} {side} {quantity} @ {order_type.value}"
         )
 
+        # --- CP4: Pipeline Trace - Order Creation ---
+        from core_engine.utils.pipeline_trace import get_tracer, CP4_ORDER_CREATE
+        _cp4_tracer = get_tracer()
+        if _cp4_tracer.enabled:
+            _cp4_tracer.emit(
+                trace_id=authorization_id,
+                checkpoint=CP4_ORDER_CREATE,
+                component="OrderManagementSystem",
+                method="create_order",
+                symbol=symbol,
+                bar_timestamp=str(order.created_at),
+                input_data={
+                    "authorization_id": authorization_id,
+                    "symbol": symbol,
+                    "side": side,
+                    "quantity": float(quantity),
+                    "order_type": order_type.value,
+                    "strategy_id": strategy_id,
+                },
+                output_data={
+                    "order_id": order.order_id,
+                    "state": order.state.value if hasattr(order.state, 'value') else str(order.state),
+                },
+                metadata={
+                    "limit_price": float(limit_price) if limit_price else None,
+                    "time_in_force": time_in_force.value if hasattr(time_in_force, 'value') else str(time_in_force),
+                },
+            )
+
         return order
 
     async def submit_order(self, order_id: str) -> Order:

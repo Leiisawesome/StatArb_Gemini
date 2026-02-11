@@ -812,370 +812,6 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
         )
 
     # ========================================
-    # STANDARDIZED DATA CONSUMPTION METHODS
-    # ========================================
-
-    def process_decisions(self, decisions: List[Any]) -> List[Any]:
-        """Standardized method for processing strategy decisions"""
-        processed_decisions = []
-        for decision in decisions:
-            processed_decision = {
-                'original_decision': decision,
-                'processed_by': 'CentralRiskManager',
-                'processing_timestamp': datetime.now()
-            }
-            processed_decisions.append(processed_decision)
-        return processed_decisions
-
-    def handle_decisions(self, decisions: List[Any]) -> List[Any]:
-        """Standardized method for handling decisions (alias)"""
-        return self.process_decisions(decisions)
-
-    def validate_risk(self, risk_data: Any) -> Dict[str, Any]:
-        """Standardized method for validating risk"""
-        return {
-            'risk_validated': True,
-            'risk_data': risk_data,
-            'processing_timestamp': datetime.now(),
-            'processing_component': 'CentralRiskManager'
-        }
-
-    def check_limits(self, limit_data: Any) -> Dict[str, Any]:
-        """Standardized method for checking limits (alias)"""
-        return self.validate_risk(limit_data)
-
-    # ========================================
-    # DATA PRODUCTION METHODS FOR ANALYTICS FLOW
-    # ========================================
-
-    def calculate_metrics(self, risk_data: Any = None) -> Dict[str, Any]:
-        """Standardized method for calculating risk metrics for analytics"""
-        return {
-            'risk_metrics_calculated': True,
-            'metrics': {
-                'portfolio_var': 0.05,
-                'max_drawdown': 0.03,
-                'sharpe_ratio': 1.2,
-                'risk_score': 0.7
-            },
-            'processing_timestamp': datetime.now(),
-            'processing_component': 'CentralRiskManager'
-        }
-
-    def analyze_performance(self, performance_data: Any = None) -> Dict[str, Any]:
-        """Standardized method for analyzing performance from risk perspective"""
-        return self.calculate_metrics(performance_data)
-
-    def generate_analytics(self, analytics_data: Any = None) -> Dict[str, Any]:
-        """Standardized method for generating analytics data"""
-        return self.calculate_metrics(analytics_data)
-
-    def produce_analytics(self, data: Any = None) -> Dict[str, Any]:
-        """Standardized method for producing analytics (alias)"""
-        return self.calculate_metrics(data)
-
-    def create_performance_analytics(self, data: Any = None) -> Dict[str, Any]:
-        """Standardized method for creating performance analytics"""
-        return self.calculate_metrics(data)
-
-    # ========================================
-    # REGIME-ADJUSTED STRATEGY CONSUMPTION METHODS
-    # ========================================
-
-    def process_regime_adjusted_strategies(self, strategy_data: Any) -> Dict[str, Any]:
-        """Standardized method for processing regime-adjusted strategies"""
-        return {
-            'regime_strategies_processed': True,
-            'strategy_data': strategy_data,
-            'risk_assessment': 'approved',
-            'processing_timestamp': datetime.now(),
-            'processing_component': 'CentralRiskManager'
-        }
-
-    def handle_strategy_risk_context(self, risk_context: Any) -> Dict[str, Any]:
-        """Standardized method for handling strategy risk context"""
-        return self.process_regime_adjusted_strategies(risk_context)
-
-    def evaluate_regime_risk(self, regime_strategy_data: Any) -> Dict[str, Any]:
-        """Standardized method for evaluating regime-based risk"""
-        return self.process_regime_adjusted_strategies(regime_strategy_data)
-
-    def consume_regime_strategies(self, regime_strategies: Any) -> Dict[str, Any]:
-        """Standardized method for consuming regime-adjusted strategies"""
-        return self.process_regime_adjusted_strategies(regime_strategies)
-
-    def handle_regime_adjusted_strategies(self, strategies: Any) -> Dict[str, Any]:
-        """Standardized method for handling regime-adjusted strategies"""
-        return self.process_regime_adjusted_strategies(strategies)
-
-    # ========================================
-    # RISK METRICS CONSUMPTION METHODS
-    # ========================================
-
-    def process_risk_metrics(self, risk_metrics: Dict[str, Any]) -> Dict[str, Any]:
-        """Standardized method for processing risk metrics from portfolio"""
-        return {
-            'portfolio_risk_metrics_processed': True,
-            'risk_metrics': risk_metrics,
-            'risk_assessment': 'within_limits',
-            'processing_timestamp': datetime.now(),
-            'processing_component': 'CentralRiskManager'
-        }
-
-    def handle_risk(self, risk_data: Any) -> Dict[str, Any]:
-        """Standardized method for handling risk data (alias)"""
-        return self.process_risk_metrics(risk_data)
-
-    def analyze_risk(self, risk_data: Any) -> Dict[str, Any]:
-        """Standardized method for analyzing risk data (alias)"""
-        return self.process_risk_metrics(risk_data)
-
-    # ========================================
-    # RISK MANAGEMENT CALLBACK METHODS
-    # ========================================
-
-    def set_risk_callbacks(self, components: List[Any] = None):
-        """Set risk management callbacks for components"""
-        if not hasattr(self, 'risk_callbacks'):
-            self.risk_callbacks = []
-
-        if components:
-            self.risk_callbacks.extend(components)
-            logger.info(f"✅ Risk callbacks registered for {len(components)} components")
-
-    def on_risk_limit_breach(self, risk_data: Dict[str, Any]):
-        """Callback method for risk limit breaches"""
-        try:
-            logger.warning(f"🚨 Risk limit breach detected: {risk_data}")
-
-            # Notify all registered components
-            if hasattr(self, 'risk_callbacks'):
-                for callback in self.risk_callbacks:
-                    try:
-                        if hasattr(callback, 'on_risk_alert'):
-                            callback.on_risk_alert(risk_data)
-                    except Exception as e:
-                        logger.error(f"Risk callback notification failed: {e}")
-
-            return {'risk_breach_processed': True, 'notifications_sent': len(getattr(self, 'risk_callbacks', []))}
-
-        except Exception as e:
-            logger.error(f"Risk limit breach callback failed: {e}")
-            return {'error': str(e)}
-
-    def on_emergency_shutdown(self, shutdown_reason: str = "Emergency"):
-        """Callback method for emergency shutdown"""
-        try:
-            logger.critical(f"🚨 Emergency shutdown callback: {shutdown_reason}")
-
-            # Trigger emergency shutdown
-            self.emergency_shutdown()
-
-            # Notify all registered components
-            if hasattr(self, 'risk_callbacks'):
-                for callback in self.risk_callbacks:
-                    try:
-                        if hasattr(callback, 'on_emergency_shutdown'):
-                            callback.on_emergency_shutdown(shutdown_reason)
-                    except Exception as e:
-                        logger.error(f"Emergency shutdown callback failed: {e}")
-
-            return {'emergency_shutdown_processed': True, 'notifications_sent': len(getattr(self, 'risk_callbacks', []))}
-
-        except Exception as e:
-            logger.error(f"Emergency shutdown callback failed: {e}")
-            return {'error': str(e)}
-
-    # ========================================
-    # EVENT NOTIFICATION CALLBACK METHODS
-    # ========================================
-
-    def subscribe(self, subscriber):
-        """Subscribe to risk management events"""
-        if not hasattr(self, 'event_subscribers'):
-            self.event_subscribers = []
-
-        self.event_subscribers.append(subscriber)
-        logger.info(f"✅ Event subscriber registered with RiskManager: {type(subscriber).__name__}")
-
-    def notify_regime_change(self, regime_analysis):
-        """Notify subscribers of regime changes (for risk management)"""
-        try:
-            if hasattr(self, 'event_subscribers'):
-                for subscriber in self.event_subscribers:
-                    try:
-                        if hasattr(subscriber, 'on_regime_change'):
-                            subscriber.on_regime_change(regime_analysis)
-                    except Exception as e:
-                        logger.error(f"Event notification failed: {e}")
-
-            return {'regime_change_notified': True, 'subscribers_notified': len(getattr(self, 'event_subscribers', []))}
-
-        except Exception as e:
-            logger.error(f"Regime change notification failed: {e}")
-            return {'error': str(e)}
-
-    # ========================================
-    # ANALYTICS CALLBACK METHODS
-    # ========================================
-
-    def set_analytics_callbacks(self, analytics_callback: Callable = None):
-        """Set analytics callback"""
-        self.analytics_callback = analytics_callback
-        if analytics_callback:
-            logger.info("✅ Analytics callback registered with RiskManager")
-
-    def on_performance_update(self, performance_data: Dict[str, Any]):
-        """Callback method for performance updates"""
-        try:
-            logger.info(f"📈 Risk performance update: {performance_data.get('component', 'unknown')}")
-
-            # Process performance data from risk perspective
-            if hasattr(self, 'analytics_callback') and self.analytics_callback:
-                self.analytics_callback(performance_data)
-
-            return {'performance_update_processed': True}
-
-        except Exception as e:
-            logger.error(f"Performance update callback failed: {e}")
-            return {'error': str(e)}
-
-    def notify_analytics(self, analytics_data: Dict[str, Any]):
-        """Notify analytics data"""
-        try:
-            logger.info("📊 Risk analytics notification")
-
-            # Process analytics data from risk perspective
-            if hasattr(self, 'analytics_callback') and self.analytics_callback:
-                self.analytics_callback(analytics_data)
-
-            return {'analytics_notification_processed': True}
-
-        except Exception as e:
-            logger.error(f"Analytics notification failed: {e}")
-            return {'error': str(e)}
-
-    # ========================================
-    # ADDITIONAL AUTHORIZATION METHODS
-    # ========================================
-
-    def authorize_operation(self, operation: str, details: Dict[str, Any] = None) -> bool:
-        """Authorize general operations"""
-        try:
-            # Risk manager can authorize most operations
-            authorized_operations = [
-                'authorize_trading_decision', 'validate_risk', 'check_limits',
-                'emergency_shutdown', 'modify_limits', 'override_authorization'
-            ]
-
-            if operation in authorized_operations:
-                logger.info(f"✅ Risk operation authorized: {operation}")
-                return True
-            else:
-                logger.warning(f"❌ Risk operation not authorized: {operation}")
-                return False
-
-        except Exception as e:
-            logger.error(f"Authorization failed: {e}")
-            return False
-
-    def check_authority_level(self, required_level: str) -> bool:
-        """Check if component has required authority level"""
-        try:
-            # Risk manager has GOVERNANCE_CONTROL authority level
-            component_authority = "GOVERNANCE_CONTROL"
-
-            authority_hierarchy = {
-                "READ_ONLY": 1,
-                "OPERATIONAL": 2,
-                "GOVERNANCE_CONTROL": 3,
-                "SYSTEM_CONTROL": 4
-            }
-
-            component_level = authority_hierarchy.get(component_authority, 0)
-            required_level_num = authority_hierarchy.get(required_level, 999)
-
-            authorized = component_level >= required_level_num
-
-            if authorized:
-                logger.info(f"✅ Authority level check passed: {component_authority} >= {required_level}")
-            else:
-                logger.warning(f"❌ Authority level check failed: {component_authority} < {required_level}")
-
-            return authorized
-
-        except Exception as e:
-            logger.error(f"Authority level check failed: {e}")
-            return False
-
-    def validate_permissions(self, permission: str, context: Dict[str, Any] = None) -> bool:
-        """Validate permissions for operations"""
-        try:
-            # Risk manager has broad permissions
-            allowed_permissions = [
-                'trade_authorization', 'risk_management', 'emergency_control',
-                'limit_modification', 'position_management'
-            ]
-
-            if permission in allowed_permissions:
-                logger.info(f"✅ Permission validated: {permission}")
-                return True
-            else:
-                logger.warning(f"❌ Permission denied: {permission}")
-                return False
-
-        except Exception as e:
-            logger.error(f"Permission validation failed: {e}")
-            return False
-
-    # ========================================
-    # AUDIT TRAIL METHODS
-    # ========================================
-
-    def log_authorization(self, authorization_event: Dict[str, Any]) -> bool:
-        """Log authorization events for audit trail"""
-        try:
-            # In real implementation, this would log to audit system
-            logger.info(f"📋 Authorization logged: {authorization_event.get('operation', 'unknown')}")
-            return True
-
-        except Exception as e:
-            logger.error(f"Authorization logging failed: {e}")
-            return False
-
-    def audit_authorization(self, authorization_id: str) -> Dict[str, Any]:
-        """Audit specific authorization"""
-        if not self.authorization_audit:
-            raise ConfigurationRequiredError("Audit trail not available - cannot perform authorization audit")
-
-        # Find authorization in audit trail
-        for entry in self.authorization_audit:
-            if entry.get('authorization_id') == authorization_id:
-                return {
-                    'authorization_id': authorization_id,
-                    'audit_status': 'compliant',
-                    'audit_timestamp': datetime.now(),
-                    'audited_by': 'CentralRiskManager'
-                }
-
-        raise ConfigurationRequiredError(f"Authorization {authorization_id} not found in audit trail")
-
-    def track_authorization(self, authorization_id: str) -> Dict[str, Any]:
-        """Track authorization lifecycle"""
-        if not self.active_authorizations:
-            raise ConfigurationRequiredError("Active authorizations not available - cannot track authorization")
-
-        if authorization_id in self.active_authorizations:
-            return {
-                'authorization_id': authorization_id,
-                'status': 'active',
-                'created_at': datetime.now(),
-                'tracked_by': 'CentralRiskManager'
-            }
-
-        raise ConfigurationRequiredError(f"Authorization {authorization_id} not found in active authorizations")
-
-    # ========================================
     # ISystemComponent interface implementation
     # ========================================
     async def start(self) -> bool:
@@ -1324,6 +960,39 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
                 # Add to history only if not in high-performance mode
                 if len(self.authorization_history) < 10000:
                     self.authorization_history.append(authorization)
+
+            # --- CP3: Pipeline Trace - Risk Authorization ---
+            from core_engine.utils.pipeline_trace import get_tracer, CP3_RISK_AUTH
+            _cp3_tracer = get_tracer()
+            if _cp3_tracer.enabled:
+                _cp3_is_authorized = authorization.authorization_level != AuthorizationLevel.REJECTED
+                _cp3_tracer.emit(
+                    trace_id=getattr(request, 'root_signal_id', '') or request.request_id,
+                    checkpoint=CP3_RISK_AUTH,
+                    component="CentralRiskManager",
+                    method="authorize_trading_decision",
+                    symbol=request.symbol,
+                    bar_timestamp=request.metadata.get('timestamp', '') if request.metadata else '',
+                    input_data={
+                        "request_id": request.request_id,
+                        "symbol": request.symbol,
+                        "side": request.side,
+                        "quantity": float(request.quantity),
+                        "confidence": float(request.confidence),
+                        "current_price": float(request.current_price),
+                        "strategy_id": request.strategy_id,
+                    },
+                    output_data={
+                        "authorized": _cp3_is_authorized,
+                        "authorization_id": getattr(authorization, 'authorization_id', ''),
+                        "authorized_quantity": float(getattr(authorization, 'authorized_quantity', 0)),
+                        "rejection_reason": getattr(authorization, 'rejection_reason', None),
+                        "authorization_level": str(authorization.authorization_level),
+                    },
+                    metadata={
+                        "authorized": _cp3_is_authorized,
+                    },
+                )
 
             return authorization
 
@@ -2321,12 +1990,12 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
                 new_quantity = Decimal('0') if book_position is None else book_position.quantity
 
                 logger.info(
-                    f"📘 PositionBook Update: {symbol} → {float(new_quantity):.2f} shares | "
+                    f"[PB] PositionBook Update: {symbol} -> {float(new_quantity):.2f} shares | "
                     f"Realized P&L: ${float(position_update.realized_pnl):,.2f} | "
                     f"Cash: ${float(self._position_book.get_cash_balance()):,.2f}"
                 )
 
-                return {
+                _result = {
                     'success': True,
                     'symbol': symbol,
                     'previous_position': float(position_update.previous_quantity),
@@ -2338,6 +2007,66 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
                     'timestamp': timestamp,
                     'realized_pnl': float(position_update.realized_pnl)
                 }
+
+                # --- CP7: Pipeline Trace - PnL Calculation ---
+                from core_engine.utils.pipeline_trace import get_tracer, CP7_PNL
+                _cp7_tracer = get_tracer()
+                if _cp7_tracer.enabled:
+                    realized_pnl = float(position_update.realized_pnl)
+                    unrealized_pnl = 0.0
+                    total_pnl = 0.0
+                    position_pnl = 0.0
+                    cost_basis = 0.0
+
+                    if hasattr(self, 'pnl_tracker') and self.pnl_tracker:
+                        realized_pnl = float(self.pnl_tracker.realized_pnl)
+                        unrealized_pnl = float(self.pnl_tracker.unrealized_pnl)
+                        total_pnl = float(self.pnl_tracker.total_pnl)
+                        position_pnl = float(self.pnl_tracker.position_pnl.get(symbol, 0.0))
+                        cost_basis = float(self.pnl_tracker.position_cost_basis.get(symbol, 0.0))
+                    else:
+                        try:
+                            unrealized_pnl = float(self._position_book.get_unrealized_pnl())
+                        except Exception:
+                            unrealized_pnl = 0.0
+                        total_pnl = realized_pnl + unrealized_pnl
+
+                    if total_pnl == 0.0 and (realized_pnl != 0.0 or unrealized_pnl != 0.0):
+                        total_pnl = realized_pnl + unrealized_pnl
+
+                    _cp7_tracer.emit(
+                        trace_id=fill.fill_id,
+                        checkpoint=CP7_PNL,
+                        component="CentralRiskManager",
+                        method="update_position",
+                        symbol=symbol,
+                        bar_timestamp=str(timestamp),
+                        input_data={
+                            "fill_id": fill.fill_id,
+                            "side": side,
+                            "quantity": float(quantity),
+                            "price": float(price),
+                            "previous_position": float(position_update.previous_quantity),
+                            "new_position": float(new_quantity),
+                            "position_size": float(new_quantity),
+                            "cost_basis": cost_basis,
+                        },
+                        output_data={
+                            "realized_pnl": realized_pnl,
+                            "unrealized_pnl": unrealized_pnl,
+                            "total_pnl": total_pnl,
+                            "position_pnl": position_pnl,
+                            "cash_change": float(position_update.cash_change),
+                            "cash_balance": float(self._position_book.get_cash_balance()),
+                            "portfolio_value": self.portfolio_value,
+                        },
+                        metadata={
+                            "positions_count": len(self.current_positions),
+                            "total_realized_pnl": float(self._position_book._total_realized_pnl),
+                        },
+                    )
+
+                return _result
 
             # ============================================================
             # LEGACY PATH: Direct position tracking (backward compatibility)

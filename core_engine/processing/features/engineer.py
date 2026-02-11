@@ -1735,34 +1735,6 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
         return result
 
     # ========================================
-    # STANDARDIZED DATA CONSUMPTION METHODS
-    # ========================================
-
-    def process_features(self, features: pd.DataFrame) -> pd.DataFrame:
-        """Standardized method for processing features data"""
-        return features
-
-    def use_features(self, features: pd.DataFrame) -> pd.DataFrame:
-        """Standardized method for using features data (alias)"""
-        return self.process_features(features)
-
-    def analyze_features(self, features: pd.DataFrame) -> pd.DataFrame:
-        """Standardized method for analyzing features data (alias)"""
-        return self.process_features(features)
-
-    def process_indicators(self, indicators: pd.DataFrame) -> pd.DataFrame:
-        """Standardized method for processing indicators data (consumption interface)"""
-        # This component consumes indicators to produce features
-        return indicators
-
-    def use_indicators(self, indicators: pd.DataFrame) -> pd.DataFrame:
-        """Standardized method for using indicators data (consumption interface)"""
-        return self.process_indicators(indicators)
-
-    def analyze_indicators(self, indicators: pd.DataFrame) -> pd.DataFrame:
-        """Standardized method for analyzing indicators data (consumption interface)"""
-        return self.process_indicators(indicators)
-
     # ========================================
     # STREAMING MODE METHODS (Paper Trading Evolution)
     # ========================================
