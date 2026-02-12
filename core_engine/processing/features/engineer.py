@@ -794,6 +794,14 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
             # Minimum data requirement
             if len(df) < 50:
                 self.logger.debug("Insufficient data for composite features (need 50+ bars)")
+                # Set defaults for downstream consumers (_create_transition_features)
+                for _col, _val in [('directional_coherence', 0.5),
+                                   ('composite_velocity', 0.0),
+                                   ('composite_acceleration', 0.0),
+                                   ('composite_velocity_norm', 0.0),
+                                   ('composite_accel_norm', 0.0)]:
+                    if _col not in df.columns:
+                        df[_col] = _val
                 return df
 
             # Step 1: Collect 10 momentum indicators
@@ -873,6 +881,14 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
             # Requirement: Need at least 5 indicators for robust composite
             if len(momentum_indicators) < 5:
                 self.logger.warning(f"Insufficient indicators for composite: {len(momentum_indicators)}/10 available")
+                # Set defaults for downstream consumers (_create_transition_features)
+                for _col, _val in [('directional_coherence', 0.5),
+                                   ('composite_velocity', 0.0),
+                                   ('composite_acceleration', 0.0),
+                                   ('composite_velocity_norm', 0.0),
+                                   ('composite_accel_norm', 0.0)]:
+                    if _col not in df.columns:
+                        df[_col] = _val
                 return df
 
             self.logger.debug(f"Building composite from {len(momentum_indicators)} indicators: {indicator_names}")
@@ -1072,7 +1088,7 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
             #    = coherence × accel_gate × expansion × vov_gate
             #    Any single zero kills the score.
             # ----------------------------------------------------------
-            coherence = df['directional_coherence'].fillna(0.0).values
+            coherence = df['directional_coherence'].fillna(0.0).values if 'directional_coherence' in df.columns else np.full(n, 0.5)
             accel_raw = df.get('composite_accel_norm', pd.Series(0.0, index=df.index)).fillna(0.0).values
 
             # Acceleration gate: only positive acceleration (in signal direction)

@@ -805,7 +805,7 @@ class Cooldown:
         # Check for cooldown trigger
         if self.compute() >= self.threshold:
             self.cooldown_bars = self.cooldown_duration
-            logger.warning(f"⚠️ PVSI cooldown triggered: PVSI={self.compute():.2f} >= {self.threshold}")
+            logger.debug(f"PVSI cooldown triggered: PVSI={self.compute():.2f} >= {self.threshold}")
 
     def tick(self):
         """Decrement cooldown counter (call each bar)."""

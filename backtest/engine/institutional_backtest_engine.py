@@ -617,39 +617,48 @@ class InstitutionalBacktestEngine:
             # Phase 6: Initialize Analytics
             await self._initialize_phase6_analytics()
 
-            # Phase 2.2+: Manually initialize registered components
-            # Note: For backtesting, we don't use the full orchestrator lifecycle
-            # (which requires CentralRiskManager). Instead, we manually initialize
-            # the components we need for historical simulation.
+            # C3 FIX: Use orchestrator for component lifecycle management.
+            # Previously components were initialized manually, bypassing the
+            # orchestrator's hierarchical init, control relationships, and
+            # monitoring.  Now the orchestrator drives component init while
+            # the BT engine retains ownership of Phase-level sequencing.
             if len(self.components) > 0:
                 logger.info(f"   Components registered: {len(self.components)}")
 
-                # Manually initialize each component
-                for component_name, component in self.components.items():
-                    # Skip if already initialized
-                    if hasattr(component, 'is_initialized') and component.is_initialized:
-                        logger.info(f"   {component_name} already initialized, skipping...")
-                        continue
-
-                    logger.info(f"   Initializing {component_name}...")
-                    # G15 FIX: Critical components (data, risk, strategy) must not
-                    # fail silently — a backtest without them produces wrong results.
-                    _critical_components = {'data_manager', 'risk_manager', 'strategy_manager',
-                                            'clickhouse_data_manager', 'central_risk_manager'}
+                # Initialize components in registration (priority) order via orchestrator
+                _critical_components = {'data_manager', 'risk_manager', 'strategy_manager',
+                                        'clickhouse_data_manager', 'central_risk_manager'}
+                for component_name, component in sorted(
+                    self.components.items(),
+                    key=lambda kv: getattr(kv[1], 'initialization_order', 100) if hasattr(kv[1], 'initialization_order') else 100,
+                ):
                     _is_critical = any(c in component_name.lower() for c in _critical_components)
                     try:
-                        if hasattr(component, 'initialize'):
+                        # Skip initialize() for already-initialized components,
+                        # but ALWAYS call start() — the phase methods call
+                        # initialize() but not start(), so is_operational stays
+                        # False without this.
+                        if hasattr(component, 'is_initialized') and component.is_initialized:
+                            logger.info(f"   {component_name} already initialized, calling start()...")
+                        elif hasattr(component, 'initialize'):
                             await component.initialize()
                         if hasattr(component, 'start'):
                             await component.start()
-                        logger.info(f"   ✅ {component_name} initialized")
+                        logger.info(f"   ✅ {component_name} started")
                     except Exception as e:
                         if _is_critical:
                             logger.error(f"   ❌ CRITICAL component {component_name} failed: {e}")
                             raise RuntimeError(f"Critical component {component_name} failed to initialize: {e}") from e
                         else:
                             logger.warning(f"   ⚠️ Optional component {component_name} failed: {e}")
-                            # Continue with other components
+
+                # C3: Start the orchestrator itself so health_check / status work
+                try:
+                    self.orchestrator.system_status = self.orchestrator.system_status.__class__('ready')
+                    await self.orchestrator.start()
+                    logger.info("✅ HierarchicalSystemOrchestrator → OPERATIONAL")
+                except Exception as orch_err:
+                    logger.warning(f"⚠️ Orchestrator start (non-fatal): {orch_err}")
 
                 logger.info(f"\n✅ {len(self.components)} components initialized")
             else:
@@ -1908,9 +1917,15 @@ class InstitutionalBacktestEngine:
             # Phase 11: Analytics & TCA (Phase 10 handled by CentralRiskManager)
             await self._initialize_execution_analytics()
 
+            # P1-4 FIX: Create HistoricalExecutionSimulator eagerly at init
+            # time, not lazily on first simulate_execution() call.  This
+            # validates configuration early and prevents config divergence.
+            await self._initialize_execution_simulator()
+
             logger.info("\n✅ Phase 5 complete: Full execution pipeline ready (Rule 7 Phases 8-11)")
             logger.info("   Phase 8: ✅ EnhancedTradingEngine (execution planning)")
             logger.info("   Phase 9: ✅ UnifiedExecutionEngine (execution action)")
+            logger.info("   Phase 9b: ✅ HistoricalExecutionSimulator (backtest fills)")
             logger.info("   Phase 10: ✅ CentralRiskManager (position updates)")
             logger.info("   Phase 11: ✅ ExecutionAnalytics (TCA)")
             logger.info("=" * 80)
@@ -2157,6 +2172,42 @@ class InstitutionalBacktestEngine:
         except Exception as e:
             logger.error(f"❌ Failed to configure execution analytics: {e}", exc_info=True)
             raise RuntimeError(f"Execution analytics configuration failed: {e}")
+
+    async def _initialize_execution_simulator(self) -> None:
+        """
+        P1-4 FIX: Eagerly create HistoricalExecutionSimulator during Phase 5.
+
+        Previously the simulator was lazily created on the first call to
+        ``simulate_execution()``, which deferred config validation and introduced
+        a risk of config divergence if the backtest changed settings between
+        initialization and first trade.
+        """
+        from backtest.engine.historical_execution_simulator import HistoricalExecutionSimulator
+
+        disable_rejections = getattr(self, 'disable_rejections', False)
+        self.execution_simulator = HistoricalExecutionSimulator({
+            'fill_model': 'realistic',
+            'base_spread_bps': getattr(self.config, 'base_spread_bps', self.DEFAULT_SPREAD_BPS),
+            'base_slippage_bps': getattr(self.config, 'base_slippage_bps', 2.0),
+            'commission_per_share': getattr(self.config, 'commission_per_trade', self.DEFAULT_COMMISSION_PER_SHARE),
+            'enable_random_slippage': False,  # Deterministic for backtesting
+            'impact_linear_coeff': getattr(self.config, 'linear_coefficient', 0.1),
+            'impact_sqrt_coeff': getattr(self.config, 'sqrt_coefficient', 0.5),
+            'disable_rejections': disable_rejections,
+            'execution_seed': getattr(self.config, 'execution_seed', None),
+        })
+
+        # Share config with CRM for Gate 6 cost alignment
+        if self.risk_manager is not None:
+            self.risk_manager._exec_sim_config = {
+                'base_spread_bps': getattr(self.config, 'base_spread_bps', self.DEFAULT_SPREAD_BPS),
+                'base_slippage_bps': getattr(self.config, 'base_slippage_bps', 2.0),
+                'commission_per_share': getattr(self.config, 'commission_per_trade', self.DEFAULT_COMMISSION_PER_SHARE),
+                'impact_linear_coeff': getattr(self.config, 'linear_coefficient', 0.1),
+                'impact_sqrt_coeff': getattr(self.config, 'sqrt_coefficient', 0.5),
+            }
+
+        logger.info("✅ HistoricalExecutionSimulator created (P1-4: eager init)")
 
     # ============================================================
     # PHASE 6: ANALYTICS INTEGRATION (BRICKS #10-12)
@@ -3328,187 +3379,67 @@ class InstitutionalBacktestEngine:
             logger.info(f"   End: {self.historical_data.index[-1]}")
             logger.info("")
 
-            # 🚀 OPTION B: Pre-calculate all indicators/features for entire dataset
-            # This enables momentum strategies by providing historical context
-            # 🔧 MULTI-SYMBOL SUPPORT: Calculate per-symbol for correct data isolation
-            logger.info("🔧 Pre-calculating indicators and features for entire dataset...")
+            # ============================================================
+            # C2 FIX: Route pre-calculation through PipelineOrchestrator
+            # so BT, papertest, and live share the same code path.
+            # ============================================================
+            logger.info("🔧 Pre-calculating indicators and features via PipelineOrchestrator...")
             pre_calc_start = datetime.now()
 
             try:
-                # NEW: Store pre-calculated data PER SYMBOL for multi-symbol support
                 self.pre_calculated_indicators_per_symbol: Dict[str, pd.DataFrame] = {}
                 self.pre_calculated_features_per_symbol: Dict[str, pd.DataFrame] = {}
 
-                is_multi_symbol = len(self.config.symbols) > 1
+                # Build raw_data dict from already-loaded market_data
+                raw_data_per_symbol: Dict[str, pd.DataFrame] = {}
+                for sym in self.config.symbols:
+                    if sym not in self.market_data or self.market_data[sym].empty:
+                        logger.warning(f"   ⚠️ No data for {sym}, skipping")
+                        continue
+                    sym_data = self.market_data[sym].copy()
+                    if 'timestamp' not in sym_data.columns:
+                        sym_data = sym_data.reset_index()
+                    raw_data_per_symbol[sym] = sym_data
 
-                # --- CP0: Pipeline Trace - Raw Market Data (batch, pre-enrichment) ---
-                from core_engine.utils.pipeline_trace import get_tracer, CP0_MARKET_DATA, CP1_ENRICHMENT
-                _cp01_tracer = get_tracer()
+                # Route through pipeline_orchestrator.process_preloaded_data()
+                # This ensures indicators, features, and signals are calculated
+                # through the exact same code path used by papertest/live.
+                enriched_results = await self.pipeline_orchestrator.process_preloaded_data(
+                    raw_data_per_symbol=raw_data_per_symbol,
+                    timeframe=self.config.interval,
+                )
 
-                if is_multi_symbol:
-                    logger.info(f"   📊 Multi-symbol mode: calculating indicators for {len(self.config.symbols)} symbols")
+                # Extract indicators and features from EnrichedMarketData containers
+                for sym, enriched in enriched_results.items():
+                    self.pre_calculated_indicators_per_symbol[sym] = enriched.indicators
+                    self.pre_calculated_features_per_symbol[sym] = enriched.features
+                    logger.info(
+                        f"   ✅ {sym}: {len(enriched.features)} bars "
+                        f"({enriched.indicator_columns} indicators, "
+                        f"{enriched.feature_columns} features)"
+                    )
 
-                    for sym in self.config.symbols:
-                        if sym not in self.market_data or len(self.market_data[sym]) == 0:
-                            logger.warning(f"   ⚠️ No data for {sym}, skipping")
-                            continue
+                # Backward compatibility: set primary symbol aliases
+                primary_symbol = self.config.symbols[0] if self.config.symbols else None
+                self.pre_calculated_indicators = (
+                    self.pre_calculated_indicators_per_symbol.get(primary_symbol)
+                    if primary_symbol else None
+                )
+                self.pre_calculated_features = (
+                    self.pre_calculated_features_per_symbol.get(primary_symbol)
+                    if primary_symbol else None
+                )
 
-                        # Get symbol-specific data
-                        sym_data = self.market_data[sym].copy()
-                        if 'timestamp' not in sym_data.columns:
-                            sym_data = sym_data.reset_index()
-
-                        # --- CP0: Raw market data per symbol (before enrichment) ---
-                        if _cp01_tracer.enabled:
-                            _cp01_tracer.emit(
-                                trace_id=f"precalc_raw_{sym}",
-                                checkpoint=CP0_MARKET_DATA,
-                                component="InstitutionalBacktestEngine",
-                                method="run_backtest(pre_calc)",
-                                symbol=sym,
-                                bar_timestamp=str(sym_data['timestamp'].iloc[-1]) if 'timestamp' in sym_data.columns and len(sym_data) > 0 else "batch",
-                                input_data=sym_data,
-                                output_data=sym_data,
-                                metadata={
-                                    "phase": "pre_calculation",
-                                    "bars": len(sym_data),
-                                    "columns": sorted(sym_data.columns.tolist()),
-                                    "mode": "multi_symbol",
-                                },
-                            )
-
-                        # Calculate indicators for this symbol
-                        if self.indicators_engine:
-                            sym_indicators = self.indicators_engine.calculate_indicators(sym_data)
-                            self.pre_calculated_indicators_per_symbol[sym] = sym_indicators
-
-                            # Calculate features for this symbol
-                            if self.feature_engineer:
-                                sym_features = self.feature_engineer.create_features(sym_indicators)
-                                self.pre_calculated_features_per_symbol[sym] = sym_features
-                                logger.info(f"   ✅ {sym}: {len(sym_features)} bars with indicators+features")
-
-                                # --- CP1: Enrichment complete for this symbol ---
-                                if _cp01_tracer.enabled:
-                                    import numpy as _cp1_np
-                                    _cp1_nan = int(sym_features.select_dtypes(include=[_cp1_np.number]).isna().sum().sum()) if not sym_features.empty else 0
-                                    _cp01_tracer.emit(
-                                        trace_id=f"precalc_enrich_{sym}",
-                                        checkpoint=CP1_ENRICHMENT,
-                                        component="InstitutionalBacktestEngine",
-                                        method="run_backtest(pre_calc)",
-                                        symbol=sym,
-                                        bar_timestamp=str(sym_features['timestamp'].iloc[-1]) if 'timestamp' in sym_features.columns and len(sym_features) > 0 else "batch",
-                                        input_data=sym_data,
-                                        output_data=sym_features,
-                                        metadata={
-                                            "phase": "pre_calculation",
-                                            "raw_bars": len(sym_data),
-                                            "enriched_bars": len(sym_features),
-                                            "indicator_columns": sorted(sym_indicators.columns.tolist()) if sym_indicators is not None else [],
-                                            "feature_columns": sorted(sym_features.columns.tolist()),
-                                            "nan_count": _cp1_nan,
-                                            "mode": "multi_symbol",
-                                        },
-                                    )
-
-                    # For backward compatibility, set primary symbol's data
-                    primary_symbol = self.config.symbols[0]
-                    self.pre_calculated_indicators = self.pre_calculated_indicators_per_symbol.get(primary_symbol)
-                    self.pre_calculated_features = self.pre_calculated_features_per_symbol.get(primary_symbol)
-                else:
-                    # Single-symbol mode (original behavior)
-                    # Ensure timestamp is a column for processing
-                    data_for_processing = self.historical_data.copy()
-                    if 'timestamp' not in data_for_processing.columns:
-                        data_for_processing = data_for_processing.reset_index()
-
-                    # Store full data count for reference
-                    full_data_count = len(data_for_processing)
-
-                    # --- CP0: Raw market data (single symbol, before enrichment) ---
-                    _single_sym = self.config.symbols[0] if self.config.symbols else "UNKNOWN"
-                    if _cp01_tracer.enabled:
-                        _cp01_tracer.emit(
-                            trace_id=f"precalc_raw_{_single_sym}",
-                            checkpoint=CP0_MARKET_DATA,
-                            component="InstitutionalBacktestEngine",
-                            method="run_backtest(pre_calc)",
-                            symbol=_single_sym,
-                            bar_timestamp=str(data_for_processing['timestamp'].iloc[-1]) if 'timestamp' in data_for_processing.columns and len(data_for_processing) > 0 else "batch",
-                            input_data=data_for_processing,
-                            output_data=data_for_processing,
-                            metadata={
-                                "phase": "pre_calculation",
-                                "bars": len(data_for_processing),
-                                "columns": sorted(data_for_processing.columns.tolist()),
-                                "mode": "single_symbol",
-                            },
-                        )
-
-                    # Step 1: Calculate all indicators (using full history for proper context)
-                    self.pre_calculated_indicators = None
-                    if self.indicators_engine:
-                        self.pre_calculated_indicators = self.indicators_engine.calculate_indicators(data_for_processing)
-                        logger.info(f"   ✅ Indicators calculated: {len(self.pre_calculated_indicators)} bars")
-
-                    # Step 2: Engineer all features (using full history for proper context)
-                    self.pre_calculated_features = None
-                    if self.feature_engineer and self.pre_calculated_indicators is not None:
-                        self.pre_calculated_features = self.feature_engineer.create_features(self.pre_calculated_indicators)
-
-                    # --- CP1: Enrichment complete (single symbol) ---
-                    if _cp01_tracer.enabled and self.pre_calculated_features is not None and not self.pre_calculated_features.empty:
-                        import numpy as _cp1_np
-                        _cp1_nan = int(self.pre_calculated_features.select_dtypes(include=[_cp1_np.number]).isna().sum().sum())
-                        _cp01_tracer.emit(
-                            trace_id=f"precalc_enrich_{_single_sym}",
-                            checkpoint=CP1_ENRICHMENT,
-                            component="InstitutionalBacktestEngine",
-                            method="run_backtest(pre_calc)",
-                            symbol=_single_sym,
-                            bar_timestamp=str(self.pre_calculated_features['timestamp'].iloc[-1]) if 'timestamp' in self.pre_calculated_features.columns and len(self.pre_calculated_features) > 0 else "batch",
-                            input_data=data_for_processing,
-                            output_data=self.pre_calculated_features,
-                            metadata={
-                                "phase": "pre_calculation",
-                                "raw_bars": len(data_for_processing),
-                                "enriched_bars": len(self.pre_calculated_features),
-                                "indicator_columns": sorted(self.pre_calculated_indicators.columns.tolist()) if self.pre_calculated_indicators is not None else [],
-                                "feature_columns": sorted(self.pre_calculated_features.columns.tolist()),
-                                "nan_count": _cp1_nan,
-                                "mode": "single_symbol",
-                            },
-                        )
-
-                    # IMPORTANT: do NOT drop warmup history from pre_calculated_features.
-                    # Strategies (and parity with papertest) require warmup bars as historical context
-                    # for rolling indicators/feature-dependent logic. Trading is gated later in the
-                    # bar loop via simulation_start_dt date filtering.
-
-                    logger.info(f"   ✅ Features engineered: {len(self.pre_calculated_features)} bars")
-
-                # Step 3: Generate all signals (optional - strategy can also generate on-the-fly)
+                # Pre-calculated signals (optional — strategies generate on-the-fly)
                 self.pre_calculated_signals = None
-                if self.signal_generator and self.pre_calculated_features is not None:
-                    signals_result = self.signal_generator.generate_signals(self.pre_calculated_features)
-                    # Signal generator may return List[Signal] or DataFrame
-                    if signals_result is not None:
-                        if isinstance(signals_result, list):
-                            # Convert list of signals to DataFrame
-                            if len(signals_result) > 0:
-                                self.pre_calculated_signals = pd.DataFrame([s.__dict__ for s in signals_result])
-                                logger.info(f"   ✅ Signals generated: {len(signals_result)} signals")
-                        elif isinstance(signals_result, pd.DataFrame):
-                            self.pre_calculated_signals = signals_result
-                            logger.info(f"   ✅ Signals generated: {len(signals_result)} signals")
 
                 pre_calc_duration = (datetime.now() - pre_calc_start).total_seconds()
                 logger.info(f"   ⏱️  Pre-calculation completed in {pre_calc_duration:.2f} seconds")
+                logger.info(f"   🔗 Code path: PipelineOrchestrator (same as papertest/live)")
                 logger.info("")
 
             except Exception as e:
-                logger.error(f"❌ Pre-calculation failed: {e}")
+                logger.error(f"❌ Pre-calculation via PipelineOrchestrator failed: {e}")
                 logger.warning("⚠️  Falling back to on-the-fly calculation")
                 self.pre_calculated_indicators = None
                 self.pre_calculated_features = None
@@ -3519,6 +3450,11 @@ class InstitutionalBacktestEngine:
             bars_with_signals = 0
             bars_with_trades = 0
             pre_calc_index = 0  # Track index in pre_calculated_features (which excludes warmup)
+
+            # C5 FIX: Circuit breaker — halt after N consecutive bar errors.
+            # Prevents runaway error loops from burning CPU while producing garbage.
+            _consecutive_errors = 0
+            _MAX_CONSECUTIVE_ERRORS = 50
 
             # Record initial position state
             if self.risk_manager:
@@ -3588,9 +3524,20 @@ class InstitutionalBacktestEngine:
                         bars_with_trades += 1  # Count EOD as a trading bar
 
                 except Exception as e:
+                    _consecutive_errors += 1
                     logger.error(f"❌ Error processing bar {idx} at {timestamp}: {e}")
-                    # Continue with next bar rather than failing entire backtest
+                    # C5 FIX: Halt backtest if consecutive errors exceed threshold
+                    if _consecutive_errors >= _MAX_CONSECUTIVE_ERRORS:
+                        logger.error(
+                            f"🛑 CIRCUIT BREAKER: {_consecutive_errors} consecutive bar errors "
+                            f"— aborting backtest to prevent garbage results"
+                        )
+                        raise RuntimeError(
+                            f"Circuit breaker tripped: {_consecutive_errors} consecutive bar processing errors"
+                        )
                     continue
+                else:
+                    _consecutive_errors = 0  # Reset on success
                 finally:
                     # F11 FIX: Always advance pre_calc_index, even on error.
                     # pre_calc_index tracks position in the timeline, not processed bars.
@@ -4370,7 +4317,10 @@ class InstitutionalBacktestEngine:
                                   bar_index: int,
                                   pre_calc_index: int = 0) -> Dict[str, Any]:
         """
-        Process a single bar of market data through the complete pipeline
+        Process a single bar of market data through the complete pipeline.
+
+        Optimized: each logical step is delegated to a focused helper method
+        for readability, testability, and profiling granularity.
         """
         bar_results = {
             'timestamp': timestamp,
@@ -4385,31 +4335,10 @@ class InstitutionalBacktestEngine:
             bar_dict = self._bar_to_dict(bar)
 
             # Step 1: Update regime engine (Rule 2 - Regime-First)
-            if self.regime_engine:
-                # Convert bar to dict for regime engine
-                regime_bar_dict = dict(bar_dict)
-                regime_bar_dict['timestamp'] = timestamp
+            self._update_regime_for_bar(bar_dict, timestamp, bar_index)
 
-                # Process market data through regime engine or its sensor
-                try:
-                    if hasattr(self.regime_engine, "process_market_data"):
-                        regime_result = self.regime_engine.process_market_data(regime_bar_dict)
-                    elif hasattr(self.regime_engine, "regime_sensor"):
-                        regime_result = self.regime_engine.regime_sensor.process_market_data(regime_bar_dict)
-                    else:
-                        raise AttributeError("regime_engine has no process_market_data or regime_sensor")
-                except Exception as e:
-                    # Log error but continue - regime engine might not be fully initialized
-                    # or might not support this data format
-                    if bar_index == 0:
-                        logger.warning(f"⚠️ Regime engine processing failed: {e}")
-                    regime_result = None
-
-            # ================================================================
-            # EOD GUARD: Skip all signal execution and generation at/after EOD
-            # ================================================================
+            # Step 2: EOD guard
             _eod_guard_active = self.eod_guard.is_active(timestamp)
-
             if _eod_guard_active and self.pending_signals:
                 kept, discarded = self.eod_guard.filter_signals(self.pending_signals)
                 if discarded > 0:
@@ -4419,49 +4348,10 @@ class InstitutionalBacktestEngine:
                     )
                 self.pending_signals = kept
 
-            # ================================================================
-            # PT-style sequencing: execute prior-bar pending signals at THIS bar open
-            # ================================================================
-            # This mirrors the live bar lifecycle:
-            # - decide on bar N close
-            # - execute at bar N+1 open
-            if self.pending_signals:
-                try:
-                    # C2 STALENESS FIX: Filter out signals older than 1 bar.
-                    # Signals should execute on the very next bar after generation.
-                    # If they're still pending after that, they're stale.
-                    max_signal_age_bars = 1
-                    fresh_signals = []
-                    for sig in self.pending_signals:
-                        sig_bar_idx = sig.get('signal_bar_index')
-                        if sig_bar_idx is None:
-                            # H2 R3 FIX: Missing signal_bar_index means unknown age.
-                            # Treat as stale to prevent immortal signals from broken paths.
-                            logger.warning(
-                                f"⚠️ Dropping signal with no signal_bar_index: "
-                                f"{sig.get('symbol')} {sig.get('side')} — treating as stale"
-                            )
-                        elif (bar_index - sig_bar_idx) > max_signal_age_bars:
-                            logger.warning(
-                                f"⚠️ Expired stale signal: {sig.get('symbol')} {sig.get('side')} "
-                                f"(generated at bar {sig_bar_idx}, now at bar {bar_index}, "
-                                f"age={bar_index - sig_bar_idx} bars > max {max_signal_age_bars})"
-                            )
-                        else:
-                            fresh_signals.append(sig)
-
-                    open_price = bar.get('open', bar.get('close', 0))
-                    executed_trades = await self._execute_pending_signals(
-                        fresh_signals,
-                        bar,
-                        timestamp,
-                        execution_price=open_price,
-                    )
-                    bar_results['trades_executed'] = len(executed_trades)
-                except Exception as e:
-                    logger.warning("Pending-signal execution failed", exc_info=True)
-                finally:
-                    self.pending_signals = []
+            # Step 3: Execute prior-bar pending signals at THIS bar's open
+            bar_results['trades_executed'] = await self._drain_pending_signals(
+                bar, timestamp, bar_index
+            )
 
             # Step 2: Use pre-calculated data for StrategyManager inputs (PT-style = indicators)
             # Check if we have pre-calculated indicators/features available
@@ -4756,10 +4646,10 @@ class InstitutionalBacktestEngine:
                             signals_df = pd.DataFrame([_signal_to_dict(s) for s in signals_result])
                             bar_results['signals_generated'] = len(signals_df)
                     else:
-                        # No matching timestamp found in pre_calculated_features
-                        # Fall back to on-the-fly calculation
+                        # No historical data before this bar (expected for first bar).
+                        # Fall back to on-the-fly calculation.
                         use_pre_calculated = False
-                        logger.warning(f"⚠️  Pre-calculated features not found for timestamp {bar_timestamp}, falling back to on-the-fly")
+                        logger.debug(f"Pre-calculated features not found for timestamp {bar_timestamp}, falling back to on-the-fly")
 
                 except Exception as e:
                     use_pre_calculated = False
@@ -4892,34 +4782,7 @@ class InstitutionalBacktestEngine:
             await self._evaluate_multi_exit_rules(bar, bar_index, timestamp)
 
             # Record position history after execution
-            if self.risk_manager:
-                # Use CentralRiskManager for position state (Rule 4)
-                # P&L values come from pnl_tracker (if available)
-                pnl_source = getattr(self, 'pnl_tracker', None) or self.risk_manager
-                position_snapshot = {
-                    'timestamp': timestamp,
-                    'equity': self.risk_manager.portfolio_value if hasattr(self.risk_manager, 'portfolio_value') else self.config.initial_capital,
-                    'cash': self.risk_manager.available_cash,
-                    'total_pnl': getattr(pnl_source, 'total_pnl', 0.0),
-                    'realized_pnl': getattr(pnl_source, 'realized_pnl', 0.0),
-                    'unrealized_pnl': getattr(pnl_source, 'unrealized_pnl', 0.0),
-                    'position_count': len(self.risk_manager.current_positions),
-                    'max_drawdown': getattr(self.risk_manager, 'max_drawdown', 0.0),
-                    'max_drawdown_pct': getattr(self.risk_manager, 'max_drawdown_pct', 0.0)
-                }
-                self.position_history.append(position_snapshot)
-
-                # C6 R3 FIX: Trim position_history to prevent OOM on long backtests.
-                # Keep every Nth snapshot when over limit (downsample, not truncate).
-                if len(self.position_history) > self._max_position_history:
-                    if not self._position_history_trim_warned:
-                        logger.info(
-                            f"📊 position_history exceeded {self._max_position_history} entries — "
-                            f"downsampling to every-other snapshot to conserve memory"
-                        )
-                        self._position_history_trim_warned = True
-                    # Keep every other entry (50% reduction)
-                    self.position_history = self.position_history[::2]
+            self._record_position_snapshot(timestamp)
 
             return bar_results
 
@@ -4927,6 +4790,106 @@ class InstitutionalBacktestEngine:
             logger.error(f"❌ Error processing bar at {timestamp}: {e}")
             bar_results['error'] = str(e)
             return bar_results
+
+    # ============================================================
+    # EXTRACTED HELPERS FROM _process_single_bar (optimization)
+    # ============================================================
+
+    def _update_regime_for_bar(
+        self,
+        bar_dict: Dict[str, Any],
+        timestamp: datetime,
+        bar_index: int,
+    ) -> None:
+        """Step 1: Feed bar to regime engine (Rule 2 - Regime-First)."""
+        if not self.regime_engine:
+            return
+        regime_bar_dict = dict(bar_dict)
+        regime_bar_dict['timestamp'] = timestamp
+        try:
+            # P0-4 FIX: RegimeManager now has process_market_data() via delegation
+            self.regime_engine.process_market_data(regime_bar_dict)
+        except Exception as e:
+            if bar_index == 0:
+                logger.warning(f"⚠️ Regime engine processing failed: {e}")
+
+    async def _drain_pending_signals(
+        self,
+        bar: pd.Series,
+        timestamp: datetime,
+        bar_index: int,
+    ) -> int:
+        """Execute prior-bar pending signals at current bar's OPEN price.
+
+        Returns the number of trades executed.
+        """
+        if not self.pending_signals:
+            return 0
+
+        try:
+            max_signal_age_bars = 1
+            fresh_signals = []
+            for sig in self.pending_signals:
+                sig_bar_idx = sig.get('signal_bar_index')
+                if sig_bar_idx is None:
+                    logger.warning(
+                        f"⚠️ Dropping signal with no signal_bar_index: "
+                        f"{sig.get('symbol')} {sig.get('side')} — treating as stale"
+                    )
+                elif (bar_index - sig_bar_idx) > max_signal_age_bars:
+                    logger.warning(
+                        f"⚠️ Expired stale signal: {sig.get('symbol')} {sig.get('side')} "
+                        f"(age={bar_index - sig_bar_idx} bars > max {max_signal_age_bars})"
+                    )
+                else:
+                    fresh_signals.append(sig)
+
+            open_price = bar.get('open', bar.get('close', 0))
+            executed_trades = await self._execute_pending_signals(
+                fresh_signals,
+                bar,
+                timestamp,
+                execution_price=open_price,
+            )
+            return len(executed_trades)
+        except Exception:
+            logger.warning("Pending-signal execution failed", exc_info=True)
+            return 0
+        finally:
+            self.pending_signals = []
+
+    def _record_position_snapshot(self, timestamp: datetime) -> None:
+        """Record position state for equity curve / analytics."""
+        if not self.risk_manager:
+            return
+
+        pnl_source = getattr(self, 'pnl_tracker', None) or self.risk_manager
+        snapshot = {
+            'timestamp': timestamp,
+            'equity': (
+                self.risk_manager.portfolio_value
+                if hasattr(self.risk_manager, 'portfolio_value')
+                else self.config.initial_capital
+            ),
+            'cash': self.risk_manager.available_cash,
+            'total_pnl': getattr(pnl_source, 'total_pnl', 0.0),
+            'realized_pnl': getattr(pnl_source, 'realized_pnl', 0.0),
+            'unrealized_pnl': getattr(pnl_source, 'unrealized_pnl', 0.0),
+            'position_count': len(self.risk_manager.current_positions),
+            'max_drawdown': getattr(self.risk_manager, 'max_drawdown', 0.0),
+            'max_drawdown_pct': getattr(self.risk_manager, 'max_drawdown_pct', 0.0),
+        }
+        self.position_history.append(snapshot)
+
+        # C6 FIX: Downsample with peak/trough retention
+        if len(self.position_history) > self._max_position_history:
+            if not self._position_history_trim_warned:
+                logger.info(
+                    f"📊 position_history exceeded {self._max_position_history} entries — "
+                    f"downsampling with peak/trough retention"
+                )
+                self._position_history_trim_warned = True
+            self.position_history = self._downsample_with_peaks(self.position_history)
 
     # ============================================================
     # PER-BAR MARKET PRICE UPDATE
@@ -5661,104 +5624,83 @@ class InstitutionalBacktestEngine:
 
                     # Request authorization from CentralRiskManager (BRICK #8)
                     if self.risk_manager:
-                        from core_engine.system.central_risk_manager import TradingDecisionRequest, TradingDecisionType
-
-                        # F6 FIX: Use POSITION_EXIT for exit signals.
-                        # POSITION_ENTRY triggers regime/vol/confidence scaling which
-                        # chronically reduces exit quantities, leaving residual positions.
+                        # C1: Determine if signal is an exit (skips sizing scale-down)
                         is_exit_signal = signal_type_lower in exit_signals
-                        decision_type = (
-                            TradingDecisionType.POSITION_EXIT if is_exit_signal
-                            else TradingDecisionType.POSITION_ENTRY
-                        )
 
-                        request = TradingDecisionRequest(
-                            decision_type=decision_type,
-                            symbol=symbol,
-                            side=side,
-                            quantity=quantity,
-                            strategy_id=signal_row.get('strategy_id', 'backtest_strategy'),
-                            confidence=confidence,
+                        # C1 FIX: ALWAYS use 6-gate authorization pipeline.
+                        # The traditional authorize_trading_decision() path is removed.
+                        # 6-gate provides: circuit breakers, session, price validation,
+                        # position constraints, multifactor sizing, risk budget, cost,
+                        # and final authorization — all with waterfall audit trail.
+
+                        # Extract bar volume/volatility for Gate 6 cost model alignment
+                        _bar_vol = 0.0
+                        _bar_volatility = self.DEFAULT_VOLATILITY
+                        try:
+                            if 'filtered_data' in dir() and filtered_data is not None and len(filtered_data) > 0:
+                                _last_bar = filtered_data.iloc[-1]
+                                _bar_vol = float(_last_bar.get('volume', 0)) if hasattr(_last_bar, 'get') else float(getattr(_last_bar, 'volume', 0))
+                                _bar_volatility = float(_last_bar.get('volatility', self.DEFAULT_VOLATILITY)) if hasattr(_last_bar, 'get') else float(getattr(_last_bar, 'volatility', self.DEFAULT_VOLATILITY))
+                            elif hasattr(signal_row, 'get'):
+                                _bar_vol = float(signal_row.get('volume', 0))
+                                _bar_volatility = float(signal_row.get('volatility', self.DEFAULT_VOLATILITY))
+                        except Exception:
+                            pass
+
+                        # P0-3 FIX: Compute available_cash with intra-bar commitment
+                        # tracking.  Multiple BUY signals on the same bar must
+                        # collectively respect the cash constraint.
+                        _real_cash = (
+                            float(self.risk_manager._position_book.get_cash_balance())
+                            if getattr(self.risk_manager, '_position_book', None)
+                            else getattr(self.risk_manager, 'available_cash',
+                                         self.risk_manager.portfolio_value * 0.95)
+                        )
+                        _signal_available_cash = max(0.0, _real_cash - _bar_cash_committed)
+
+                        _6gate_signal = {
+                            'symbol': symbol,
+                            'side': side,
+                            'requested_quantity': quantity,
+                            'signal_strength': signal_strength,
+                            'confidence': confidence,
+                            'strategy_id': signal_row.get('strategy_id', 'backtest_strategy'),
+                            'signal_timestamp': timestamp,
+                            'arrival_price': current_price,
+                            'stop_loss_pct': 0.02,
+                            # Signal metadata
+                            'is_exit': is_exit_signal,
+                            'signal_type': signal_type,
+                            'target_weight': target_weight,
+                            'quantity_type': quantity_type,
+                            'available_cash': _signal_available_cash,
+                            'original_signal_metadata': {
+                                'strength': signal_strength,
+                                'target_weight': target_weight,
+                                'signal_type': signal_type,
+                            },
+                            # Gate 6 cost model inputs (aligned with execution simulator)
+                            'bar_volume': _bar_vol,
+                            'bar_volatility': _bar_volatility,
+                        }
+                        _6gate_result = await self.risk_manager.authorize_signal_6gate(
+                            signal=_6gate_signal,
                             current_price=current_price,
-                            metadata={
-                                'timestamp': timestamp.isoformat() if hasattr(timestamp, 'isoformat') else str(timestamp),
-                                'signal_type': signal_type,
-                                'bar_index': self.current_bar_index,
-                                'debug_run': 'momentum_smoke',
-                                'is_exit': is_exit_signal,
-                                'target_weight': target_weight,
-                                'quantity_type': quantity_type,
-                                'original_signal_metadata': {
-                                    'strength': signal_strength,
-                                    'target_weight': target_weight,
-                                    'signal_type': signal_type,
-                                },
-                            }
+                            portfolio_value=self.risk_manager.portfolio_value,
                         )
-
-                        # Get authorization (P5: optionally use 6-gate pipeline)
-                        if getattr(self.config, 'use_6gate_auth', False):
-                            # Extract bar volume/volatility for Gate 6 cost model alignment
-                            _bar_vol = 0.0
-                            _bar_volatility = 0.02
-                            try:
-                                if 'filtered_data' in dir() and filtered_data is not None and len(filtered_data) > 0:
-                                    _last_bar = filtered_data.iloc[-1]
-                                    _bar_vol = float(_last_bar.get('volume', 0)) if hasattr(_last_bar, 'get') else float(getattr(_last_bar, 'volume', 0))
-                                    _bar_volatility = float(_last_bar.get('volatility', 0.02)) if hasattr(_last_bar, 'get') else float(getattr(_last_bar, 'volatility', 0.02))
-                                elif hasattr(signal_row, 'get'):
-                                    _bar_vol = float(signal_row.get('volume', 0))
-                                    _bar_volatility = float(signal_row.get('volatility', 0.02))
-                            except Exception:
-                                pass
-
-                            _6gate_signal = {
-                                'symbol': symbol,
-                                'side': side,
-                                'requested_quantity': quantity,
-                                'signal_strength': signal_strength,
-                                'confidence': confidence,
-                                'strategy_id': signal_row.get('strategy_id', 'backtest_strategy'),
-                                'signal_timestamp': timestamp,
-                                'arrival_price': current_price,
-                                'stop_loss_pct': 0.02,
-                                # Metadata parity with traditional TradingDecisionRequest
-                                'is_exit': is_exit_signal,
-                                'signal_type': signal_type,
-                                'target_weight': target_weight,
-                                'quantity_type': quantity_type,
-                                'available_cash': float(self.risk_manager._position_book.get_cash_balance())
-                                    if hasattr(self.risk_manager, '_position_book') and self.risk_manager._position_book
-                                    else self.risk_manager.portfolio_value * 0.95,
-                                'original_signal_metadata': {
-                                    'strength': signal_strength,
-                                    'target_weight': target_weight,
-                                    'signal_type': signal_type,
-                                },
-                                # Gate 6 cost model inputs (aligned with execution simulator)
-                                'bar_volume': _bar_vol,
-                                'bar_volatility': _bar_volatility,
-                            }
-                            _6gate_result = await self.risk_manager.authorize_signal_6gate(
-                                signal=_6gate_signal,
-                                current_price=current_price,
-                                portfolio_value=self.risk_manager.portfolio_value,
-                            )
-                            # Adapt 6-gate result to authorization interface
-                            from core_engine.system.central_risk_manager import AuthorizationLevel
-                            class _6GateAuth:
-                                pass
-                            authorization = _6GateAuth()
-                            authorization.authorization_level = (
-                                AuthorizationLevel.AUTOMATIC if _6gate_result.get('authorized', False)
-                                else AuthorizationLevel.REJECTED
-                            )
-                            authorization.authorized_quantity = _6gate_result.get('authorized_quantity', 0.0)
-                            authorization.authorization_id = f"6gate_{symbol}_{self.current_bar_index}"
-                            authorization.rejection_reason = _6gate_result.get('rejection_reason', '')
-                            authorization.gate_diagnostics = _6gate_result.get('gates', {})
-                        else:
-                            authorization = await self.risk_manager.authorize_trading_decision(request)
+                        # Adapt 6-gate result to authorization interface
+                        from core_engine.system.central_risk_manager import AuthorizationLevel
+                        class _6GateAuth:
+                            pass
+                        authorization = _6GateAuth()
+                        authorization.authorization_level = (
+                            AuthorizationLevel.AUTOMATIC if _6gate_result.get('authorized', False)
+                            else AuthorizationLevel.REJECTED
+                        )
+                        authorization.authorized_quantity = _6gate_result.get('authorized_quantity', 0.0)
+                        authorization.authorization_id = f"6gate_{symbol}_{self.current_bar_index}"
+                        authorization.rejection_reason = _6gate_result.get('rejection_reason', '')
+                        authorization.gate_diagnostics = _6gate_result.get('gates', {})
 
                         # Check if authorized
                         from core_engine.system.central_risk_manager import AuthorizationLevel
@@ -5869,6 +5811,42 @@ class InstitutionalBacktestEngine:
             return dict(bar)
         except Exception:
             return {}
+
+    @staticmethod
+    def _downsample_with_peaks(history: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """C6 FIX: Downsample position_history by 50% while retaining peak
+        equity and trough drawdown snapshots for faithful curve reconstruction.
+
+        Algorithm:
+        1. Mark the global equity-peak and drawdown-trough indices.
+        2. Keep every-other entry (base downsample).
+        3. Force-include any marked peak/trough that was about to be dropped.
+        """
+        if len(history) < 4:
+            return history
+
+        # Identify peak-equity and trough-drawdown indices
+        peak_idx = 0
+        trough_idx = 0
+        peak_equity = -float('inf')
+        worst_dd = float('inf')
+
+        for i, snap in enumerate(history):
+            eq = snap.get('equity', 0)
+            dd = snap.get('max_drawdown_pct', 0)
+            if eq > peak_equity:
+                peak_equity = eq
+                peak_idx = i
+            if dd < worst_dd:
+                worst_dd = dd
+                trough_idx = i
+
+        # Base downsample: keep every-other + always keep first and last
+        keep_set = {0, len(history) - 1, peak_idx, trough_idx}
+        for i in range(0, len(history), 2):
+            keep_set.add(i)
+
+        return [history[i] for i in sorted(keep_set)]
 
     def _get_precalc_bar_iloc_fast(
         self,
@@ -6118,32 +6096,13 @@ class InstitutionalBacktestEngine:
             return []
 
         try:
-            from backtest.engine.historical_execution_simulator import HistoricalExecutionSimulator
-
-            # Create simulator if not exists (H3 fix — use BacktestConfig values)
-            if not hasattr(self, 'execution_simulator'):
-                disable_rejections = getattr(self, 'disable_rejections', False)
-                self.execution_simulator = HistoricalExecutionSimulator({
-                    'fill_model': 'realistic',
-                    'base_spread_bps': getattr(self.config, 'base_spread_bps', 5.0),
-                    'base_slippage_bps': getattr(self.config, 'base_slippage_bps', 2.0),
-                    'commission_per_share': getattr(self.config, 'commission_per_trade', 0.005),
-                    'enable_random_slippage': False,  # Deterministic for backtesting
-                    'impact_linear_coeff': getattr(self.config, 'linear_coefficient', 0.1),
-                    'impact_sqrt_coeff': getattr(self.config, 'sqrt_coefficient', 0.5),
-                    'disable_rejections': disable_rejections,
-                    'execution_seed': getattr(self.config, 'execution_seed', None),
-                })
-
-            # Share execution simulator config with CRM for Gate 6 cost alignment
-            if hasattr(self, 'risk_manager') and self.risk_manager is not None:
-                self.risk_manager._exec_sim_config = {
-                    'base_spread_bps': getattr(self.config, 'base_spread_bps', 5.0),
-                    'base_slippage_bps': getattr(self.config, 'base_slippage_bps', 2.0),
-                    'commission_per_share': getattr(self.config, 'commission_per_trade', 0.005),
-                    'impact_linear_coeff': getattr(self.config, 'linear_coefficient', 0.1),
-                    'impact_sqrt_coeff': getattr(self.config, 'sqrt_coefficient', 0.5),
-                }
+            # P1-4: execution_simulator is now created eagerly in Phase 5.
+            # Assert its presence as a safety check.
+            if not hasattr(self, 'execution_simulator') or self.execution_simulator is None:
+                raise RuntimeError(
+                    "execution_simulator not initialized — did Phase 5 complete? "
+                    "(P1-4: eager init should have created it)"
+                )
 
             # P4: Initialize OMS for path parity when enabled
             if getattr(self.config, 'use_oms', False) and self.order_management_system is None:

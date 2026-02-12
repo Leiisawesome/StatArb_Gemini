@@ -705,6 +705,30 @@ class RealTimeRegimeSensor(ISystemComponent, IRegimePolicy):
                     self.current_regime = new_regime
                     self._regime_history.append(new_regime)
 
+                    # P1-1 FIX: Persist regime by timestamp for dict-input path
+                    # Previously, only the DataFrame path populated these
+                    # structures, causing get_regime_at_timestamp() to fail
+                    # or return None for bar-by-bar dict inputs.
+                    if symbol not in self.regime_by_timestamp:
+                        self.regime_by_timestamp[symbol] = {}
+                    self.regime_by_timestamp[symbol][timestamp] = new_regime
+
+                    if symbol not in self.regime_sequence:
+                        self.regime_sequence[symbol] = deque(maxlen=10000)
+                    self.regime_sequence[symbol].append({
+                        'timestamp': timestamp,
+                        'regime': new_regime.primary_regime.value,
+                        'confidence': new_regime.confidence,
+                        'volatility_regime': new_regime.volatility_regime.value if hasattr(new_regime.volatility_regime, 'value') else str(new_regime.volatility_regime),
+                    })
+
+                    # Clean up timestamp index periodically (same logic as DF path)
+                    if len(self.regime_by_timestamp[symbol]) > len(self.regime_sequence[symbol]) * 1.5:
+                        valid_timestamps = {entry.get('timestamp') for entry in self.regime_sequence[symbol]}
+                        stale_keys = [k for k in self.regime_by_timestamp[symbol] if k not in valid_timestamps]
+                        for k in stale_keys:
+                            del self.regime_by_timestamp[symbol][k]
+
                     # Note: deque(maxlen=1000) auto-removes oldest entries
 
                     # Notify subscribers on regime change

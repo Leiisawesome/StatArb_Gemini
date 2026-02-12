@@ -338,6 +338,37 @@ class RegimeManager(ISystemComponent, IRegimePolicy):
         # Note: In production, use the async update_regime_analysis for real-time updates
         return self._sync_update_analysis(data, kwargs.get('portfolio_data'))
 
+    # ================================================================
+    # P0-4 FIX: Delegation methods for pipeline orchestrator
+    # PipelineOrchestrator and InstitutionalBacktestEngine call
+    # process_market_data() and get_regime_at_timestamp() on whatever
+    # object is assigned as ``regime_engine``.  When that object is a
+    # RegimeManager (the common case), these methods were missing,
+    # causing AttributeError at runtime.
+    # ================================================================
+
+    def process_market_data(self, market_data: Any) -> Dict[str, Any]:
+        """Delegate bar-level regime processing to the internal sensor.
+
+        This method makes RegimeManager a drop-in replacement for
+        RealTimeRegimeSensor in any context that calls
+        ``regime_engine.process_market_data()``.
+        """
+        return self.regime_sensor.process_market_data(market_data)
+
+    def get_regime_at_timestamp(self, symbol: str, timestamp: datetime) -> Optional[Any]:
+        """Delegate bar-level regime lookup to the internal sensor.
+
+        This method makes RegimeManager a drop-in replacement for
+        RealTimeRegimeSensor in any context that calls
+        ``regime_engine.get_regime_at_timestamp()``.
+        """
+        return self.regime_sensor.get_regime_at_timestamp(symbol, timestamp)
+
+    def get_regime_sequence(self, symbol: str) -> List[Dict[str, Any]]:
+        """Delegate regime sequence retrieval to the internal sensor."""
+        return self.regime_sensor.get_regime_sequence(symbol)
+
     def get_capabilities(self) -> Dict[str, Any]:
         """Returns metadata about what this policy can detect (IRegimePolicy interface)"""
         return {
@@ -984,7 +1015,7 @@ class RegimeManager(ISystemComponent, IRegimePolicy):
                 return False
 
             if self.is_operational:
-                logger.warning("RegimeManager already operational")
+                logger.debug("RegimeManager already operational — skipping start()")
                 return True
 
             logger.info("🚀 Starting RegimeManager...")

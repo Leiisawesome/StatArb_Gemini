@@ -744,6 +744,24 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
                 f"Failed to load market data from ClickHouse: {e}. Real market data required."
             ) from e
 
+        # P0-5 FIX: Validate data quality after loading.
+        # Previously validate_data() was defined but never invoked, allowing
+        # corrupt or incomplete data to silently flow into the pipeline.
+        validation = self.validate_data(df)
+        if not validation['valid']:
+            self.logger.warning(
+                "Data quality issues detected (score=%.2f): %s",
+                validation['score'],
+                '; '.join(validation['issues']),
+            )
+            # Hard-fail only when structural columns are missing (score < 0.5).
+            # Soft issues (nulls, ordering) are logged but tolerated.
+            if validation['score'] < 0.5:
+                raise DataUnavailableError(
+                    f"Loaded data failed quality validation (score={validation['score']:.2f}): "
+                    + '; '.join(validation['issues'])
+                )
+
         # Cache the result (real or synthetic)
         self._cache[cache_key] = df
         self._cache_timestamps[cache_key] = datetime.now()
@@ -1139,10 +1157,15 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
             # Get the latest row
             latest_row = df.iloc[-1]
 
+            # P1-2 FIX: Use explicit 'timestamp' column instead of row index.
+            # latest_row.name is the integer positional index when the DF uses
+            # default RangeIndex, not the actual bar timestamp.
+            ts = latest_row.get('timestamp', latest_row.name)
+
             # Create MarketData object
             market_data = MarketData(
                 symbol=symbol,
-                timestamp=latest_row.name,
+                timestamp=ts,
                 open=float(latest_row['open']),
                 high=float(latest_row['high']),
                 low=float(latest_row['low']),
@@ -1151,8 +1174,9 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
                 source="clickhouse"
             )
 
-            # Note: Subscriber notification not implemented yet
-            # await self.notify_subscribers(market_data)
+            # P1-3 FIX: Enable subscriber notifications so streaming/live
+            # consumers receive data updates.
+            await self.notify_subscribers(market_data)
 
         except Exception as e:
             self.logger.warning(f"Failed to notify subscribers: {e}")

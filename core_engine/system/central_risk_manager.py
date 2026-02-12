@@ -2360,25 +2360,44 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
             }
 
     def get_current_position(self, symbol: str) -> float:
-        """Get current position for symbol
+        """Get current SIGNED position for symbol.
 
-        ✅ PHASE 2: Queries PositionBook when available
+        Returns positive for LONG, negative for SHORT, 0.0 for FLAT.
+
+        ✅ PHASE 2: Queries PositionBook when available.
+        P0-1 FIX: PositionBook stores quantity as always-positive with a
+        separate ``side`` field. This method now applies the sign so that
+        downstream consumers (Gate 3, concentration checks, sizing) receive
+        the correct signed quantity.
         """
         if self._position_book is not None:
             position = self._position_book.get_position(symbol)
-            return float(position.quantity) if position else 0.0
+            if position is None:
+                return 0.0
+            raw_qty = float(position.quantity)
+            # Apply sign: negative for SHORT, positive for LONG/FLAT
+            if position.side.value == 'short':
+                return -raw_qty
+            return raw_qty
         return self.current_positions.get(symbol, 0.0)
 
     def get_all_positions(self) -> Dict[str, float]:
-        """Get all current positions
+        """Get all current positions as SIGNED quantities.
 
-        ✅ PHASE 2: Queries PositionBook when available
+        Returns positive for LONG, negative for SHORT.
+
+        ✅ PHASE 2: Queries PositionBook when available.
+        P0-1 FIX: Returns signed quantities from PositionBook.
         """
         if self._position_book is not None:
-            return {
-                symbol: float(pos.quantity)
-                for symbol, pos in self._position_book.get_all_positions().items()
-            }
+            result = {}
+            for symbol, pos in self._position_book.get_all_positions().items():
+                raw_qty = float(pos.quantity)
+                if pos.side.value == 'short':
+                    result[symbol] = -raw_qty
+                else:
+                    result[symbol] = raw_qty
+            return result
         return self.current_positions.copy()
 
     def get_position_details(self) -> Dict[str, Dict[str, Any]]:
@@ -3935,19 +3954,15 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
         capped_qty = quantity
 
         # --- Resolve current position (SSOT: PositionBook > legacy map) ---
+        # P0-1 FIX: Use get_current_position() which returns SIGNED quantity
+        # (negative for shorts). Previously, reading pos.quantity directly
+        # returned unsigned value, breaking sell-side and concentration checks
+        # when allow_shorts=True.
         current_position = 0.0
-        if getattr(self, "_position_book", None) is not None:
-            try:
-                pos = self._position_book.get_position(symbol)
-                if pos is not None:
-                    current_position = float(getattr(pos, "quantity", 0.0) or 0.0)
-            except Exception:
-                current_position = 0.0
-        else:
-            try:
-                current_position = float(self.current_positions.get(symbol, 0.0) or 0.0)
-            except Exception:
-                current_position = 0.0
+        try:
+            current_position = float(self.get_current_position(symbol) or 0.0)
+        except Exception:
+            current_position = 0.0
 
         # --- Pending exposure from OMS ---
         pending_buy_qty = 0.0
@@ -3965,7 +3980,11 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
 
         # --- BUY: Cash constraint ---
         if side == 'buy':
-            available_cash = signal.get('available_cash', portfolio_value * 0.95)
+            # P0-2 FIX: Use actual tracked cash from PositionBook/CRM as default,
+            # not the unreliable 95%-of-portfolio heuristic. The signal may
+            # carry pre-committed cash (P0-3), so prefer signal > real cash > fallback.
+            _real_cash = getattr(self, 'available_cash', portfolio_value * 0.95)
+            available_cash = signal.get('available_cash', _real_cash)
             required_cash = capped_qty * current_price
             if required_cash > available_cash:
                 max_affordable = available_cash / current_price if current_price > 0 else 0
@@ -4071,6 +4090,27 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
             return {
                 'passed': True,
                 'sized_quantity': sized_qty,
+                'diagnostics': diag,
+            }
+
+        # ---- HARD CONFIDENCE FLOOR (reinstated for 6-gate parity) ----
+        # After C1 removed the traditional authorize_trading_decision path,
+        # risk.min_signal_confidence became dead config.  Enforce it here so
+        # the YAML-declared threshold actually rejects low-confidence entries
+        # rather than merely halving their size.
+        min_conf = self.min_signal_confidence  # from config.risk_limits.confidence_threshold
+        if confidence < min_conf:
+            diag['scaling_factors']['confidence_floor_reject'] = True
+            diag['min_signal_confidence'] = min_conf
+            diag['signal_confidence'] = confidence
+            diag['qty_out'] = 0.0
+            return {
+                'passed': False,
+                'reason': (
+                    f'Confidence {confidence:.2%} below minimum '
+                    f'{min_conf:.2%} (hard floor)'
+                ),
+                'sized_quantity': 0.0,
                 'diagnostics': diag,
             }
 

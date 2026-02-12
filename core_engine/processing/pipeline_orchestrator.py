@@ -1025,6 +1025,78 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
             logger.error(f"❌ Pipeline processing failed: {e}", exc_info=True)
             return {}
 
+    async def process_preloaded_data(
+        self,
+        raw_data_per_symbol: Dict[str, pd.DataFrame],
+        timeframe: str = "1min",
+    ) -> Dict[str, 'EnrichedMarketData']:
+        """
+        C2 FIX: Process already-loaded raw OHLCV through the same pipeline
+        used by ``process_market_data()``.
+
+        This enables BT, papertest, and live to share a single code path for
+        indicator / feature / signal calculation.  The only difference is how
+        raw data is sourced:
+        - live/papertest: ``process_market_data()`` loads from DataManager
+        - backtest: caller pre-loads data and passes it here
+
+        Args:
+            raw_data_per_symbol: Dict mapping symbol -> raw OHLCV DataFrame.
+            timeframe: Data timeframe (for metadata only).
+
+        Returns:
+            Dict[symbol, EnrichedMarketData] with indicators, features, signals.
+        """
+        if not self.is_operational:
+            logger.error("Pipeline not operational — call initialize() first")
+            return {}
+
+        enriched_data: Dict[str, 'EnrichedMarketData'] = {}
+        start_processing = datetime.now()
+
+        try:
+            # Validate + clean each symbol's raw data (same as process_market_data)
+            for symbol, df in raw_data_per_symbol.items():
+                if df.empty:
+                    continue
+                is_valid, error = self._validate_dataframe(
+                    df,
+                    f"Preloaded Raw Data - {symbol}",
+                    ['open', 'high', 'low', 'close', 'volume'],
+                )
+                if not is_valid:
+                    logger.error(f"❌ {symbol}: Preloaded data validation failed: {error}")
+                    raw_data_per_symbol[symbol] = pd.DataFrame()
+                    continue
+                raw_data_per_symbol[symbol] = self._clean_dataframe(df, f"Preloaded - {symbol}")
+
+            # Process all symbols (reuses _process_single_symbol for full parity)
+            tasks = []
+            for symbol, df in raw_data_per_symbol.items():
+                if df.empty:
+                    continue
+                tasks.append(self._process_single_symbol(symbol, df, timeframe))
+
+            if not tasks:
+                return {}
+
+            results = await asyncio.gather(*tasks, return_exceptions=False)
+
+            for symbol, result in results:
+                if result is not None:
+                    enriched_data[symbol] = result
+
+            total_time = (datetime.now() - start_processing).total_seconds()
+            self.total_processed += len(enriched_data)
+            logger.info(
+                f"✅ Pipeline (preloaded) complete: {len(enriched_data)} symbols in {total_time:.3f}s"
+            )
+            return enriched_data
+
+        except Exception as e:
+            logger.error(f"❌ Pipeline processing (preloaded) failed: {e}", exc_info=True)
+            return {}
+
     async def _process_single_symbol(
         self, 
         symbol: str, 
@@ -1355,10 +1427,10 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
             # Clean NaN/Inf from indicators
             indicators_df = self._clean_dataframe(indicators_df, "Phase 2 (Indicators)")
 
-            # Log quality metrics
+            # Log quality metrics (warmup NaN is expected; INFO not WARNING)
             quality = self._calculate_data_quality_metrics(indicators_df, "Phase 2 (Indicators)")
             if quality['quality_score'] < 0.9:
-                logger.warning(f"⚠️  Indicator quality score: {quality['quality_score']:.2f}")
+                logger.info(f"Indicator quality score: {quality['quality_score']:.2f} (warmup NaN expected)")
 
             return indicators_df
 
@@ -1417,10 +1489,10 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
             # Clean NaN/Inf from features
             features_df = self._clean_dataframe(features_df, "Phase 3 (Features)")
 
-            # Log quality metrics
+            # Log quality metrics (warmup NaN is expected; INFO not WARNING)
             quality = self._calculate_data_quality_metrics(features_df, "Phase 3 (Features)")
             if quality['quality_score'] < 0.9:
-                logger.warning(f"⚠️  Feature quality score: {quality['quality_score']:.2f}")
+                logger.info(f"Feature quality score: {quality['quality_score']:.2f} (warmup NaN expected)")
 
             return features_df
 
@@ -1974,6 +2046,20 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
             # Sort by timestamp to ensure proper order
             if 'timestamp' in features_df.columns:
                 features_df = features_df.sort_values('timestamp').reset_index(drop=True)
+
+            # P1-5 FIX: Forward-fill NaN values at segment boundaries.
+            # After trimming warmup, the first rows of each segment may have
+            # NaN in rolling-window columns (e.g., SMA_50 when segment < 50
+            # bars).  Forward-fill propagates the last valid value from the
+            # prior segment, which is causally correct (no lookahead).
+            # Only apply to numeric indicator/feature columns, not OHLCV or metadata.
+            _ohlcv_cols = {'open', 'high', 'low', 'close', 'volume', 'timestamp', 'symbol'}
+            _numeric_cols = [c for c in indicators_df.columns if c not in _ohlcv_cols]
+            if _numeric_cols:
+                indicators_df[_numeric_cols] = indicators_df[_numeric_cols].ffill()
+            _numeric_feat_cols = [c for c in features_df.columns if c not in _ohlcv_cols]
+            if _numeric_feat_cols:
+                features_df[_numeric_feat_cols] = features_df[_numeric_feat_cols].ffill()
 
         # PHASE 4: Generate signals (process entire combined DataFrame)
         # Signals are already filtered bar-by-bar in _filter_signals()
