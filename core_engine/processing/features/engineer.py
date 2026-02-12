@@ -1085,8 +1085,18 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
             vov = df['vol_of_vol'].fillna(0.5).values
             vov_gate = np.clip(1.0 - vov, 0.0, 1.0)
 
+            # VPIN toxicity gate: INVERT (low VPIN = uninformed flow = tradable)
+            # High VPIN (informed/toxic flow) kills the transition score, preventing
+            # entries during adverse-selection-heavy periods.
+            if 'vpin_percentile' in df.columns:
+                vpin_pct = df['vpin_percentile'].fillna(0.5).values
+                vpin_gate = np.clip(1.0 - vpin_pct, 0.0, 1.0)
+            else:
+                vpin_gate = np.ones(n)  # No VPIN data → neutral (pass-through)
+
             # Multiplicative combination (ADS-compliant: not linear terminal)
-            raw_transition = coherence * accel_gate * expansion * vov_gate
+            # VPIN gate added: any single zero (including high toxicity) kills the score.
+            raw_transition = coherence * accel_gate * expansion * vov_gate * vpin_gate
 
             # Smooth slightly (3-bar EMA) to reduce tick-to-tick noise
             alpha_ema = 2.0 / (3.0 + 1.0)
@@ -1097,9 +1107,12 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
 
             df['transition_score'] = np.clip(smoothed, 0.0, 1.0)
 
+            vpin_range = ""
+            if 'vpin_percentile' in df.columns:
+                vpin_range = f", vpin_pct=[{df['vpin_percentile'].min():.3f}, {df['vpin_percentile'].max():.3f}]"
             self.logger.debug(
                 f"Transition features: coherence=[{df['directional_coherence'].min():.3f}, {df['directional_coherence'].max():.3f}], "
-                f"vov=[{df['vol_of_vol'].min():.3f}, {df['vol_of_vol'].max():.3f}], "
+                f"vov=[{df['vol_of_vol'].min():.3f}, {df['vol_of_vol'].max():.3f}]{vpin_range}, "
                 f"transition=[{df['transition_score'].min():.3f}, {df['transition_score'].max():.3f}]"
             )
 
@@ -1511,6 +1524,9 @@ class EnhancedFeatureEngineer(ISystemComponent, IRegimeAware):
             'composite_pct',               # [0, 100] — percentile rank
             'composite_velocity',          # raw first derivative (used by accel_norm)
             'composite_acceleration',      # raw second derivative (used by accel_norm)
+            'vpin',                        # [0, 1] — VPIN raw score
+            'vpin_percentile',             # [0, 1] — percentile-ranked VPIN
+            'buy_volume_pct',              # [0, 1] — BVC buy fraction
         ]
 
         # Columns to preserve (don't normalize)

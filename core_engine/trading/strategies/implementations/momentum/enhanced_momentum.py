@@ -133,6 +133,10 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
         self._sm_entry_reasons: Dict[str, int] = {}
         self._sm_entries_triggered: int = 0
 
+        # MQS v3.3: per-bar microstructure quality state (reset each evaluation)
+        self._current_mqs: float = 1.0
+        self._current_mqs_penalty: float = 1.0
+
     @staticmethod
     def _normalize_composite_pct(x: float) -> float:
         """
@@ -776,6 +780,77 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                     if vov > vov_block:
                         return None
 
+                    # Hard block: VPIN toxicity (informed/adverse flow regime)
+                    # When VPIN percentile exceeds threshold, the probability of
+                    # informed trading is elevated — entries face systematic
+                    # adverse selection. Block until toxicity subsides.
+                    if bool(getattr(self.config, "enable_vpin_gate", True)):
+                        vpin_pct = float(current_data.get("vpin_percentile", 0.5))
+                        vpin_block = float(getattr(self.config, "vpin_block_threshold", 0.85))
+                        if vpin_pct > vpin_block:
+                            return None
+
+                    # ========================================================
+                    # MICROSTRUCTURE QUALITY SCORE (MQS) — v3.3
+                    #
+                    # Addresses three universal momentum failure modes via a
+                    # single multiplicative quality score rather than independent
+                    # hard blocks (which over-kill due to feature overlap
+                    # between winners and losers at 1-min resolution).
+                    #
+                    # MQS = coherence_f × flow_alignment_f × liquidity_f
+                    #
+                    # Each factor ∈ [0, 1]; any single factor at zero kills
+                    # the score (ADS-compliant multiplicative design).
+                    #
+                    # The MQS is applied as a confidence penalty: it scales
+                    # down signal confidence proportionally. Entries with
+                    # multiple adverse microstructure conditions see their
+                    # confidence collapse below the minimum threshold.
+                    #
+                    # Additionally, extreme BVC contra-flow (buy_vol_pct < 0.15
+                    # on BUY) is a hard block — this is the Kyle (1985)
+                    # adverse selection check for egregious cases only.
+                    # ========================================================
+                    if bool(getattr(self.config, "enable_microstructure_quality", True)):
+                        _buy_vol_pct = float(current_data.get("buy_volume_pct", 0.5))
+                        # volume_ratio in the features DataFrame is normalized/centered
+                        # (0 = average, negative = below average).
+                        _vol_ratio = float(current_data.get("volume_ratio", 0.0))
+
+                        # Hard block: extreme BVC contra-flow only
+                        # (catching only egregious cases like Trade #2: BVC=0.057)
+                        bvc_hard_block = float(getattr(self.config, "bvc_hard_block", 0.15))
+                        if side == "BUY" and _buy_vol_pct < bvc_hard_block:
+                            return None
+                        elif side == "SELL" and (1.0 - _buy_vol_pct) < bvc_hard_block:
+                            return None
+
+                        # Compute MQS components (each [0, 1])
+                        coh_ref = float(getattr(self.config, "mqs_coherence_ref", 0.30))
+                        bvc_ref = float(getattr(self.config, "mqs_bvc_ref", 0.45))
+                        # volume_ratio is centered at 0 (negative = below avg)
+                        vol_floor = float(getattr(self.config, "mqs_vol_floor", -0.50))
+                        vol_range = float(getattr(self.config, "mqs_vol_range", 0.50))
+
+                        coherence_f = min(1.0, max(0.0, coherence / max(coh_ref, 1e-6)))
+
+                        aligned_bvc = _buy_vol_pct if side == "BUY" else (1.0 - _buy_vol_pct)
+                        flow_alignment_f = min(1.0, max(0.0, aligned_bvc / max(bvc_ref, 1e-6)))
+
+                        liquidity_f = min(1.0, max(0.0, (_vol_ratio - vol_floor) / max(vol_range, 1e-6)))
+
+                        mqs = coherence_f * flow_alignment_f * liquidity_f
+
+                        # Apply MQS as confidence penalty via a stored attribute
+                        # that will be read when _calculate_signal_confidence runs.
+                        # Lower bound: MQS can reduce confidence by up to mqs_max_penalty.
+                        mqs_penalty_weight = float(getattr(self.config, "mqs_penalty_weight", 0.40))
+                        self._current_mqs = float(mqs)
+                        self._current_mqs_penalty = 1.0 - mqs_penalty_weight * (1.0 - mqs)
+
+
+
                     # Regime-adaptive threshold: stricter in adverse conditions
                     base_tau = float(getattr(self.config, "transition_threshold", 0.15))
                     strict_tau = float(getattr(self.config, "transition_threshold_strict", 0.30))
@@ -974,6 +1049,12 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                 mom_signal = MomentumSignal.BULLISH_MOMENTUM if side == "BUY" else MomentumSignal.BEARISH_MOMENTUM
                 confidence = self._calculate_signal_confidence(symbol, mom_signal)
 
+                # Apply MQS confidence penalty (v3.3)
+                # Trades with poor microstructure quality see confidence reduced,
+                # potentially below the minimum threshold → auto-killed.
+                mqs_penalty = getattr(self, '_current_mqs_penalty', 1.0)
+                confidence = confidence * mqs_penalty
+
                 if confidence > 0.4:  # Minimum confidence threshold (lowered for composite signals)
                     base_tw = float(getattr(self.config, "base_position_pct", 0.0) or 0.0)
                     target_weight = self._calculate_regime_adaptive_weight(
@@ -990,6 +1071,8 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                     _entry_vov = float(current_data.get("vol_of_vol", 0.5))
                     _entry_accel = float(current_data.get("composite_accel_norm", 0.0))
                     _entry_vol_expansion = float(current_data.get("vol_expansion", 0.0))
+                    _entry_vpin = float(current_data.get("vpin", 0.5))
+                    _entry_vpin_pct = float(current_data.get("vpin_percentile", 0.5))
 
                     signal = StrategySignal(
                         strategy_id=self.strategy_id,
@@ -1031,6 +1114,12 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                             'entry_vol_of_vol': _entry_vov,
                             'entry_composite_accel': _entry_accel,
                             'entry_vol_expansion': _entry_vol_expansion,
+                            # VPIN / Flow Toxicity diagnostics (v3.2)
+                            'entry_vpin': _entry_vpin,
+                            'entry_vpin_percentile': _entry_vpin_pct,
+                            # Microstructure Quality Score (v3.3)
+                            'entry_mqs': getattr(self, '_current_mqs', 1.0),
+                            'entry_mqs_penalty': getattr(self, '_current_mqs_penalty', 1.0),
                         }
                     )
                     signal.additional_data.update(
@@ -1570,6 +1659,13 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
         tau_0 = float(getattr(self.config, "tau_0", 0.50))
         ads_r = thresholds.get("ads_regime_vector_obj")
         bb_missing = ("bb_position" not in data.columns) and ("bb_upper" not in data.columns)
+
+        # VPIN-conditioned tau hardening: pass current VPIN percentile to tau(R)
+        # so that signal maturity threshold increases during toxic flow regimes.
+        vpin_pct_for_tau = 0.5  # neutral default
+        if bool(getattr(self.config, "enable_vpin_gate", True)):
+            vpin_pct_for_tau = float(row.get("vpin_percentile", 0.5))
+
         tau = float(
             compute_sms_tau(
                 ads_r,
@@ -1577,6 +1673,8 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                 ofi_proxy_used=True,
                 bb_missing=bb_missing,
                 direction="long" if side == "BUY" else "short",
+                vpin_percentile=vpin_pct_for_tau,
+                vpin_tau_sensitivity=float(getattr(self.config, "vpin_tau_sensitivity", 0.15)),
             )
         )
         
@@ -1601,6 +1699,25 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
         expected_pnl_bps = (expected_move / price) * 10000 if price > 0 else 0.0
 
         cvar_95_bps = estimate_cvar_95(volatility=volatility, holding_days=holding_days)
+
+        # VPIN-adjusted adverse selection probability:
+        # Base P_adv = 0.10 (uninformed baseline). When VPIN percentile is elevated,
+        # scale P_adv up to capture the higher probability of trading against
+        # informed counterparties.
+        #   P_adv = base + vpin_sensitivity × max(0, vpin_pct - vpin_neutral)
+        # where vpin_neutral = 0.50 (median = uninformed).
+        base_adverse_prob = float(getattr(self.config, "erar_base_adverse_prob", 0.10))
+        if bool(getattr(self.config, "enable_vpin_gate", True)):
+            vpin_pct = float(row.get("vpin_percentile", 0.5))
+            vpin_sensitivity = float(getattr(self.config, "vpin_adverse_sensitivity", 0.40))
+            vpin_neutral = 0.50
+            adverse_prob = float(np.clip(
+                base_adverse_prob + vpin_sensitivity * max(0.0, vpin_pct - vpin_neutral),
+                0.01, 0.50
+            ))
+        else:
+            adverse_prob = base_adverse_prob
+
         erar = ERAR(
             expected_pnl=float(expected_pnl_bps),
             cvar_95=float(cvar_95_bps),
@@ -1608,7 +1725,7 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
             spread_bps=float(getattr(self.config, "spread_bps", 2.0)),
             participation=0.01,
             volatility=float(volatility),
-            adverse_prob=0.1,
+            adverse_prob=adverse_prob,
             kyle_lambda=0.0001,
             holding_days=float(holding_days),
             alt_return_bps=float(getattr(self.config, "alt_return_bps", 0.5)),

@@ -86,6 +86,39 @@ papertest:
         trend_persistence_lookback: 10
         trend_persistence_min_ratio: 0.6
 
+        # VPIN / Flow Toxicity Gate (v3.2)
+        # Easley-Lopez de Prado-O'Hara (2012) integration:
+        #   1. Hard block entries when VPIN pct > threshold
+        #   2. Dynamic adverse_prob in ERAR cost model
+        #   3. SMS tau(R) hardening under toxic flow
+        enable_vpin_gate: true
+        vpin_block_threshold: 0.85
+        erar_base_adverse_prob: 0.10
+        vpin_adverse_sensitivity: 0.40
+        vpin_tau_sensitivity: 0.15
+
+        # Transition Supervisor calibration for 1-min bars (v3.3)
+        # With real feature data now flowing (directional_coherence,
+        # transition_score, vol_of_vol), the transition supervisor actually
+        # functions.  The multiplicative transition_score is naturally
+        # near-zero at 1-min resolution — recalibrate to avoid false blocks.
+        # MQS (v3.3) subsumes the quality scoring role of transition_score.
+        transition_threshold: 0.0
+        transition_threshold_strict: 0.001
+        vov_block_threshold: 0.98
+
+        # Microstructure Quality Score (MQS v3.3)
+        # Multiplicative quality score penalises confidence rather
+        # than hard-blocking -- avoids over-kill from feature overlap.
+        # Only extreme BVC contra-flow gets a hard block.
+        enable_microstructure_quality: true
+        bvc_hard_block: 0.15
+        mqs_coherence_ref: 0.15
+        mqs_bvc_ref: 0.45
+        mqs_vol_floor: -0.50
+        mqs_vol_range: 0.50
+        mqs_penalty_weight: 0.25
+
         # Regime Adaptive Sizing (ADS v3.1 Logic)
         enable_regime_adaptive_sizing: true
 

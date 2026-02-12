@@ -162,6 +162,8 @@ def compute_sms_tau(
     ofi_proxy_used: bool = False,
     bb_missing: bool = False,
     direction: Optional[str] = None,
+    vpin_percentile: float = 0.5,
+    vpin_tau_sensitivity: float = 0.15,
 ) -> float:
     """
     ADS v3.1 Appendix A.1 recommended SMS threshold:
@@ -169,6 +171,10 @@ def compute_sms_tau(
         tau = clip(tau0 + 0.15*R_vol + 0.10*(1-R_liq) + 0.10*(1-Conf), 0.35, 0.80)
 
     Then apply small conservative increments when fallbacks are used.
+
+    v3.2 Extension: VPIN-conditioned tau hardening.
+    When flow toxicity is elevated (high VPIN percentile), require higher signal
+    maturity before entry to avoid adverse selection.
     """
 
     # Baseline-centered tau:
@@ -210,6 +216,13 @@ def compute_sms_tau(
         base += 0.02
     if bb_missing:
         base += 0.02
+
+    # VPIN toxicity hardening (v3.2):
+    # When informed trading probability is elevated, require stronger signal
+    # maturity. Penalty scales linearly above the 50th percentile (neutral).
+    # At VPIN pct = 0.85, this adds ~0.05 to tau; at 1.0, adds ~0.075.
+    vpin_excess = max(0.0, float(vpin_percentile) - 0.50)
+    base += float(vpin_tau_sensitivity) * vpin_excess
 
     return max(0.35, min(0.80, base))
 
