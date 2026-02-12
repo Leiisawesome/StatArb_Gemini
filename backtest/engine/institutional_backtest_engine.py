@@ -4597,6 +4597,11 @@ class InstitutionalBacktestEngine:
                         # ✅ Canonical (PT-style): For strategies, provide OHLCV + INDICATORS dataframe
                         # (computed causally from the rolling bar history). Avoid feeding feature-engineered
                         # batch tables here, as PT does not run full create_features() per bar.
+                        #
+                        # HOWEVER: merge selected feature-only columns (directional_coherence,
+                        # transition_score, vol_of_vol, composite_accel_norm, etc.) into the
+                        # indicators DataFrame so strategies can use ADS gating features without
+                        # the normalization side-effects of the full features DataFrame.
                         enriched_data_per_symbol = {}
                         is_multi_symbol = len(self.config.symbols) > 1
                         tz_align_cache = {} if self._use_fast_tz_alignment else None
@@ -4717,6 +4722,46 @@ class InstitutionalBacktestEngine:
                                 enriched_data_per_symbol[sym] = pd.DataFrame(
                                     columns=['open', 'high', 'low', 'close', 'volume']
                                 )
+
+                        # Merge feature-only columns (ADS gating features) into indicator data.
+                        # Feature columns like directional_coherence, transition_score,
+                        # vol_of_vol, composite_accel_norm are NOT in the indicator engine
+                        # output. We selectively merge them from the pre-calculated features
+                        # DataFrame, avoiding full replacement (which would clobber indicator
+                        # column scales via feature-engineer normalization).
+                        _FEATURE_ONLY_COLS = [
+                            'directional_coherence', 'transition_score', 'vol_of_vol',
+                            'composite_accel_norm', 'composite_velocity_norm',
+                            'composite_velocity', 'momentum_acceleration',
+                        ]
+                        for sym, df_ind in enriched_data_per_symbol.items():
+                            if df_ind is None or df_ind.empty:
+                                continue
+                            # Locate the matching features source
+                            _feat_src = None
+                            if hasattr(self, 'pre_calculated_features_per_symbol') and sym in getattr(self, 'pre_calculated_features_per_symbol', {}):
+                                _feat_src = self.pre_calculated_features_per_symbol[sym]
+                            elif hasattr(self, 'pre_calculated_features') and self.pre_calculated_features is not None:
+                                _feat_src = self.pre_calculated_features
+                            if _feat_src is None or _feat_src.empty:
+                                continue
+
+                            # Determine which columns to merge (present in features, missing in indicators)
+                            cols_to_merge = [c for c in _FEATURE_ONLY_COLS if c in _feat_src.columns and c not in df_ind.columns]
+                            if not cols_to_merge:
+                                continue
+
+                            try:
+                                # Align features to indicator index for safe merge
+                                _feat_indexed = _feat_src
+                                if 'timestamp' in _feat_indexed.columns and not isinstance(_feat_indexed.index, pd.DatetimeIndex):
+                                    _feat_indexed = _feat_indexed.set_index('timestamp')
+                                # Use reindex to align, filling NaN for missing timestamps
+                                for col in cols_to_merge:
+                                    if col in _feat_indexed.columns:
+                                        df_ind[col] = _feat_indexed[col].reindex(df_ind.index).values
+                            except Exception as _merge_err:
+                                logger.debug(f"Feature column merge for {sym}: {_merge_err}")
 
                         # NOTE: CP0 (raw market data) and CP1 (enrichment) are emitted
                         # during the pre-calculation phase in run_backtest(), before the

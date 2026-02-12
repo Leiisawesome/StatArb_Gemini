@@ -28,7 +28,7 @@ def load_yaml(path: PathLike) -> Dict[str, Any]:
     p = Path(path).expanduser()
     if not p.exists():
         raise FileNotFoundError(f"Config file not found: {p}")
-    data = yaml.safe_load(p.read_text()) or {}
+    data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
     if not isinstance(data, dict):
         raise ValueError(f"YAML root must be a mapping/dict: {p}")
     return data

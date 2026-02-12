@@ -451,6 +451,79 @@ class MomentumConfig(BaseStrategyConfig):
     Prevents entry during volatility mirages (pre-news, macro uncertainty).
     Default: 0.85 (top 15% vol instability)."""
 
+    # --- VPIN / Flow Toxicity Gate (v3.2) ---
+    # Easley-Lopez de Prado-O'Hara (2012) VPIN integration.
+    # Three integration points:
+    #   1. Transition Supervisor hard block (vpin_block_threshold)
+    #   2. ERAR adverse_prob dynamic adjustment (vpin_adverse_sensitivity)
+    #   3. SMS tau(R) hardening (vpin_tau_sensitivity)
+
+    enable_vpin_gate: bool = True
+    """Enable VPIN flow toxicity gating. Default: True"""
+
+    vpin_block_threshold: float = 0.85
+    """VPIN percentile above which entries are hard-blocked.
+    Prevents entry during high informed-trading probability regimes.
+    Default: 0.85 (top 15% toxicity)."""
+
+    erar_base_adverse_prob: float = 0.10
+    """Base adverse selection probability for ERAR cost model.
+    Default: 0.10 (10% baseline)."""
+
+    vpin_adverse_sensitivity: float = 0.40
+    """Sensitivity of ERAR adverse_prob to VPIN percentile excess.
+    adverse_prob = base + sensitivity × max(0, vpin_pct - 0.50).
+    At vpin_pct=0.85: adverse_prob = 0.10 + 0.40×0.35 = 0.24.
+    Default: 0.40."""
+
+    vpin_tau_sensitivity: float = 0.15
+    """Sensitivity of SMS tau(R) to VPIN percentile excess.
+    Higher VPIN → higher maturity threshold → signals must bake longer.
+    Default: 0.15."""
+
+    # --- Microstructure Quality Score (MQS) v3.3 ---
+    # Multiplicative quality score that combines multiple microstructure
+    # signals into a single confidence penalty, rather than independent
+    # hard blocks which over-kill due to feature overlap.
+    # MQS = coherence_f × flow_alignment_f × liquidity_f
+    # Applied as: confidence *= 1 - penalty_weight * (1 - MQS)
+
+    enable_microstructure_quality: bool = True
+    """Enable MQS-based confidence penalty for entries.
+    Default: True."""
+
+    bvc_hard_block: float = 0.15
+    """Hard block BUY when buy_volume_pct < this (or SELL when sell_vol_pct < this).
+    Only catches egregious contra-flow (Kyle 1985 adverse selection).
+    Default: 0.15."""
+
+    mqs_coherence_ref: float = 0.15
+    """Reference coherence for MQS normalization. Coherence at this value -> factor=1.0.
+    Calibrated to 1-min bar data where typical coherence is 0.01-0.20.
+    Default: 0.15."""
+
+    mqs_bvc_ref: float = 0.45
+    """Reference aligned BVC pct for MQS normalization.
+    Default: 0.45."""
+
+    mqs_vol_floor: float = -0.50
+    """Normalized volume_ratio at which liquidity factor hits 0.
+    volume_ratio is centered at 0 (negative = below average).
+    -0.50 means 50% below average volume → zero liquidity score.
+    Default: -0.50."""
+
+    mqs_vol_range: float = 0.50
+    """Range from vol_floor over which liquidity factor goes 0→1.
+    With floor=-0.50, range=0.50: liquidity_f=1.0 at volume_ratio>=0.
+    Default: 0.50."""
+
+    mqs_penalty_weight: float = 0.25
+    """Maximum fraction of confidence removed by MQS.
+    0.25 means perfect microstructure (MQS=1) -> no penalty,
+    worst microstructure (MQS=0) -> 25% confidence reduction.
+    Gentle to avoid killing all signals in low-coherence regimes.
+    Default: 0.25."""
+
     # --- Transition Lifecycle Exit Model ---
     # Replaces the single coherence_decay threshold with a multi-dimensional
     # transition health framework that mirrors entry logic.
@@ -563,6 +636,24 @@ class MomentumConfig(BaseStrategyConfig):
             raise ValueError(f"transition_threshold_strict must be [0, 1], got {self.transition_threshold_strict}")
         if not 0.0 <= self.vov_block_threshold <= 1.0:
             raise ValueError(f"vov_block_threshold must be [0, 1], got {self.vov_block_threshold}")
+        if not 0.0 <= self.vpin_block_threshold <= 1.0:
+            raise ValueError(f"vpin_block_threshold must be [0, 1], got {self.vpin_block_threshold}")
+        if self.erar_base_adverse_prob < 0 or self.erar_base_adverse_prob > 1.0:
+            raise ValueError(f"erar_base_adverse_prob must be [0, 1], got {self.erar_base_adverse_prob}")
+        if self.vpin_adverse_sensitivity < 0:
+            raise ValueError(f"vpin_adverse_sensitivity must be >= 0, got {self.vpin_adverse_sensitivity}")
+        if self.vpin_tau_sensitivity < 0:
+            raise ValueError(f"vpin_tau_sensitivity must be >= 0, got {self.vpin_tau_sensitivity}")
+        if not 0.0 <= self.bvc_hard_block <= 0.50:
+            raise ValueError(f"bvc_hard_block must be [0, 0.50], got {self.bvc_hard_block}")
+        if self.mqs_coherence_ref <= 0:
+            raise ValueError(f"mqs_coherence_ref must be > 0, got {self.mqs_coherence_ref}")
+        if self.mqs_bvc_ref <= 0:
+            raise ValueError(f"mqs_bvc_ref must be > 0, got {self.mqs_bvc_ref}")
+        if self.mqs_vol_range <= 0:
+            raise ValueError(f"mqs_vol_range must be > 0, got {self.mqs_vol_range}")
+        if not 0.0 <= self.mqs_penalty_weight <= 1.0:
+            raise ValueError(f"mqs_penalty_weight must be [0, 1], got {self.mqs_penalty_weight}")
         if not 0.0 < self.health_critical_threshold <= 1.0:
             raise ValueError(f"health_critical_threshold must be (0, 1], got {self.health_critical_threshold}")
         if not -1.0 <= self.accel_exhaustion_threshold <= 0.0:

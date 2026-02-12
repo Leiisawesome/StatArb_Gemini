@@ -865,6 +865,129 @@ class EnhancedTechnicalIndicators(IIndicatorProcessor, ISystemComponent, IRegime
                                        np.where(price_change < 0, -df['volume'], 0))
             df['obv'] = volume_direction.cumsum()
 
+        # VPIN (Volume-Synchronized Probability of Informed Trading)
+        # Easley-Lopez de Prado-O'Hara (2012) adapted for bar-level estimation.
+        #
+        # Core idea: classify each bar's volume into buy-initiated vs sell-initiated
+        # using the bulk volume classification (BVC) approach, then measure the
+        # imbalance over rolling volume buckets.
+        #
+        # VPIN = Σ|V_buy - V_sell| / (n × V_bucket)
+        #
+        # High VPIN indicates high probability of informed trading (toxic flow).
+        df = self._calculate_vpin(df)
+
+        return df
+
+    def _calculate_vpin(
+        self,
+        df: pd.DataFrame,
+        n_buckets: int = 50,
+        sample_length: int = 50,
+    ) -> pd.DataFrame:
+        """
+        Calculate VPIN (Volume-Synchronized Probability of Informed Trading).
+
+        Uses Bulk Volume Classification (BVC) to classify volume into
+        buy-initiated and sell-initiated components, then computes order
+        flow imbalance over rolling windows.
+
+        Args:
+            df: DataFrame with OHLCV data
+            n_buckets: Number of volume buckets for VPIN calculation
+            sample_length: Rolling window length for VPIN estimation
+
+        Returns:
+            DataFrame with vpin and vpin_percentile columns added
+        """
+        if 'volume' not in df.columns or 'close' not in df.columns or len(df) < sample_length:
+            df['vpin'] = 0.5
+            df['vpin_percentile'] = 0.5
+            df['buy_volume_pct'] = 0.5
+            return df
+
+        try:
+            close = df['close'].values.astype(float)
+            volume = df['volume'].values.astype(float)
+            n = len(df)
+
+            # ------------------------------------------------------------------
+            # Step 1: Bulk Volume Classification (BVC)
+            #
+            # For each bar, classify volume into buy-initiated and sell-initiated
+            # using the price change relative to the bar's range and a CDF
+            # approximation.  Z = ΔP / σ,  V_buy = V × Φ(Z)
+            # ------------------------------------------------------------------
+            returns = np.zeros(n)
+            returns[1:] = (close[1:] - close[:-1]) / np.maximum(close[:-1], 1e-10)
+
+            # Rolling volatility for BVC normalisation (20-bar)
+            vol_window = min(20, max(5, n // 10))
+            rolling_std = np.full(n, np.nan)
+            for i in range(vol_window, n):
+                rolling_std[i] = np.std(returns[i - vol_window + 1: i + 1])
+
+            # Back-fill initial NaNs with first valid value
+            first_valid = np.nanmean(rolling_std[vol_window: min(vol_window + 10, n)])
+            if np.isnan(first_valid) or first_valid <= 0:
+                first_valid = 0.01
+            rolling_std = np.where(np.isnan(rolling_std), first_valid, rolling_std)
+            rolling_std = np.maximum(rolling_std, 1e-8)
+
+            # Z-score of return normalised by rolling vol
+            z_scores = returns / rolling_std
+
+            # CDF approximation (fast sigmoid proxy for Φ(z)):
+            #   Φ(z) ≈ 1 / (1 + exp(-1.7 * z))
+            # This is the standard BVC approach.
+            buy_pct = 1.0 / (1.0 + np.exp(-1.7 * np.clip(z_scores, -5.0, 5.0)))
+
+            v_buy = volume * buy_pct
+            v_sell = volume * (1.0 - buy_pct)
+
+            # ------------------------------------------------------------------
+            # Step 2: Rolling VPIN
+            #
+            # VPIN = mean(|V_buy_i - V_sell_i|) / mean(V_i)  over window
+            # Normalised to [0, 1]; 0.5 = random, >0.5 = informed flow
+            # ------------------------------------------------------------------
+            order_imbalance = np.abs(v_buy - v_sell)
+
+            vpin_raw = np.full(n, np.nan)
+            for i in range(sample_length - 1, n):
+                window_imb = order_imbalance[i - sample_length + 1: i + 1]
+                window_vol = volume[i - sample_length + 1: i + 1]
+                total_vol = np.sum(window_vol)
+                if total_vol > 0:
+                    vpin_raw[i] = np.sum(window_imb) / total_vol
+                else:
+                    vpin_raw[i] = 0.5
+
+            # Back-fill NaNs
+            vpin_raw = np.where(np.isnan(vpin_raw), 0.5, vpin_raw)
+
+            # Clip to [0, 1]
+            vpin_raw = np.clip(vpin_raw, 0.0, 1.0)
+
+            df['vpin'] = vpin_raw
+
+            # ------------------------------------------------------------------
+            # Step 3: Percentile rank for regime-invariant interpretation
+            # ------------------------------------------------------------------
+            rank_window = min(252, n)
+            vpin_series = pd.Series(vpin_raw, index=df.index)
+            vpin_pct = vpin_series.rolling(rank_window, min_periods=sample_length).rank(pct=True)
+            df['vpin_percentile'] = vpin_pct.fillna(0.5).values
+
+            # Buy volume fraction (useful for downstream flow analysis)
+            df['buy_volume_pct'] = buy_pct
+
+        except Exception as e:
+            # Degrade gracefully
+            df['vpin'] = 0.5
+            df['vpin_percentile'] = 0.5
+            df['buy_volume_pct'] = 0.5
+
         return df
 
     def _calculate_price_patterns(self, df: pd.DataFrame) -> pd.DataFrame:
