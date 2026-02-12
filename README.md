@@ -20,6 +20,34 @@ StatArb Gemini has been completely transformed through a comprehensive 4-phase a
 | **Phase 3** | 🎯 **Strategy Unification** | ✅ **Complete** | 3 systems → 1 system (67% reduction) |
 | **Phase 4** | 🚀 **Ultimate Integration** | ✅ **Complete** | Single unified system with advanced optimization |
 
+## 🧭 Canonical Runtime Control Path (Backtest + Core Engine)
+
+For this repository, the audited and supported backtest execution path is:
+
+1. `backtest/run_suite.py` (`main` / `run_experiment`)
+2. `backtest/utils/config_loader.py` (`load_config`, dual-schema adapter)
+3. `backtest/experiments/base_experiment.py` (`_create_backtest_config`, explicit `BacktestConfig.validate()`)
+4. `backtest/engine/institutional_backtest_engine.py` phase lifecycle:
+   - `_initialize_phase2_data_regime`
+   - `_initialize_phase3_processing_pipeline`
+   - `_initialize_phase4_strategy_risk`
+   - `_initialize_phase5_execution`
+   - `_initialize_phase6_analytics`
+5. Per-bar runtime ordering in `run_backtest` / `_process_single_bar`:
+   - data ingestion + enrichment
+   - strategy signal generation
+   - 6-gate risk authorization (`CentralRiskManager`)
+   - execution/fill simulation
+   - position SSOT update
+   - analytics/reporting reconciliation
+
+Primary references:
+- `docs/audit/core_bt_plumbing_control_path_checklist.md`
+- `docs/audit/core_bt_data_contract_ledger.md`
+- `docs/audit/core_bt_remediation_issue_pack.md`
+
+This control path is the source of truth for audit/governance and should be updated whenever runtime orchestration changes.
+
 ## 🎯 **Ultimate System Features**
 
 ### **🚀 Streamlined Architecture**

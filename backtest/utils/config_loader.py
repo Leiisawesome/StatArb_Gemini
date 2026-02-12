@@ -9,13 +9,51 @@ Author: StatArb_Gemini Core Engine
 
 from pathlib import Path
 from typing import Dict, Any, Optional
+from dataclasses import fields
 import logging
 import yaml
 
 from core_engine.utils.config import deep_merge
 from core_engine.config.yaml_loader import load_with_includes
+from core_engine.config import BacktestConfig
 
 logger = logging.getLogger(__name__)
+
+
+_KNOWN_EXPERIMENT_KEYS = {
+    "experiment_name",
+    "experiment_type",
+    "strategy",
+    "strategies",
+    "includes",
+    "base_config",
+    "_includes_meta",
+    "unknown_keys_policy",
+}
+
+_ALLOWED_FLAT_CONFIG_KEYS = {f.name for f in fields(BacktestConfig)} | _KNOWN_EXPERIMENT_KEYS
+
+
+def _enforce_unknown_key_policy(config: Dict[str, Any], config_path: str) -> None:
+    """Apply deterministic unknown-key policy for flat backtest configs."""
+    if not isinstance(config, dict):
+        return
+
+    unknown_keys = sorted(k for k in config.keys() if k not in _ALLOWED_FLAT_CONFIG_KEYS)
+    if not unknown_keys:
+        return
+
+    policy = str(config.get("unknown_keys_policy", "warn")).strip().lower()
+    message = (
+        f"Unknown flat config keys in {config_path}: {unknown_keys}. "
+        "These keys are ignored by BacktestConfig mapping. "
+        "Set unknown_keys_policy: error to fail fast."
+    )
+
+    if policy == "error":
+        raise ValueError(message)
+
+    logger.warning(message)
 
 def load_config(config_path: str, base_config_path: Optional[str] = None) -> Dict[str, Any]:
     """
@@ -63,6 +101,8 @@ def load_config(config_path: str, base_config_path: Optional[str] = None) -> Dic
 
     # Merge configs (primary overrides base)
     config = deep_merge(config, primary_config)
+
+    _enforce_unknown_key_policy(config, config_path)
 
     logger.info(f"Loaded config: {config_path}")
     return config

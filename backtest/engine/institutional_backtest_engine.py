@@ -4694,34 +4694,12 @@ class InstitutionalBacktestEngine:
                                 enriched_data_per_symbol[sym] = features_historical
                                 continue
 
-                            # Fallback: use symbol-specific raw market_data
-                            if sym in self.market_data and len(self.market_data[sym]) > 0:
-                                # Fallback to raw market_data only if no enriched data available
-                                # WARNING: This will likely cause strategies to fail validation
-                                sym_data = self.market_data[sym].copy()
-
-                                # Ensure timestamp index for filtering
-                                if 'timestamp' in sym_data.columns and not isinstance(sym_data.index, pd.DatetimeIndex):
-                                    sym_data = sym_data.set_index('timestamp')
-
-                                # Filter data up to current bar timestamp
-                                ts_compare = pd.Timestamp(bar_timestamp)
-                                ts_compare = self._align_timestamp_to_index_tz(
-                                    ts_compare,
-                                    getattr(sym_data.index, 'tz', None),
-                                    cache=tz_align_cache,
-                                )
-                                # AXIS2 FIX: Strict < to EXCLUDE current bar
-                                sym_data = sym_data[sym_data.index < ts_compare]
-
-                                enriched_data_per_symbol[sym] = sym_data
-                                logger.warning(f"⚠️  Using raw market_data for {sym} - enriched features unavailable")
-                            else:
-                                logger.warning(f"⚠️  No data available for {sym}")
-                                # AXIS4 FIX: Provide empty DataFrame with correct column contract
-                                enriched_data_per_symbol[sym] = pd.DataFrame(
-                                    columns=['open', 'high', 'low', 'close', 'volume']
-                                )
+                            logger.warning(
+                                f"⚠️  No enriched features available for {sym}; skipping raw market_data fallback"
+                            )
+                            enriched_data_per_symbol[sym] = pd.DataFrame(
+                                columns=['open', 'high', 'low', 'close', 'volume']
+                            )
 
                         # Merge feature-only columns (ADS gating features) into indicator data.
                         # Feature columns like directional_coherence, transition_score,
@@ -4844,20 +4822,10 @@ class InstitutionalBacktestEngine:
                             if features_df is not None and not features_df.empty:
                                 # Use the freshly-computed features (OHLCV + indicators + features)
                                 enriched_data_per_symbol[sym] = features_df.copy()
-                            elif sym in self.market_data and len(self.market_data[sym]) > 0:
-                                # Last resort: raw market_data (strategies may lack needed columns)
-                                logger.warning(f"[WARN] No enriched features for {sym} in on-the-fly path, using raw data")
-                                sym_data = self.market_data[sym].copy()
-                                if 'timestamp' in sym_data.columns and not isinstance(sym_data.index, pd.DatetimeIndex):
-                                    sym_data = sym_data.set_index('timestamp')
-                                if timestamp is not None:
-                                    ts_compare = pd.Timestamp(timestamp)
-                                    if hasattr(sym_data.index, 'tz') and sym_data.index.tz is not None and ts_compare.tz is None:
-                                        ts_compare = ts_compare.tz_localize(sym_data.index.tz)
-                                    sym_data = sym_data[sym_data.index < ts_compare]
-                                enriched_data_per_symbol[sym] = sym_data
                             else:
-                                logger.warning(f"[WARN] No data for {sym} in on-the-fly path")
+                                logger.warning(
+                                    f"[WARN] No enriched features for {sym} in on-the-fly path; raw fallback disabled"
+                                )
                                 enriched_data_per_symbol[sym] = pd.DataFrame(
                                     columns=['open', 'high', 'low', 'close', 'volume']
                                 )

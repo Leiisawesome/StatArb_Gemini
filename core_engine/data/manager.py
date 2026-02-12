@@ -730,6 +730,7 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
             else:
                 # Standardize the data
                 df = self._standardize_data(df)
+                df = self._apply_session_calendar_gate(df)
                 self.logger.info(
                     "Loaded %d records for %d symbols in %.2fs",
                     len(df),
@@ -971,6 +972,47 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
 
         age = (datetime.now() - cache_time).total_seconds()
         return age < self.enhanced_config.cache_ttl
+
+    def _apply_session_calendar_gate(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Hard gate bars to valid market sessions/calendar for each symbol."""
+        if df.empty:
+            return df
+
+        if 'symbol' not in df.columns or 'timestamp' not in df.columns:
+            raise DataUnavailableError(
+                "Session/calendar gate requires 'symbol' and 'timestamp' columns in market data."
+            )
+
+        try:
+            from core_engine.data.market_calendar import MarketCalendar
+            from core_engine.data.rth_filter import filter_bars_to_rth
+        except Exception as exc:
+            raise DataUnavailableError(f"Failed to initialize session/calendar gate: {exc}") from exc
+
+        calendar = MarketCalendar()
+        filtered_parts: List[pd.DataFrame] = []
+
+        for symbol, symbol_df in df.groupby('symbol', sort=False):
+            gated_df = filter_bars_to_rth(
+                symbol_df,
+                symbol=str(symbol),
+                calendar=calendar,
+                timestamp_col='timestamp',
+            )
+            if gated_df is None or gated_df.empty:
+                self.logger.warning(
+                    "Session/calendar gate removed all rows for symbol %s", symbol
+                )
+                continue
+            filtered_parts.append(gated_df)
+
+        if not filtered_parts:
+            raise DataUnavailableError(
+                "Session/calendar gate removed all loaded market data."
+            )
+
+        gated = pd.concat(filtered_parts, ignore_index=True)
+        return self._standardize_data(gated)
 
     async def get_latest_prices(self, symbols: Optional[List[str]] = None) -> Dict[str, float]:
         """Get latest prices for symbols"""
