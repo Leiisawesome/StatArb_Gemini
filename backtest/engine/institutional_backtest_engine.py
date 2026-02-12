@@ -46,6 +46,9 @@ from core_engine.system.hierarchical_orchestrator import (
 # Position tracking (SSOT - Phase 2 PositionBook Integration)
 from core_engine.trading.position_book import PositionBook, IPositionBook
 
+# EOD guard logic (extracted from engine monolith)
+from backtest.engine.eod_guard import EODGuard
+
 logger = logging.getLogger(__name__)
 
 
@@ -100,6 +103,22 @@ class InstitutionalBacktestEngine:
         report = await engine.generate_report()
     """
 
+    # ------------------------------------------------------------------
+    # Named constants (formerly magic numbers scattered through the code)
+    # ------------------------------------------------------------------
+    #: Minimum position quantity to be considered "open" (shares)
+    MIN_POSITION_QTY = 0.001
+    #: Near-zero epsilon for floating-point comparisons
+    EPSILON = 1e-9
+    #: Default annualised volatility assumption when bar has no 'volatility' field
+    DEFAULT_VOLATILITY = 0.02
+    #: Default one-way transaction cost estimate in basis points
+    DEFAULT_SPREAD_BPS = 5.0
+    #: Default liquidity score (max = fully liquid)
+    DEFAULT_LIQUIDITY_SCORE = 100.0
+    #: Default commission per share (USD) when not specified in config
+    DEFAULT_COMMISSION_PER_SHARE = 0.005
+
     def __init__(self, config: BacktestConfig):
         """
         Initialize backtest engine with configuration
@@ -147,7 +166,7 @@ class InstitutionalBacktestEngine:
         # G8 FIX: BacktestConfig defines `commission_per_trade`, not `commission_per_share`.
         # The old code tried the non-existent attribute and always fell back to 0.005,
         # silently ignoring any YAML-configured commission rate.
-        _commission = getattr(config, 'commission_per_trade', None) or getattr(config, 'commission_per_share', 0.005)
+        _commission = getattr(config, 'commission_per_trade', None) or getattr(config, 'commission_per_share', self.DEFAULT_COMMISSION_PER_SHARE)
         self.position_book: IPositionBook = PositionBook(
             initial_cash=config.initial_capital,
             default_commission_per_share=_commission
@@ -211,6 +230,35 @@ class InstitutionalBacktestEngine:
         # Signals generated at bar N are queued and executed at bar N+1 open
         # This eliminates look-ahead bias from same-bar execution
         self.pending_signals: List[Dict[str, Any]] = []
+
+        # Hot-loop caches (Phase 1 rollout, zero behavior change)
+        self._market_calendar = None
+        self._rth_asset_class = None
+        self._rth_tz_name = "America/New_York"
+        self._use_fast_signal_iteration = bool(getattr(config, "use_fast_signal_iteration", False))
+        self._use_fast_bar_iteration = bool(getattr(config, "use_fast_bar_iteration", False))
+        self._use_fast_price_update = bool(getattr(config, "use_fast_price_update", False))
+        self._use_fast_symbol_bar_lookup = bool(getattr(config, "use_fast_symbol_bar_lookup", False))
+        self._use_fast_timestamp_cache = bool(getattr(config, "use_fast_timestamp_cache", False))
+        self._use_fast_tz_alignment = bool(getattr(config, "use_fast_tz_alignment", False))
+        self._use_fast_precalc_bar_lookup = bool(getattr(config, "use_fast_precalc_bar_lookup", False))
+        self._use_fast_symbol_time_slice = bool(getattr(config, "use_fast_symbol_time_slice", False))
+        self._use_fast_market_data_index_cache = bool(getattr(config, "use_fast_market_data_index_cache", False))
+        self._use_fast_precalc_indexed_slice = bool(getattr(config, "use_fast_precalc_indexed_slice", False))
+        self._use_fast_strategy_param_cache = bool(getattr(config, "use_fast_strategy_param_cache", False))
+        self._use_fast_execution_symbol_bar_cache = bool(getattr(config, "use_fast_execution_symbol_bar_cache", False))
+        self._use_fast_trace_context_cache = bool(getattr(config, "use_fast_trace_context_cache", False))
+        self._price_lookup_cache: Dict[str, Any] = {}
+        self._symbol_bar_cache: Dict[str, Any] = {}
+        self._timestamp_series_cache: Dict[str, Any] = {}
+        self._precalc_bar_lookup_cache: Dict[str, Any] = {}
+        self._time_slice_cache: Dict[str, Any] = {}
+        self._market_data_index_cache: Dict[str, Any] = {}
+        self._precalc_indexed_slice_cache: Dict[str, Any] = {}
+        self._strategy_param_cache: Optional[Dict[str, Any]] = None
+
+        # EOD guard (extracted helper — owns all EOD time parsing & signal gating)
+        self.eod_guard = EODGuard(config)
 
         logger.info(f"✅ InstitutionalBacktestEngine created: {self.backtest_name}")
 
@@ -3101,7 +3149,7 @@ class InstitutionalBacktestEngine:
                         else:
                             if not in_drawdown and peak > 0:
                                 dd_pct = (peak - equity) / peak
-                                if dd_pct > 1e-9:
+                                if dd_pct > self.EPSILON:
                                     in_drawdown = True
                                     current_dd_start = i
                         drawdown = (peak - equity) / peak if peak > 0 else 0
@@ -3493,83 +3541,30 @@ class InstitutionalBacktestEngine:
             # Progress tracking
             progress_interval = max(1, total_bars // 20)  # Report every 5%
 
-            for idx, (index_val, bar) in enumerate(self.historical_data.iterrows()):
+            if self._use_fast_bar_iteration:
+                historical_rows = self._prepare_historical_rows_fast(self.historical_data)
+            else:
+                historical_rows = self.historical_data.iterrows()
+
+            for idx, (index_val, bar) in enumerate(historical_rows):
                 # Extract timestamp from bar if available, otherwise use index
                 timestamp = bar.get('timestamp', index_val)
 
                 # Skip warmup period (Rule 3: Data Pipeline)
                 # We only process bars within the requested simulation period
-                if hasattr(self, 'simulation_start_dt'):
-                    # Handle timezone compatibility
-                    ts_compare = pd.Timestamp(timestamp)
-                    sim_start_compare = pd.Timestamp(self.simulation_start_dt)
-
-                    # Normalize both to same timezone (or remove timezone for comparison)
-                    if ts_compare.tzinfo is not None:
-                        ts_compare_normalized = ts_compare.tz_localize(None)
-                    else:
-                        ts_compare_normalized = ts_compare
-
-                    if sim_start_compare.tzinfo is not None:
-                        sim_start_compare_normalized = sim_start_compare.tz_localize(None)
-                    else:
-                        sim_start_compare_normalized = sim_start_compare
-
-                    # Compare dates, not just datetime (to handle intraday data)
-                    if ts_compare_normalized.date() < sim_start_compare_normalized.date():
-                        continue  # Skip warmup bars
+                if self._is_before_simulation_start(timestamp):
+                    continue  # Skip warmup bars
 
                 # Defensive RTH gate (should be no-op if data was filtered to RTH at load time).
                 # Use MarketCalendar (asset-class aware) instead of hardcoding 09:30–16:00.
-                try:
-                    from core_engine.data.market_calendar import MarketCalendar
-                    cal = MarketCalendar()
-                    asset_class = cal.get_asset_class(self.config.symbols[0] if self.config.symbols else "SPY")
-                    ts_time = pd.Timestamp(timestamp)
-                    tz_name = cal.sessions.get(asset_class).timezone if cal.sessions.get(asset_class) else "America/New_York"
-                    if ts_time.tzinfo is None:
-                        ts_local = ts_time.tz_localize(tz_name)
-                    else:
-                        ts_local = ts_time.tz_convert(tz_name)
-                    session_open, session_close = cal.get_session_times(ts_local.to_pydatetime(), asset_class)
-                    if not (session_open.time() <= ts_local.time() < session_close.time()):
-                        continue
-                except Exception as e:
-                    # H8 R3: Log RTH gate failures instead of swallowing
-                    # F2 FIX: was `bar_index` (undefined), correct variable is `idx`
-                    if idx == 0:
-                        logger.debug(f"RTH gate check skipped (non-fatal): {e}")
+                if not self._is_within_rth(timestamp, idx):
+                    continue
 
                 self.current_bar_index = idx
 
                 # H3 R4 FIX: Update all symbol prices at each bar for
                 # accurate portfolio valuation (mark-to-market).
-                if self.risk_manager and hasattr(self.risk_manager, 'current_prices'):
-                    bar_ts = pd.Timestamp(timestamp)
-                    for sym, sym_df in self.market_data.items():
-                        try:
-                            if sym_df.empty:
-                                continue
-                            # Get the latest price AT or BEFORE current timestamp
-                            if isinstance(sym_df.index, pd.DatetimeIndex):
-                                _idx = sym_df.index
-                            elif 'timestamp' in sym_df.columns:
-                                _idx = pd.DatetimeIndex(sym_df['timestamp'])
-                            else:
-                                continue
-                            _ts = bar_ts
-                            if _idx.tz is not None and _ts.tz is None:
-                                _ts = _ts.tz_localize(_idx.tz)
-                            elif _idx.tz is None and _ts.tz is not None:
-                                _ts = _ts.tz_localize(None)
-                            mask = _idx <= _ts
-                            if mask.any():
-                                last_idx = mask[::-1].idxmax() if isinstance(mask.index, pd.RangeIndex) else mask.values.nonzero()[0][-1]
-                                close_col = 'close' if 'close' in sym_df.columns else 'Close'
-                                if close_col in sym_df.columns:
-                                    self.risk_manager.current_prices[sym] = float(sym_df[close_col].iloc[last_idx])
-                        except Exception as _price_err:
-                            logger.debug(f"Per-bar price update for {sym}: {_price_err}")
+                self._update_current_prices_from_market_data(timestamp)
 
                 # Progress reporting
                 if idx % progress_interval == 0 or idx == total_bars - 1:
@@ -3630,7 +3625,7 @@ class InstitutionalBacktestEngine:
                     )
                     last_close = bar.get('close', 0) if bar is not None else 0
                     for sym, qty in open_positions.items():
-                        if abs(qty) < 1e-9:
+                        if abs(qty) < self.EPSILON:
                             continue
                         close_side = 'sell' if qty > 0 else 'buy'
                         close_qty = abs(qty)
@@ -3751,6 +3746,158 @@ class InstitutionalBacktestEngine:
             except Exception as cleanup_err:
                 logger.debug(f"DataManager cleanup in finally: {cleanup_err}")
 
+    def _is_before_simulation_start(self, timestamp: Any) -> bool:
+        """Return True when timestamp is before configured simulation start date."""
+        if not hasattr(self, 'simulation_start_dt'):
+            return False
+
+        ts_compare = pd.Timestamp(timestamp)
+        sim_start_compare = pd.Timestamp(self.simulation_start_dt)
+
+        if ts_compare.tzinfo is not None:
+            ts_compare_normalized = ts_compare.tz_localize(None)
+        else:
+            ts_compare_normalized = ts_compare
+
+        if sim_start_compare.tzinfo is not None:
+            sim_start_compare_normalized = sim_start_compare.tz_localize(None)
+        else:
+            sim_start_compare_normalized = sim_start_compare
+
+        return ts_compare_normalized.date() < sim_start_compare_normalized.date()
+
+    def _is_within_rth(self, timestamp: Any, bar_index: int) -> bool:
+        """Defensive RTH gate with cached calendar and asset-class lookup."""
+        try:
+            from core_engine.data.market_calendar import MarketCalendar
+
+            if self._market_calendar is None:
+                self._market_calendar = MarketCalendar()
+
+            cal = self._market_calendar
+            if self._rth_asset_class is None:
+                primary_symbol = self.config.symbols[0] if self.config.symbols else "SPY"
+                self._rth_asset_class = cal.get_asset_class(primary_symbol)
+
+            ts_time = pd.Timestamp(timestamp)
+            session_cfg = cal.sessions.get(self._rth_asset_class)
+            if session_cfg:
+                self._rth_tz_name = session_cfg.timezone
+
+            if ts_time.tzinfo is None:
+                ts_local = ts_time.tz_localize(self._rth_tz_name)
+            else:
+                ts_local = ts_time.tz_convert(self._rth_tz_name)
+
+            session_open, session_close = cal.get_session_times(ts_local.to_pydatetime(), self._rth_asset_class)
+            return session_open.time() <= ts_local.time() < session_close.time()
+        except Exception as e:
+            if bar_index == 0:
+                logger.debug(f"RTH gate check skipped (non-fatal): {e}")
+            return True
+
+    def _update_current_prices_from_market_data(self, timestamp: Any) -> None:
+        """Update risk-manager mark-to-market prices for all symbols."""
+        if not (self.risk_manager and hasattr(self.risk_manager, 'current_prices')):
+            return
+
+        bar_ts = pd.Timestamp(timestamp)
+        tz_align_cache = {} if self._use_fast_tz_alignment else None
+        for sym, sym_df in self.market_data.items():
+            try:
+                if sym_df.empty:
+                    continue
+
+                fast_close = self._get_latest_close_price_fast(sym, sym_df, bar_ts, tz_align_cache=tz_align_cache)
+                if fast_close is not None:
+                    self.risk_manager.current_prices[sym] = fast_close
+                    continue
+
+                if isinstance(sym_df.index, pd.DatetimeIndex):
+                    idx_obj = sym_df.index
+                elif 'timestamp' in sym_df.columns:
+                    idx_obj = pd.DatetimeIndex(sym_df['timestamp'])
+                else:
+                    continue
+
+                ts_cmp = self._align_timestamp_to_index_tz(
+                    bar_ts,
+                    getattr(idx_obj, 'tz', None),
+                    cache=tz_align_cache,
+                )
+
+                mask = idx_obj <= ts_cmp
+                if mask.any():
+                    last_idx = mask[::-1].idxmax() if isinstance(mask.index, pd.RangeIndex) else mask.values.nonzero()[0][-1]
+                    close_col = 'close' if 'close' in sym_df.columns else 'Close'
+                    if close_col in sym_df.columns:
+                        self.risk_manager.current_prices[sym] = float(sym_df[close_col].iloc[last_idx])
+            except Exception as price_err:
+                logger.debug(f"Per-bar price update for {sym}: {price_err}")
+
+    def _get_latest_close_price_fast(
+        self,
+        symbol: str,
+        sym_df: pd.DataFrame,
+        bar_ts: pd.Timestamp,
+        tz_align_cache: Optional[Dict[Any, pd.Timestamp]] = None,
+    ) -> Optional[float]:
+        """Fast latest-close lookup using cached datetime index + searchsorted."""
+        if not self._use_fast_price_update:
+            return None
+
+        cache = self._price_lookup_cache.get(symbol)
+        if cache is None:
+            cache = self._build_price_lookup_cache(sym_df)
+            # Store sentinel to avoid rebuilding unsupported symbols each bar
+            self._price_lookup_cache[symbol] = cache if cache is not None else {'disabled': True}
+            cache = self._price_lookup_cache[symbol]
+
+        if cache.get('disabled', False):
+            return None
+
+        idx_obj = cache['idx_obj']
+        idx_tz = cache['idx_tz']
+        ts_cmp = self._align_timestamp_to_index_tz(
+            bar_ts,
+            idx_tz,
+            cache=tz_align_cache,
+        )
+
+        pos = int(idx_obj.searchsorted(ts_cmp, side='right')) - 1
+        if pos < 0:
+            return None
+
+        value = cache['close_values'][pos]
+        if pd.isna(value):
+            return None
+        return float(value)
+
+    def _build_price_lookup_cache(self, sym_df: pd.DataFrame) -> Optional[Dict[str, Any]]:
+        """Build cache for fast latest-close lookup; returns None if unsupported."""
+        if sym_df is None or sym_df.empty:
+            return None
+
+        if isinstance(sym_df.index, pd.DatetimeIndex):
+            idx_obj = sym_df.index
+        elif 'timestamp' in sym_df.columns:
+            idx_obj = pd.DatetimeIndex(sym_df['timestamp'])
+        else:
+            return None
+
+        close_col = 'close' if 'close' in sym_df.columns else 'Close'
+        if close_col not in sym_df.columns:
+            return None
+
+        if not getattr(idx_obj, 'is_monotonic_increasing', False):
+            return None
+
+        return {
+            'idx_obj': idx_obj,
+            'idx_tz': getattr(idx_obj, 'tz', None),
+            'close_values': sym_df[close_col].to_numpy(copy=False),
+        }
+
     async def _check_eod_liquidation(self, timestamp: datetime, bar: pd.Series) -> int:
         """
         Check if we should perform EOD liquidation and close all positions.
@@ -3773,58 +3920,35 @@ class InstitutionalBacktestEngine:
         if not positions:
             return 0
 
-        # Convert timestamp to comparable format (EST)
         ts = pd.Timestamp(timestamp)
         if ts.tzinfo is not None:
             ts = ts.tz_convert('America/New_York')
-        current_time_mins = ts.hour * 60 + ts.minute
 
-        liquidated_count = 0
         symbols_to_liquidate = []
 
-        # ✅ ADS v3.1: Contextual EOD check per position to avoid parameter leakage
+        # ADS v3.1: Contextual EOD check per position via EODGuard
         for symbol, qty in positions.items():
-            if abs(qty) < 0.001:
+            if abs(qty) < self.MIN_POSITION_QTY:
                 continue
 
-            # Need to find the strategy_id for this symbol from PositionBook
             strat_id = None
             if self.position_book:
                 pos = self.position_book.get_position(symbol)
                 strat_id = getattr(pos, 'strategy_id', None)
 
-            # Get EOD config for THIS specific strategy or its position
-            enable_eod = self._get_strategy_param('enable_eod_liquidation', False, strategy_id=strat_id)
-            if not enable_eod:
-                continue
-
-            eod_time_str = self._get_strategy_param('eod_close_time', '15:55', strategy_id=strat_id)
-            
-            # Parse EOD time
-            try:
-                eod_hour, eod_minute = map(int, eod_time_str.split(':'))
-            except (ValueError, AttributeError):
-                eod_hour, eod_minute = 15, 55
-
-            eod_time_mins = eod_hour * 60 + eod_minute
-
-            # Check if we've reached EOD liquidation time for THIS strategy
-            if current_time_mins >= eod_time_mins:
+            if self.eod_guard.should_liquidate_position(
+                timestamp, symbol, strat_id, self._get_strategy_param
+            ):
                 symbols_to_liquidate.append((symbol, qty, strat_id))
 
         if not symbols_to_liquidate:
             return 0
 
-        # Only liquidate if we haven't already at this timestamp
-        # Use a flag to prevent multiple liquidations at same bar
-        eod_key = f"eod_liquidated_{ts.date()}"
-        if hasattr(self, '_eod_flags') and self._eod_flags.get(eod_key, False):
+        # Idempotency: only liquidate once per day
+        if self.eod_guard.already_liquidated(ts.date()):
             return 0
 
-        # Set flag
-        if not hasattr(self, '_eod_flags'):
-            self._eod_flags = {}
-        self._eod_flags[eod_key] = True
+        self.eod_guard.mark_liquidated(ts.date())
 
         logger.info(f"\n⏰ EOD LIQUIDATION @ {ts.strftime('%H:%M')} - Closing {len(symbols_to_liquidate)} positions contextually")
 
@@ -3839,9 +3963,11 @@ class InstitutionalBacktestEngine:
             if symbol in self.market_data and len(self.market_data[symbol]) > 0:
                 sym_data = self.market_data[symbol]
                 # Get the most recent price up to current timestamp
-                if 'timestamp' in sym_data.columns:
-                    sym_data_indexed = sym_data.set_index('timestamp')
-                else:
+                sym_data_indexed = self._get_market_data_time_indexed(
+                    f"eod::{symbol}",
+                    sym_data,
+                )
+                if sym_data_indexed is None:
                     sym_data_indexed = sym_data
 
                 # Handle timezone comparison (both directions)
@@ -3934,12 +4060,12 @@ class InstitutionalBacktestEngine:
                     'strategy_run': strat_id or 'EOD_LIQUIDATION',
                     'fill_id': simulated_fill.fill_id,
                     'regime': simulated_fill.costs.regime or 'eod_close',
-                    'liquidity_score': simulated_fill.costs.liquidity_score or 100.0,
+                    'liquidity_score': simulated_fill.costs.liquidity_score or self.DEFAULT_LIQUIDITY_SCORE,
                 }
                 fill_price_for_pnl = simulated_fill.fill_price
             else:
                 # Fallback: minimal cost estimate (only if simulator not initialized)
-                estimated_cost_bps = 5.0
+                estimated_cost_bps = self.DEFAULT_SPREAD_BPS
                 cost_mult = estimated_cost_bps / 10000
                 fill_price_fallback = close_price * (1.0 - cost_mult) if side == 'sell' else close_price * (1.0 + cost_mult)
                 execution = {
@@ -3976,7 +4102,7 @@ class InstitutionalBacktestEngine:
                     'strategy_run': strat_id or 'EOD_LIQUIDATION',
                     'fill_id': f'eod_fill_{timestamp}_{symbol}',
                     'regime': 'eod_close',
-                    'liquidity_score': 100.0,
+                    'liquidity_score': self.DEFAULT_LIQUIDITY_SCORE,
                 }
                 fill_price_for_pnl = fill_price_fallback
 
@@ -4019,6 +4145,38 @@ class InstitutionalBacktestEngine:
         Returns:
             Parameter value or default
         """
+        if self._use_fast_strategy_param_cache:
+            if self._strategy_param_cache is None:
+                first_params = {}
+                params_by_name = {}
+                if hasattr(self.config, 'strategies') and self.config.strategies:
+                    first_strategy = self.config.strategies[0]
+                    if isinstance(first_strategy, dict):
+                        first_params = first_strategy.get('parameters', {}) or {}
+
+                    for strat in self.config.strategies:
+                        if isinstance(strat, dict):
+                            name = strat.get('name')
+                            if name:
+                                params_by_name[name] = strat.get('parameters', {}) or {}
+
+                self._strategy_param_cache = {
+                    'first_params': first_params,
+                    'params_by_name': params_by_name,
+                }
+
+            params_by_name = self._strategy_param_cache.get('params_by_name', {})
+            if strategy_id:
+                params = params_by_name.get(strategy_id)
+                if params is None:
+                    return default
+                if param_name in params:
+                    return params.get(param_name)
+                return default
+
+            first_params = self._strategy_param_cache.get('first_params', {})
+            return first_params.get(param_name, default)
+
         if hasattr(self.config, 'strategies') and self.config.strategies:
             # Try to find specific strategy if provided
             if strategy_id:
@@ -4040,6 +4198,172 @@ class InstitutionalBacktestEngine:
                 return params.get(param_name, default)
         return default
 
+    def _resolve_symbol_bar(self, symbol: str, bar_timestamp, current_bar):
+        """
+        Resolve the correct OHLCV bar for a specific symbol at a given timestamp.
+
+        In multi-symbol backtests, `current_bar` may belong to a different symbol.
+        This method looks up the correct bar from market_data or pre_calculated_features.
+
+        Args:
+            symbol: The symbol to resolve bar data for
+            bar_timestamp: Timestamp of the bar to look up
+            current_bar: The current iteration bar (fallback)
+
+        Returns:
+            Bar data (Series or dict-like) for the requested symbol
+        """
+        sym_bar = current_bar
+        try:
+            cur_sym = None
+            try:
+                cur_sym = current_bar.get('symbol', None)
+            except Exception:
+                cur_sym = None
+
+            if cur_sym is not None and str(cur_sym) == str(symbol):
+                return sym_bar
+
+            fast_bar = self._resolve_symbol_bar_fast(symbol, bar_timestamp)
+            if fast_bar is not None:
+                return fast_bar
+
+            # Prefer the loaded per-symbol OHLCV from self.market_data (authoritative).
+            try:
+                md = getattr(self, "market_data", None)
+                sym_df = md.get(symbol) if isinstance(md, dict) else None
+                if sym_df is not None and hasattr(sym_df, "empty") and not sym_df.empty:
+                    ts_idx = pd.Timestamp(bar_timestamp)
+                    # Index lookup
+                    if getattr(sym_df.index, "dtype", None) is not None:
+                        try:
+                            if ts_idx in sym_df.index:
+                                sym_bar = sym_df.loc[ts_idx]
+                                if hasattr(sym_bar, "iloc"):
+                                    sym_bar = sym_bar.iloc[-1] if len(sym_bar) > 0 else sym_bar
+                        except Exception:
+                            pass
+                    # Column filter fallback
+                    if (sym_bar is current_bar) and ('timestamp' in getattr(sym_df, "columns", [])):
+                        ts_ser = pd.to_datetime(sym_df['timestamp'])
+                        m = ts_ser == ts_idx
+                        if m.any():
+                            sym_bar = sym_df.loc[m].iloc[-1]
+            except Exception:
+                pass
+
+            # Fallback: pre_calculated_features if available
+            if sym_bar is current_bar:
+                dfp = getattr(self, "pre_calculated_features", None)
+                if dfp is not None and hasattr(dfp, "empty") and not dfp.empty:
+                    ts_idx = pd.Timestamp(bar_timestamp)
+                    if 'timestamp' in dfp.columns:
+                        ts_ser = pd.to_datetime(dfp['timestamp'])
+                        m = (dfp.get('symbol') == symbol) & (ts_ser == ts_idx)
+                        if m.any():
+                            sym_bar = dfp.loc[m].iloc[-1]
+                    else:
+                        try:
+                            df_sym = dfp[dfp.get('symbol') == symbol]
+                            df_sym = df_sym.loc[:ts_idx]
+                            if len(df_sym) > 0:
+                                sym_bar = df_sym.iloc[-1]
+                        except Exception:
+                            pass
+        except Exception:
+            sym_bar = current_bar
+
+        return sym_bar
+
+    def _resolve_symbol_bar_fast(self, symbol: str, bar_timestamp) -> Optional[Dict[str, Any]]:
+        """Fast symbol bar resolution via cached datetime-index searchsorted."""
+        if not self._use_fast_symbol_bar_lookup:
+            return None
+
+        md = getattr(self, "market_data", None)
+        sym_df = md.get(symbol) if isinstance(md, dict) else None
+        if sym_df is None or getattr(sym_df, 'empty', True):
+            return None
+
+        cache_key = f"md::{symbol}"
+        cache = self._symbol_bar_cache.get(cache_key)
+        if cache is None:
+            cache = self._build_symbol_bar_cache(sym_df)
+            self._symbol_bar_cache[cache_key] = cache if cache is not None else {'disabled': True}
+            cache = self._symbol_bar_cache[cache_key]
+
+        if cache.get('disabled', False):
+            return None
+
+        ts_idx = self._align_timestamp_to_index_tz(
+            pd.Timestamp(bar_timestamp),
+            cache['idx_tz'],
+            cache=None,
+        )
+        idx_obj = cache['idx_obj']
+
+        pos = int(idx_obj.searchsorted(ts_idx, side='right')) - 1
+        if pos < 0:
+            return None
+
+        row = cache['records'][pos]
+        # Preserve original behavior: only return exact timestamp matches.
+        if pd.Timestamp(row['timestamp']) != ts_idx:
+            return None
+
+        return row
+
+    def _build_symbol_bar_cache(self, sym_df: pd.DataFrame) -> Optional[Dict[str, Any]]:
+        """Build per-symbol bar lookup cache for exact timestamp resolution."""
+        if sym_df is None or sym_df.empty:
+            return None
+
+        if isinstance(sym_df.index, pd.DatetimeIndex):
+            idx_obj = sym_df.index
+            df_tmp = sym_df.copy()
+            df_tmp = df_tmp.reset_index(drop=False)
+            ts_col = 'timestamp' if 'timestamp' in df_tmp.columns else df_tmp.columns[0]
+            if ts_col != 'timestamp':
+                df_tmp = df_tmp.rename(columns={ts_col: 'timestamp'})
+        elif 'timestamp' in sym_df.columns:
+            idx_obj = pd.DatetimeIndex(sym_df['timestamp'])
+            df_tmp = sym_df.copy()
+            df_tmp['timestamp'] = pd.to_datetime(df_tmp['timestamp'])
+        else:
+            return None
+
+        if not getattr(idx_obj, 'is_monotonic_increasing', False):
+            return None
+
+        records = df_tmp.to_dict('records')
+        return {
+            'idx_obj': idx_obj,
+            'idx_tz': getattr(idx_obj, 'tz', None),
+            'records': records,
+        }
+
+    def _build_market_data_dict(self, sym_bar, bar_timestamp, current_price: float) -> Dict[str, Any]:
+        """
+        Build the market_data dict for the execution simulator from a resolved symbol bar.
+
+        Args:
+            sym_bar: Resolved bar data (from _resolve_symbol_bar)
+            bar_timestamp: Timestamp for the bar
+            current_price: Current execution price
+
+        Returns:
+            Dict with timestamp, open, high, low, close, volume, volatility
+        """
+        return {
+            'timestamp': bar_timestamp,
+            'open': sym_bar.get('open', current_price),
+            'high': sym_bar.get('high', current_price),
+            'low': sym_bar.get('low', current_price),
+            'close': current_price,
+            'volume': sym_bar.get('volume', 0),
+            'volatility': sym_bar.get('volatility', self.DEFAULT_VOLATILITY),
+        }
+
     async def _process_single_bar(self,
                                   bar: pd.Series,
                                   timestamp: datetime,
@@ -4058,18 +4382,20 @@ class InstitutionalBacktestEngine:
         }
 
         try:
+            bar_dict = self._bar_to_dict(bar)
+
             # Step 1: Update regime engine (Rule 2 - Regime-First)
             if self.regime_engine:
                 # Convert bar to dict for regime engine
-                bar_dict = bar.to_dict()
-                bar_dict['timestamp'] = timestamp
+                regime_bar_dict = dict(bar_dict)
+                regime_bar_dict['timestamp'] = timestamp
 
                 # Process market data through regime engine or its sensor
                 try:
                     if hasattr(self.regime_engine, "process_market_data"):
-                        regime_result = self.regime_engine.process_market_data(bar_dict)
+                        regime_result = self.regime_engine.process_market_data(regime_bar_dict)
                     elif hasattr(self.regime_engine, "regime_sensor"):
-                        regime_result = self.regime_engine.regime_sensor.process_market_data(bar_dict)
+                        regime_result = self.regime_engine.regime_sensor.process_market_data(regime_bar_dict)
                     else:
                         raise AttributeError("regime_engine has no process_market_data or regime_sensor")
                 except Exception as e:
@@ -4082,68 +4408,16 @@ class InstitutionalBacktestEngine:
             # ================================================================
             # EOD GUARD: Skip all signal execution and generation at/after EOD
             # ================================================================
-            # Two checks:
-            #   1. _eod_flags already set (EOD liquidation already fired today)
-            #   2. PROACTIVE: current bar time >= eod_close_time for ANY strategy
-            #      This catches pending signals from bar N-1 that would execute
-            #      at bar N (the EOD bar) BEFORE _check_eod_liquidation fires.
-            _eod_guard_active = False
-            _ts_for_eod = pd.Timestamp(timestamp)
-            if _ts_for_eod.tzinfo is not None:
-                _ts_for_eod = _ts_for_eod.tz_convert('America/New_York')
-
-            # Check 1: _eod_flags already set
-            if hasattr(self, '_eod_flags'):
-                _eod_key_guard = f"eod_liquidated_{_ts_for_eod.date()}"
-                if self._eod_flags.get(_eod_key_guard, False):
-                    _eod_guard_active = True
-
-            # Check 2: Proactive time-based guard — if current bar >= earliest
-            # EOD close time across all strategies, block new entries.
-            if not _eod_guard_active:
-                try:
-                    _current_mins = _ts_for_eod.hour * 60 + _ts_for_eod.minute
-                    # Find the earliest eod_close_time across all strategies
-                    _earliest_eod_mins = None
-                    if hasattr(self.config, 'strategies') and self.config.strategies:
-                        for strat in self.config.strategies:
-                            strat_params = strat.get('parameters', {}) if isinstance(strat, dict) else {}
-                            if strat_params.get('enable_eod_liquidation', False):
-                                _eod_str = strat_params.get('eod_close_time', '15:55')
-                                _h, _m = map(int, _eod_str.split(':'))
-                                _eod_mins = _h * 60 + _m
-                                if _earliest_eod_mins is None or _eod_mins < _earliest_eod_mins:
-                                    _earliest_eod_mins = _eod_mins
-
-                    if _earliest_eod_mins is not None and _current_mins >= _earliest_eod_mins:
-                        _eod_guard_active = True
-                        logger.debug(
-                            f"⏰ EOD proactive guard: bar {_ts_for_eod.strftime('%H:%M')} >= "
-                            f"eod_close_time {_earliest_eod_mins // 60}:{_earliest_eod_mins % 60:02d}"
-                        )
-                except Exception:
-                    pass  # Non-fatal — fall through to flag-based guard
+            _eod_guard_active = self.eod_guard.is_active(timestamp)
 
             if _eod_guard_active and self.pending_signals:
-                # Filter: discard ENTRY pending signals; keep EXIT signals
-                _kept = []
-                _discarded = 0
-                for sig in self.pending_signals:
-                    _sig_type = str(sig.get('signal_type', sig.get('side', ''))).lower()
-                    _is_exit = sig.get('is_exit', False) or _sig_type in (
-                        'sell', 'long_exit', 'short_exit', 'close', 'close_long',
-                        'close_short', 'cover', 'flatten',
-                    )
-                    if _is_exit:
-                        _kept.append(sig)
-                    else:
-                        _discarded += 1
-                if _discarded > 0:
+                kept, discarded = self.eod_guard.filter_signals(self.pending_signals)
+                if discarded > 0:
                     logger.debug(
-                        f"⏰ EOD guard: Discarding {_discarded} entry pending signals "
-                        f"at {timestamp} (kept {len(_kept)} exits)"
+                        f"EOD guard: Discarding {discarded} entry pending signals "
+                        f"at {timestamp} (kept {len(kept)} exits)"
                     )
-                self.pending_signals = _kept
+                self.pending_signals = kept
 
             # ================================================================
             # PT-style sequencing: execute prior-bar pending signals at THIS bar open
@@ -4208,10 +4482,10 @@ class InstitutionalBacktestEngine:
                 return bar_results
 
             # Always create bar_df from current bar (needed for price lookup in trade authorization)
-            bar_dict = bar.to_dict()
-            if 'timestamp' in bar_dict:
-                bar_dict.pop('timestamp')
-            bar_df = pd.DataFrame([bar_dict], index=[timestamp])
+            bar_df_dict = dict(bar_dict)
+            if 'timestamp' in bar_df_dict:
+                bar_df_dict.pop('timestamp')
+            bar_df = pd.DataFrame([bar_df_dict], index=[timestamp])
             bar_df.index.name = 'timestamp'
             bar_df = bar_df.reset_index()
 
@@ -4224,12 +4498,23 @@ class InstitutionalBacktestEngine:
 
                     # Find index of current bar in pre_calculated_features
                     if 'timestamp' in self.pre_calculated_features.columns:
-                        timestamps = pd.to_datetime(self.pre_calculated_features['timestamp'])
-                        current_bar_mask = timestamps == bar_timestamp
-                        if current_bar_mask.any():
-                            # CRITICAL FIX: Use np.argmax to get iloc position, not idxmax which returns label
-                            import numpy as np
-                            current_bar_iloc = np.argmax(current_bar_mask.values)  # Get iloc position
+                        current_bar_iloc = self._get_precalc_bar_iloc_fast(
+                            "precalc_features_main",
+                            self.pre_calculated_features,
+                            bar_timestamp,
+                        )
+                        if current_bar_iloc is None:
+                            timestamps = self._get_cached_timestamp_series(
+                                "precalc_features_main",
+                                self.pre_calculated_features,
+                            )
+                            current_bar_mask = timestamps == bar_timestamp
+                            if current_bar_mask.any():
+                                # CRITICAL FIX: Use np.argmax to get iloc position, not idxmax which returns label
+                                import numpy as np
+                                current_bar_iloc = np.argmax(current_bar_mask.values)  # Get iloc position
+
+                        if current_bar_iloc is not None:
                             # C1 LOOKAHEAD FIX: Pass data up to but EXCLUDING current bar.
                             # Strategies must decide using only data available BEFORE the
                             # current bar's close is known. The current bar's OHLCV is not
@@ -4277,7 +4562,7 @@ class InstitutionalBacktestEngine:
                         position_details = {}
                         if self.risk_manager and hasattr(self, 'pnl_tracker') and self.pnl_tracker:
                             for sym, qty in current_positions.items():
-                                if abs(qty) > 0.001:  # Has position
+                                if abs(qty) > self.MIN_POSITION_QTY:  # Has position
                                     entry_price = self.pnl_tracker.position_cost_basis.get(sym, 0.0)
                                     entry_time = getattr(self.pnl_tracker, 'position_entry_time', {}).get(sym)
                                     
@@ -4314,27 +4599,48 @@ class InstitutionalBacktestEngine:
                         # batch tables here, as PT does not run full create_features() per bar.
                         enriched_data_per_symbol = {}
                         is_multi_symbol = len(self.config.symbols) > 1
+                        tz_align_cache = {} if self._use_fast_tz_alignment else None
 
                         for sym in self.config.symbols:
                             # Prefer per-symbol pre-calculated INDICATORS (closer to PT semantics).
                             if hasattr(self, 'pre_calculated_indicators_per_symbol') and sym in getattr(self, 'pre_calculated_indicators_per_symbol', {}):
                                 sym_ind = self.pre_calculated_indicators_per_symbol[sym]
                                 if sym_ind is not None and len(sym_ind) > 0:
-                                    ts_compare = pd.Timestamp(bar_timestamp)
                                     if 'timestamp' in sym_ind.columns:
-                                        sym_ts = pd.to_datetime(sym_ind['timestamp'])
-                                        if getattr(sym_ts.dt, "tz", None) is not None and ts_compare.tz is None:
-                                            ts_compare = ts_compare.tz_localize(sym_ts.dt.tz)
-                                        # AXIS2 FIX: Strict < to EXCLUDE current bar's close
-                                        # from signal generation (prevents lookahead bias).
-                                        mask = sym_ts < ts_compare
-                                        df_enriched = sym_ind[mask].copy()
-                                        # Ensure datetime index for strategy zscore/window logic
-                                        try:
-                                            if 'timestamp' in df_enriched.columns:
-                                                df_enriched = df_enriched.set_index('timestamp')
-                                        except Exception as _idx_err:
-                                            logger.debug(f"Enriched data index set for {sym}: {_idx_err}")
+                                        df_enriched = self._slice_precalc_indexed_before_timestamp_fast(
+                                            f"precalc_ind_sym::{sym}",
+                                            sym_ind,
+                                            bar_timestamp,
+                                            tz_align_cache=tz_align_cache,
+                                        )
+                                        if df_enriched is None:
+                                            df_enriched = self._slice_df_before_timestamp_fast(
+                                            f"precalc_ind_sym::{sym}",
+                                            sym_ind,
+                                            bar_timestamp,
+                                            tz_align_cache=tz_align_cache,
+                                            )
+                                        if df_enriched is None:
+                                            ts_compare = pd.Timestamp(bar_timestamp)
+                                            sym_ts = self._get_cached_timestamp_series(
+                                                f"precalc_ind_sym::{sym}",
+                                                sym_ind,
+                                            )
+                                            ts_compare = self._align_timestamp_to_index_tz(
+                                                ts_compare,
+                                                getattr(sym_ts.dt, 'tz', None),
+                                                cache=tz_align_cache,
+                                            )
+                                            # AXIS2 FIX: Strict < to EXCLUDE current bar's close
+                                            # from signal generation (prevents lookahead bias).
+                                            mask = sym_ts < ts_compare
+                                            df_enriched = sym_ind[mask].copy()
+                                            # Ensure datetime index for strategy zscore/window logic
+                                            try:
+                                                if 'timestamp' in df_enriched.columns:
+                                                    df_enriched = df_enriched.set_index('timestamp')
+                                            except Exception as _idx_err:
+                                                logger.debug(f"Enriched data index set for {sym}: {_idx_err}")
                                         enriched_data_per_symbol[sym] = df_enriched
                                         continue
 
@@ -4343,16 +4649,36 @@ class InstitutionalBacktestEngine:
                                 try:
                                     ind_df = self.pre_calculated_indicators
                                     if isinstance(ind_df, pd.DataFrame) and not ind_df.empty:
-                                        ts_compare = pd.Timestamp(bar_timestamp)
                                         if 'timestamp' in ind_df.columns:
-                                            ind_ts = pd.to_datetime(ind_df['timestamp'])
-                                            if getattr(ind_ts.dt, "tz", None) is not None and ts_compare.tz is None:
-                                                ts_compare = ts_compare.tz_localize(ind_ts.dt.tz)
-                                            # AXIS2 FIX: Strict < to EXCLUDE current bar
-                                            m = ind_ts < ts_compare
-                                            df_enriched = ind_df[m].copy()
-                                            if 'timestamp' in df_enriched.columns:
-                                                df_enriched = df_enriched.set_index('timestamp')
+                                            df_enriched = self._slice_precalc_indexed_before_timestamp_fast(
+                                                "precalc_ind_single",
+                                                ind_df,
+                                                bar_timestamp,
+                                                tz_align_cache=tz_align_cache,
+                                            )
+                                            if df_enriched is None:
+                                                df_enriched = self._slice_df_before_timestamp_fast(
+                                                "precalc_ind_single",
+                                                ind_df,
+                                                bar_timestamp,
+                                                tz_align_cache=tz_align_cache,
+                                                )
+                                            if df_enriched is None:
+                                                ts_compare = pd.Timestamp(bar_timestamp)
+                                                ind_ts = self._get_cached_timestamp_series(
+                                                    "precalc_ind_single",
+                                                    ind_df,
+                                                )
+                                                ts_compare = self._align_timestamp_to_index_tz(
+                                                    ts_compare,
+                                                    getattr(ind_ts.dt, 'tz', None),
+                                                    cache=tz_align_cache,
+                                                )
+                                                # AXIS2 FIX: Strict < to EXCLUDE current bar
+                                                m = ind_ts < ts_compare
+                                                df_enriched = ind_df[m].copy()
+                                                if 'timestamp' in df_enriched.columns:
+                                                    df_enriched = df_enriched.set_index('timestamp')
                                             enriched_data_per_symbol[sym] = df_enriched
                                             continue
                                 except Exception as _ind_err:
@@ -4375,12 +4701,11 @@ class InstitutionalBacktestEngine:
 
                                 # Filter data up to current bar timestamp
                                 ts_compare = pd.Timestamp(bar_timestamp)
-                                if hasattr(sym_data.index, 'tz') and sym_data.index.tz is not None:
-                                    if ts_compare.tz is None:
-                                        ts_compare = ts_compare.tz_localize(sym_data.index.tz)
-                                elif hasattr(sym_data.index, 'tz') and sym_data.index.tz is None:
-                                    if ts_compare.tz is not None:
-                                        ts_compare = ts_compare.tz_localize(None)
+                                ts_compare = self._align_timestamp_to_index_tz(
+                                    ts_compare,
+                                    getattr(sym_data.index, 'tz', None),
+                                    cache=tz_align_cache,
+                                )
                                 # AXIS2 FIX: Strict < to EXCLUDE current bar
                                 sym_data = sym_data[sym_data.index < ts_compare]
 
@@ -4453,7 +4778,7 @@ class InstitutionalBacktestEngine:
                         position_details = {}
                         if self.risk_manager and hasattr(self, 'pnl_tracker') and self.pnl_tracker:
                             for sym, qty in current_positions.items():
-                                if abs(qty) > 0.001:
+                                if abs(qty) > self.MIN_POSITION_QTY:
                                     entry_price = self.pnl_tracker.position_cost_basis.get(sym, 0.0)
                                     current_price_sym = self.risk_manager.current_prices.get(sym, 0.0)
                                     unrealized_pnl = self.pnl_tracker.position_pnl.get(sym, 0.0)
@@ -4547,287 +4872,11 @@ class InstitutionalBacktestEngine:
 
                     self.pending_signals.extend(authorized_trades)
 
-            # ✅ FIXED (Rule 4): Update market prices for unrealized P&L via CentralRiskManager
-            # Position tracking is now handled by CentralRiskManager (Rule 4, Section 10)
-            if self.risk_manager and self.risk_manager.current_positions:
-                current_prices = {}
-                for symbol in self.risk_manager.current_positions.keys():
-                    if symbol in self.market_data:
-                        # Robust price lookup (tz-safe): use most recent close <= timestamp
-                        symbol_data = self.market_data[symbol]
-                        try:
-                            sym_df = symbol_data
-                            if 'timestamp' in sym_df.columns and not isinstance(sym_df.index, pd.DatetimeIndex):
-                                sym_df = sym_df.set_index('timestamp')
+            # Update market prices for unrealized P&L via CentralRiskManager (Rule 4)
+            await self._update_market_prices_for_bar(timestamp)
 
-                            ts_compare = pd.Timestamp(timestamp)
-                            index_tz = getattr(sym_df.index, 'tz', None)
-                            ts_tz = ts_compare.tz
-                            if index_tz is not None and ts_tz is None:
-                                ts_compare = ts_compare.tz_localize(index_tz)
-                            elif index_tz is None and ts_tz is not None:
-                                ts_compare = ts_compare.tz_localize(None)
-
-                            filtered = sym_df[sym_df.index <= ts_compare]
-                            if len(filtered) > 0:
-                                close_col = 'close' if 'close' in filtered.columns else 'Close'
-                                if close_col in filtered.columns:
-                                    current_prices[symbol] = float(filtered[close_col].iloc[-1])
-                                    continue
-                        except Exception:
-                            pass
-
-                        # Fallback: use last available close in the dataframe
-                        if not symbol_data.empty:
-                            try:
-                                close_col = 'close' if 'close' in symbol_data.columns else 'Close'
-                                if close_col in symbol_data.columns:
-                                    current_prices[symbol] = float(symbol_data[close_col].iloc[-1])
-                            except Exception:
-                                pass
-
-                # Update via CentralRiskManager (single source of truth) — OUTSIDE the loop
-                # so prices from ALL symbols are sent in one batch after collection.
-                if current_prices and hasattr(self.risk_manager, 'update_market_prices'):
-                    await self.risk_manager.update_market_prices(current_prices, timestamp=timestamp)
-
-            # ADS v3.1 exits in backtest: synthesize LONG_EXIT signals when multi-exit rules trigger.
-            # Rationale: exits are centralized (risk-side), but backtest execution/reporting expects signals.
-            try:
-                if self.risk_manager and self.risk_manager.current_positions and self.position_book is not None:
-                    from core_engine.risk.multi_exit_engine import decide_exit
-                    from core_engine.risk.volatility_forecast import (
-                        VolStopParams,
-                        correlation_change,
-                        sigma_eff,
-                        stop_distance_pct,
-                    )
-
-                    exit_rows = []
-                    positions = self.position_book.get_all_positions()
-                    for sym, pos in positions.items():
-                        # CONTEXTUAL PARAMETER LOOKUP (ADS v3.1 §4)
-                        # Avoid parameter leakage by using specific strategy_id for this position
-                        strat_id = getattr(pos, 'strategy_id', None)
-                        enable_ads_multi_exit = bool(self._get_strategy_param("enable_ads_multi_exit", False, strategy_id=strat_id))
-                        max_holding_minutes = float(self._get_strategy_param("max_holding_minutes", 0.0, strategy_id=strat_id) or 0.0)
-
-                        if not enable_ads_multi_exit or max_holding_minutes <= 0:
-                            continue
-
-                        enable_forward_vol_stops = bool(self._get_strategy_param("enable_forward_vol_stops", False, strategy_id=strat_id))
-                        
-                        try:
-                            # FIX: Evaluate ALL positions (long AND short) for multi-exit rules.
-                            # Previously short positions were skipped, causing them to only exit via EOD.
-                            pos_is_long = getattr(pos, "is_long", True)
-                            qty = float(getattr(pos, "quantity", 0.0))
-                            if abs(qty) <= 0:
-                                continue
-                            opened_at = getattr(pos, "opened_at", None)
-                            if opened_at is None:
-                                continue
-
-                            # FIX: Determine correct exit side based on position direction.
-                            exit_side = "sell" if pos_is_long else "buy"
-
-                            # Avoid repeatedly queuing exit while one is already pending for this symbol.
-                            # FIX: Check for the correct exit side (was hardcoded to "sell" only).
-                            if any((t.get("symbol") == sym and str(t.get("side", "")).lower() == exit_side) for t in (self.pending_signals or [])):
-                                continue
-
-                            held_mins = (timestamp - opened_at).total_seconds() / 60.0
-
-                            # Compute pnl_pct using SSOT entry price + current mark from RiskManager.
-                            # FIX: Direction-aware PnL calculation (was always assuming long).
-                            avg_entry = float(getattr(pos, "avg_entry_price", 0.0) or 0.0)
-                            px = float(self.risk_manager.current_prices.get(sym, avg_entry) or avg_entry or 0.0)
-                            if avg_entry > 0:
-                                if pos_is_long:
-                                    pnl_pct = ((px - avg_entry) / avg_entry) * 100.0
-                                else:
-                                    pnl_pct = ((avg_entry - px) / avg_entry) * 100.0
-                            else:
-                                pnl_pct = 0.0
-
-                            # Optional forward-looking vol stop (% distance)
-                            stop_loss_pct_val = None
-                            if enable_forward_vol_stops:
-                                try:
-                                    sym_prices = list(getattr(self.risk_manager, "_price_history", {}).get(sym, []))
-                                    if len(sym_prices) >= 3:
-                                        sp = np.asarray(sym_prices, dtype=float)
-                                        sym_returns = list(np.diff(sp) / sp[:-1])
-
-                                        benchmark = str(getattr(self.risk_manager.config, "corr_benchmark_symbol", "SPY"))
-                                        bench_prices = list(getattr(self.risk_manager, "_price_history", {}).get(benchmark, []))
-                                        bench_returns = []
-                                        if len(bench_prices) >= 3:
-                                            bp = np.asarray(bench_prices, dtype=float)
-                                            bench_returns = list(np.diff(bp) / bp[:-1])
-
-                                        s_eff, _, _ = sigma_eff(
-                                            sym_returns,
-                                            realized_window=int(getattr(self.risk_manager.config, "vol_realized_window", 20)),
-                                            lambda_=float(getattr(self.risk_manager.config, "vol_ewma_lambda", 0.94)),
-                                        )
-                                        d_rho = correlation_change(
-                                            sym_returns,
-                                            bench_returns,
-                                            short_window=int(getattr(self.risk_manager.config, "corr_short_window", 20)),
-                                            long_window=int(getattr(self.risk_manager.config, "corr_long_window", 60)),
-                                        )
-                                        params = VolStopParams(
-                                            k=float(getattr(self.risk_manager.config, "stop_k", 2.0)),
-                                            kappa=float(getattr(self.risk_manager.config, "stop_kappa", 0.5)),
-                                            overnight_mult=float(getattr(self.risk_manager.config, "stop_overnight_mult", 1.5)),
-                                        )
-                                        sl_frac = stop_distance_pct(s_eff, delta_rho=d_rho, params=params, overnight=False)
-                                        stop_loss_pct_val = float(sl_frac) * 100.0
-                                except Exception:
-                                    stop_loss_pct_val = None
-
-                            # ==========================================================
-                            # Transition Lifecycle: extract entry & current state
-                            # for multi-dimensional health-based exits.
-                            # ==========================================================
-                            def _sf(v):
-                                """Safe float conversion (None-safe)."""
-                                if v is None:
-                                    return None
-                                try:
-                                    return float(v)
-                                except (TypeError, ValueError):
-                                    return None
-
-                            pos_meta = getattr(pos, "metadata", None) or {}
-
-                            # Entry state (from position metadata, captured at signal time)
-                            _entry_coh = _sf(pos_meta.get("entry_coherence"))
-                            _entry_accel = _sf(pos_meta.get("entry_composite_accel"))
-                            _entry_vov = _sf(pos_meta.get("entry_vol_of_vol"))
-                            _entry_ts = _sf(pos_meta.get("transition_score"))
-                            _entry_cz = _sf(pos_meta.get("composite_z"))
-
-                            # Current state from PRE-CALCULATED enriched features
-                            # (bar is raw OHLCV — enriched columns live in
-                            #  self.pre_calculated_features_per_symbol / self.pre_calculated_features)
-                            _cur_coh = None
-                            _cur_accel = None
-                            _cur_vov = None
-                            _cur_cz = None
-                            try:
-                                _feat_df = None
-                                if hasattr(self, "pre_calculated_features_per_symbol") and sym in self.pre_calculated_features_per_symbol:
-                                    _feat_df = self.pre_calculated_features_per_symbol[sym]
-                                elif hasattr(self, "pre_calculated_features") and self.pre_calculated_features is not None:
-                                    _feat_df = self.pre_calculated_features
-
-                                if _feat_df is not None and len(_feat_df) > 0:
-                                    _bar_ts = pd.Timestamp(timestamp)
-                                    # Locate row by timestamp (index or column)
-                                    _feat_row = None
-                                    if isinstance(_feat_df.index, pd.DatetimeIndex):
-                                        if _bar_ts in _feat_df.index:
-                                            _feat_row = _feat_df.loc[_bar_ts]
-                                            if hasattr(_feat_row, "iloc") and len(_feat_row.shape) > 1:
-                                                _feat_row = _feat_row.iloc[-1]
-                                    elif "timestamp" in _feat_df.columns:
-                                        _ts_col = pd.to_datetime(_feat_df["timestamp"])
-                                        _mask = _ts_col == _bar_ts
-                                        if _mask.any():
-                                            _feat_row = _feat_df.loc[_mask.values].iloc[-1]
-
-                                    if _feat_row is not None:
-                                        _cur_coh = _sf(_feat_row.get("directional_coherence"))
-                                        _cur_accel = _sf(_feat_row.get("composite_accel_norm"))
-                                        _cur_vov = _sf(_feat_row.get("vol_of_vol"))
-                                        _cur_cz = _sf(_feat_row.get("composite_z"))
-                                    
-                            except Exception as _feat_err:
-                                if not getattr(self, "_exit_feat_err_logged", False):
-                                    self._exit_feat_err_logged = True
-                                    logger.warning(f"Exit feature lookup error: {_feat_err}")
-
-                            # Config parameters (strategy-specific lookup)
-                            _health_crit = float(self._get_strategy_param(
-                                "health_critical_threshold", 0.15, strategy_id=strat_id))
-                            _accel_exhaust = float(self._get_strategy_param(
-                                "accel_exhaustion_threshold", -0.3, strategy_id=strat_id))
-                            _tp_init = float(self._get_strategy_param(
-                                "tp_initial_pct", 2.0, strategy_id=strat_id))
-                            _tp_floor = float(self._get_strategy_param(
-                                "tp_floor_pct", 0.3, strategy_id=strat_id))
-                            _tp_decay = float(self._get_strategy_param(
-                                "tp_decay_minutes", 30.0, strategy_id=strat_id))
-                            _health_tp = float(self._get_strategy_param(
-                                "health_tp_trigger", 0.7, strategy_id=strat_id))
-
-                            decision = decide_exit(
-                                now=timestamp,
-                                opened_at=opened_at,
-                                pnl_pct=float(pnl_pct),
-                                is_long=pos_is_long,
-                                stop_loss_pct=stop_loss_pct_val,
-                                # Entry state
-                                entry_coherence=_entry_coh,
-                                entry_composite_accel=_entry_accel,
-                                entry_vol_of_vol=_entry_vov,
-                                entry_transition_score=_entry_ts,
-                                entry_composite_z=_entry_cz,
-                                # Current state
-                                current_coherence=_cur_coh,
-                                current_composite_accel=_cur_accel,
-                                current_vol_of_vol=_cur_vov,
-                                current_composite_z=_cur_cz,
-                                # Config
-                                health_critical_threshold=_health_crit,
-                                accel_exhaustion_threshold=_accel_exhaust,
-                                tp_initial_pct=_tp_init,
-                                tp_floor_pct=_tp_floor,
-                                tp_decay_minutes=_tp_decay,
-                                health_tp_trigger=_health_tp,
-                                max_holding_minutes=float(max_holding_minutes),
-                                liquidity_bad=False,
-                                liquidity_details=None,
-                            )
-
-                            if decision.should_exit:
-                                # FIX: Signal type must match position direction
-                                # (was hardcoded to "long_exit", shorts never got correct exit type).
-                                exit_signal_type = "long_exit" if pos_is_long else "short_exit"
-                                exit_rows.append({
-                                    "symbol": sym,
-                                    "signal_type": exit_signal_type,
-                                    "side": exit_side,
-                                    "strategy_id": strat_id,
-                                    "confidence": 1.0,
-                                    "strength": 1.0,
-                                    "timestamp": timestamp,
-                                    "additional_data": {
-                                        "ads_exit": decision.reason,
-                                        "ads_exit_details": decision.details,
-                                        "held_minutes": held_mins,
-                                        "pnl_pct": float(pnl_pct),
-                                        "stop_loss_pct": float(stop_loss_pct_val) if stop_loss_pct_val is not None else None,
-                                        "position_side": "long" if pos_is_long else "short",
-                                    },
-                                })
-                        except Exception:
-                            continue
-
-                    if exit_rows:
-                            exit_df = pd.DataFrame(exit_rows)
-                            bar_df_local = pd.DataFrame([bar.to_dict()])
-                            authorized_exits = await self._get_authorized_trades_for_bar(bar_df_local, exit_df, timestamp)
-                            if authorized_exits:
-                                for trade in authorized_exits:
-                                    trade["signal_bar_close"] = bar.get("close", 0)
-                                    trade["signal_bar_index"] = bar_index
-                                    trade["signal_timestamp"] = timestamp
-                                self.pending_signals.extend(authorized_exits)
-            except Exception as e:
-                logger.warning(f"⚠️ ADS exit processing error (non-fatal): {e}")
+            # ADS v3.1 exits in backtest: synthesize exit signals when multi-exit rules trigger.
+            await self._evaluate_multi_exit_rules(bar, bar_index, timestamp)
 
             # Record position history after execution
             if self.risk_manager:
@@ -4865,6 +4914,327 @@ class InstitutionalBacktestEngine:
             logger.error(f"❌ Error processing bar at {timestamp}: {e}")
             bar_results['error'] = str(e)
             return bar_results
+
+    # ============================================================
+    # PER-BAR MARKET PRICE UPDATE
+    # ============================================================
+
+    async def _update_market_prices_for_bar(self, timestamp) -> None:
+        """
+        Collect the latest close prices for all open positions and push them to
+        CentralRiskManager in a single batch.
+
+        This is extracted from _process_single_bar for readability. It performs a
+        timezone-safe lookup against self.market_data.
+        """
+        if not (self.risk_manager and self.risk_manager.current_positions):
+            return
+
+        current_prices = {}
+        bar_ts = pd.Timestamp(timestamp)
+        tz_align_cache = {} if self._use_fast_tz_alignment else None
+        for symbol in self.risk_manager.current_positions.keys():
+            if symbol not in self.market_data:
+                continue
+
+            symbol_data = self.market_data[symbol]
+            try:
+                fast_close = self._get_latest_close_price_fast(
+                    symbol,
+                    symbol_data,
+                    bar_ts,
+                    tz_align_cache=tz_align_cache,
+                )
+                if fast_close is not None:
+                    current_prices[symbol] = fast_close
+                    continue
+
+                sym_df = symbol_data
+                sym_df_indexed = self._get_market_data_time_indexed(
+                    f"mtm::{symbol}",
+                    sym_df,
+                )
+                if sym_df_indexed is not None:
+                    sym_df = sym_df_indexed
+
+                ts_compare = self._align_timestamp_to_index_tz(
+                    bar_ts,
+                    getattr(sym_df.index, 'tz', None),
+                    cache=tz_align_cache,
+                )
+
+                filtered = sym_df[sym_df.index <= ts_compare]
+                if len(filtered) > 0:
+                    close_col = 'close' if 'close' in filtered.columns else 'Close'
+                    if close_col in filtered.columns:
+                        current_prices[symbol] = float(filtered[close_col].iloc[-1])
+                        continue
+            except Exception:
+                pass
+
+            # Fallback: use last available close in the dataframe
+            if not symbol_data.empty:
+                try:
+                    close_col = 'close' if 'close' in symbol_data.columns else 'Close'
+                    if close_col in symbol_data.columns:
+                        current_prices[symbol] = float(symbol_data[close_col].iloc[-1])
+                except Exception:
+                    pass
+
+        # Update via CentralRiskManager (single source of truth)
+        if current_prices and hasattr(self.risk_manager, 'update_market_prices'):
+            await self.risk_manager.update_market_prices(current_prices, timestamp=timestamp)
+
+    # ============================================================
+    # ADS MULTI-EXIT EVALUATION
+    # ============================================================
+
+    @staticmethod
+    def _safe_float(v):
+        """Safe float conversion (None-safe)."""
+        if v is None:
+            return None
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+
+    async def _evaluate_multi_exit_rules(
+        self,
+        bar: pd.Series,
+        bar_index: int,
+        timestamp: datetime,
+    ) -> None:
+        """
+        ADS v3.1: Evaluate multi-exit rules for all open positions and queue
+        exit signals when triggered.
+
+        This is a self-contained step extracted from _process_single_bar for
+        readability.  It only appends to self.pending_signals; the actual
+        execution happens on the next bar.
+        """
+        try:
+            if not (self.risk_manager and self.risk_manager.current_positions and self.position_book is not None):
+                return
+
+            from core_engine.risk.multi_exit_engine import decide_exit
+            from core_engine.risk.volatility_forecast import (
+                VolStopParams,
+                correlation_change,
+                sigma_eff,
+                stop_distance_pct,
+            )
+
+            exit_rows = []
+            positions = self.position_book.get_all_positions()
+            for sym, pos in positions.items():
+                strat_id = getattr(pos, 'strategy_id', None)
+                enable_ads_multi_exit = bool(self._get_strategy_param("enable_ads_multi_exit", False, strategy_id=strat_id))
+                max_holding_minutes = float(self._get_strategy_param("max_holding_minutes", 0.0, strategy_id=strat_id) or 0.0)
+
+                if not enable_ads_multi_exit or max_holding_minutes <= 0:
+                    continue
+
+                enable_forward_vol_stops = bool(self._get_strategy_param("enable_forward_vol_stops", False, strategy_id=strat_id))
+
+                try:
+                    pos_is_long = getattr(pos, "is_long", True)
+                    qty = float(getattr(pos, "quantity", 0.0))
+                    if abs(qty) <= 0:
+                        continue
+                    opened_at = getattr(pos, "opened_at", None)
+                    if opened_at is None:
+                        continue
+
+                    exit_side = "sell" if pos_is_long else "buy"
+
+                    # Skip if an exit is already pending for this symbol
+                    if any((t.get("symbol") == sym and str(t.get("side", "")).lower() == exit_side) for t in (self.pending_signals or [])):
+                        continue
+
+                    held_mins = (timestamp - opened_at).total_seconds() / 60.0
+
+                    # Direction-aware PnL
+                    avg_entry = float(getattr(pos, "avg_entry_price", 0.0) or 0.0)
+                    px = float(self.risk_manager.current_prices.get(sym, avg_entry) or avg_entry or 0.0)
+                    if avg_entry > 0:
+                        pnl_pct = ((px - avg_entry) / avg_entry) * 100.0 if pos_is_long else ((avg_entry - px) / avg_entry) * 100.0
+                    else:
+                        pnl_pct = 0.0
+
+                    # Optional forward-looking vol stop
+                    stop_loss_pct_val = self._compute_vol_stop(
+                        sym, enable_forward_vol_stops
+                    )
+
+                    # Entry & current state for health-based exits
+                    pos_meta = getattr(pos, "metadata", None) or {}
+                    _sf = self._safe_float
+
+                    entry_state = {
+                        'coherence': _sf(pos_meta.get("entry_coherence")),
+                        'composite_accel': _sf(pos_meta.get("entry_composite_accel")),
+                        'vol_of_vol': _sf(pos_meta.get("entry_vol_of_vol")),
+                        'transition_score': _sf(pos_meta.get("transition_score")),
+                        'composite_z': _sf(pos_meta.get("composite_z")),
+                    }
+                    current_state = self._lookup_current_exit_features(sym, timestamp)
+
+                    # Config parameters (strategy-specific)
+                    _health_crit = float(self._get_strategy_param("health_critical_threshold", 0.15, strategy_id=strat_id))
+                    _accel_exhaust = float(self._get_strategy_param("accel_exhaustion_threshold", -0.3, strategy_id=strat_id))
+                    _tp_init = float(self._get_strategy_param("tp_initial_pct", 2.0, strategy_id=strat_id))
+                    _tp_floor = float(self._get_strategy_param("tp_floor_pct", 0.3, strategy_id=strat_id))
+                    _tp_decay = float(self._get_strategy_param("tp_decay_minutes", 30.0, strategy_id=strat_id))
+                    _health_tp = float(self._get_strategy_param("health_tp_trigger", 0.7, strategy_id=strat_id))
+
+                    decision = decide_exit(
+                        now=timestamp,
+                        opened_at=opened_at,
+                        pnl_pct=float(pnl_pct),
+                        is_long=pos_is_long,
+                        stop_loss_pct=stop_loss_pct_val,
+                        entry_coherence=entry_state['coherence'],
+                        entry_composite_accel=entry_state['composite_accel'],
+                        entry_vol_of_vol=entry_state['vol_of_vol'],
+                        entry_transition_score=entry_state['transition_score'],
+                        entry_composite_z=entry_state['composite_z'],
+                        current_coherence=current_state.get('coherence'),
+                        current_composite_accel=current_state.get('composite_accel'),
+                        current_vol_of_vol=current_state.get('vol_of_vol'),
+                        current_composite_z=current_state.get('composite_z'),
+                        health_critical_threshold=_health_crit,
+                        accel_exhaustion_threshold=_accel_exhaust,
+                        tp_initial_pct=_tp_init,
+                        tp_floor_pct=_tp_floor,
+                        tp_decay_minutes=_tp_decay,
+                        health_tp_trigger=_health_tp,
+                        max_holding_minutes=float(max_holding_minutes),
+                        liquidity_bad=False,
+                        liquidity_details=None,
+                    )
+
+                    if decision.should_exit:
+                        exit_signal_type = "long_exit" if pos_is_long else "short_exit"
+                        exit_rows.append({
+                            "symbol": sym,
+                            "signal_type": exit_signal_type,
+                            "side": exit_side,
+                            "strategy_id": strat_id,
+                            "confidence": 1.0,
+                            "strength": 1.0,
+                            "timestamp": timestamp,
+                            "additional_data": {
+                                "ads_exit": decision.reason,
+                                "ads_exit_details": decision.details,
+                                "held_minutes": held_mins,
+                                "pnl_pct": float(pnl_pct),
+                                "stop_loss_pct": float(stop_loss_pct_val) if stop_loss_pct_val is not None else None,
+                                "position_side": "long" if pos_is_long else "short",
+                            },
+                        })
+                except Exception:
+                    continue
+
+            if exit_rows:
+                exit_df = pd.DataFrame(exit_rows)
+                bar_df_local = pd.DataFrame([bar.to_dict()])
+                authorized_exits = await self._get_authorized_trades_for_bar(bar_df_local, exit_df, timestamp)
+                if authorized_exits:
+                    for trade in authorized_exits:
+                        trade["signal_bar_close"] = bar.get("close", 0)
+                        trade["signal_bar_index"] = bar_index
+                        trade["signal_timestamp"] = timestamp
+                    self.pending_signals.extend(authorized_exits)
+        except Exception as e:
+            logger.warning(f"ADS exit processing error (non-fatal): {e}")
+
+    def _compute_vol_stop(self, sym: str, enabled: bool) -> Optional[float]:
+        """Compute forward-looking vol stop distance for a symbol, if enabled."""
+        if not enabled:
+            return None
+        try:
+            import numpy as np
+            from core_engine.risk.volatility_forecast import (
+                VolStopParams, correlation_change, sigma_eff, stop_distance_pct,
+            )
+            sym_prices = list(getattr(self.risk_manager, "_price_history", {}).get(sym, []))
+            if len(sym_prices) < 3:
+                return None
+            sp = np.asarray(sym_prices, dtype=float)
+            sym_returns = list(np.diff(sp) / sp[:-1])
+
+            benchmark = str(getattr(self.risk_manager.config, "corr_benchmark_symbol", "SPY"))
+            bench_prices = list(getattr(self.risk_manager, "_price_history", {}).get(benchmark, []))
+            bench_returns = []
+            if len(bench_prices) >= 3:
+                bp = np.asarray(bench_prices, dtype=float)
+                bench_returns = list(np.diff(bp) / bp[:-1])
+
+            s_eff, _, _ = sigma_eff(
+                sym_returns,
+                realized_window=int(getattr(self.risk_manager.config, "vol_realized_window", 20)),
+                lambda_=float(getattr(self.risk_manager.config, "vol_ewma_lambda", 0.94)),
+            )
+            d_rho = correlation_change(
+                sym_returns, bench_returns,
+                short_window=int(getattr(self.risk_manager.config, "corr_short_window", 20)),
+                long_window=int(getattr(self.risk_manager.config, "corr_long_window", 60)),
+            )
+            params = VolStopParams(
+                k=float(getattr(self.risk_manager.config, "stop_k", 2.0)),
+                kappa=float(getattr(self.risk_manager.config, "stop_kappa", 0.5)),
+                overnight_mult=float(getattr(self.risk_manager.config, "stop_overnight_mult", 1.5)),
+            )
+            sl_frac = stop_distance_pct(s_eff, delta_rho=d_rho, params=params, overnight=False)
+            return float(sl_frac) * 100.0
+        except Exception:
+            return None
+
+    def _lookup_current_exit_features(self, sym: str, timestamp) -> Dict[str, Any]:
+        """
+        Look up current-state features (coherence, accel, vol_of_vol, composite_z)
+        from pre-calculated enriched data for exit evaluation.
+        """
+        result: Dict[str, Any] = {}
+        try:
+            _feat_df = None
+            if hasattr(self, "pre_calculated_features_per_symbol") and sym in self.pre_calculated_features_per_symbol:
+                _feat_df = self.pre_calculated_features_per_symbol[sym]
+            elif hasattr(self, "pre_calculated_features") and self.pre_calculated_features is not None:
+                _feat_df = self.pre_calculated_features
+
+            if _feat_df is None or len(_feat_df) == 0:
+                return result
+
+            _bar_ts = pd.Timestamp(timestamp)
+            _feat_row = None
+            if isinstance(_feat_df.index, pd.DatetimeIndex):
+                if _bar_ts in _feat_df.index:
+                    _feat_row = _feat_df.loc[_bar_ts]
+                    if hasattr(_feat_row, "iloc") and len(_feat_row.shape) > 1:
+                        _feat_row = _feat_row.iloc[-1]
+            elif "timestamp" in _feat_df.columns:
+                _ts_col = self._get_cached_timestamp_series(
+                    f"exit_feat::{sym}",
+                    _feat_df,
+                )
+                _mask = _ts_col == _bar_ts
+                if _mask.any():
+                    _feat_row = _feat_df.loc[_mask.values].iloc[-1]
+
+            if _feat_row is not None:
+                _sf = self._safe_float
+                result['coherence'] = _sf(_feat_row.get("directional_coherence"))
+                result['composite_accel'] = _sf(_feat_row.get("composite_accel_norm"))
+                result['vol_of_vol'] = _sf(_feat_row.get("vol_of_vol"))
+                result['composite_z'] = _sf(_feat_row.get("composite_z"))
+        except Exception as _feat_err:
+            if not getattr(self, "_exit_feat_err_logged", False):
+                self._exit_feat_err_logged = True
+                logger.warning(f"Exit feature lookup error: {_feat_err}")
+
+        return result
 
     # ============================================================
     # STRATEGY SIGNAL PROCESSING (PHASE 7.2)
@@ -4921,7 +5291,12 @@ class InstitutionalBacktestEngine:
 
             # Group signals by symbol
             symbol_signals = defaultdict(list)
-            for _idx, _row in signals_df.iterrows():
+            if self._use_fast_signal_iteration:
+                signal_rows_for_group = self._prepare_signal_rows_fast(signals_df)
+            else:
+                signal_rows_for_group = signals_df.iterrows()
+
+            for _idx, _row in signal_rows_for_group:
                 _sym = _row.get('symbol', self.config.symbols[0])
                 symbol_signals[_sym].append((_idx, _row))
 
@@ -4963,7 +5338,12 @@ class InstitutionalBacktestEngine:
 
             # Convert signals to trade requests
             from backtest.utils.validation import validate_signal as _validate_signal
-            for idx, signal_row in signals_df.iterrows():
+            if self._use_fast_signal_iteration:
+                signal_rows_for_auth = self._prepare_signal_rows_fast(signals_df)
+            else:
+                signal_rows_for_auth = signals_df.iterrows()
+
+            for idx, signal_row in signal_rows_for_auth:
                 # H6: Skip signals dropped by conflict resolution
                 if idx in drop_indices:
                     continue
@@ -5403,6 +5783,239 @@ class InstitutionalBacktestEngine:
 
         return authorized_trades
 
+    def _prepare_signal_rows_fast(self, signals_df: pd.DataFrame) -> List[Any]:
+        """Materialize signal rows as (index, row_dict) pairs for lower-overhead iteration."""
+        if signals_df is None or signals_df.empty:
+            return []
+
+        indices = signals_df.index.tolist()
+        records = signals_df.to_dict('records')
+        return list(zip(indices, records))
+
+    def _prepare_historical_rows_fast(self, historical_df: pd.DataFrame) -> List[Any]:
+        """Materialize historical bars as (index, row_dict) pairs for lower-overhead iteration."""
+        if historical_df is None or historical_df.empty:
+            return []
+
+        indices = historical_df.index.tolist()
+        records = historical_df.to_dict('records')
+        return list(zip(indices, records))
+
+    def _get_cached_timestamp_series(self, cache_key: str, df: pd.DataFrame):
+        """Return cached pd.to_datetime(df['timestamp']) for stable DataFrames in hot loops."""
+        if df is None or df.empty or 'timestamp' not in df.columns:
+            return pd.Series(dtype='datetime64[ns]')
+
+        if not self._use_fast_timestamp_cache:
+            return pd.to_datetime(df['timestamp'])
+
+        cached = self._timestamp_series_cache.get(cache_key)
+        expected_len = len(df)
+        if cached is not None and cached.get('length') == expected_len:
+            return cached['series']
+
+        series = pd.to_datetime(df['timestamp'])
+        self._timestamp_series_cache[cache_key] = {
+            'length': expected_len,
+            'series': series,
+        }
+        return series
+
+    def _align_timestamp_to_index_tz(
+        self,
+        base_ts: pd.Timestamp,
+        index_tz,
+        cache: Optional[Dict[Any, pd.Timestamp]] = None,
+    ) -> pd.Timestamp:
+        """Align a timestamp to index timezone semantics with optional per-bar cache."""
+        if cache is not None:
+            key = index_tz if index_tz is not None else "__naive__"
+            cached = cache.get(key)
+            if cached is not None:
+                return cached
+
+        ts_cmp = pd.Timestamp(base_ts)
+        if index_tz is not None and ts_cmp.tz is None:
+            ts_cmp = ts_cmp.tz_localize(index_tz)
+        elif index_tz is None and ts_cmp.tz is not None:
+            ts_cmp = ts_cmp.tz_localize(None)
+
+        if cache is not None:
+            key = index_tz if index_tz is not None else "__naive__"
+            cache[key] = ts_cmp
+
+        return ts_cmp
+
+    def _bar_to_dict(self, bar: Any) -> Dict[str, Any]:
+        """Convert a bar row (Series or mapping) into a plain dict."""
+        if hasattr(bar, 'to_dict'):
+            return bar.to_dict()
+        if isinstance(bar, dict):
+            return dict(bar)
+        try:
+            return dict(bar)
+        except Exception:
+            return {}
+
+    def _get_precalc_bar_iloc_fast(
+        self,
+        cache_key: str,
+        df: pd.DataFrame,
+        bar_timestamp: pd.Timestamp,
+    ) -> Optional[int]:
+        """Resolve exact bar iloc via cached searchsorted when timestamp column is monotonic."""
+        if not self._use_fast_precalc_bar_lookup:
+            return None
+        if df is None or df.empty or 'timestamp' not in df.columns:
+            return None
+
+        cache = self._precalc_bar_lookup_cache.get(cache_key)
+        expected_len = len(df)
+        if cache is None or cache.get('length') != expected_len:
+            ts_series = self._get_cached_timestamp_series(cache_key, df)
+            idx_obj = pd.DatetimeIndex(ts_series)
+            if not getattr(idx_obj, 'is_monotonic_increasing', False):
+                self._precalc_bar_lookup_cache[cache_key] = {
+                    'length': expected_len,
+                    'disabled': True,
+                }
+                return None
+            cache = {
+                'length': expected_len,
+                'idx_obj': idx_obj,
+                'idx_tz': getattr(idx_obj, 'tz', None),
+            }
+            self._precalc_bar_lookup_cache[cache_key] = cache
+
+        if cache.get('disabled', False):
+            return None
+
+        ts_cmp = self._align_timestamp_to_index_tz(
+            pd.Timestamp(bar_timestamp),
+            cache.get('idx_tz'),
+            cache=None,
+        )
+        idx_obj = cache['idx_obj']
+        pos = int(idx_obj.searchsorted(ts_cmp, side='left'))
+        if 0 <= pos < len(idx_obj) and idx_obj[pos] == ts_cmp:
+            return pos
+        return None
+
+    def _slice_df_before_timestamp_fast(
+        self,
+        cache_key: str,
+        df: pd.DataFrame,
+        bar_timestamp: pd.Timestamp,
+        tz_align_cache: Optional[Dict[Any, pd.Timestamp]] = None,
+    ) -> Optional[pd.DataFrame]:
+        """Return df rows strictly before timestamp via cached searchsorted; None means fallback."""
+        if not self._use_fast_symbol_time_slice:
+            return None
+        if df is None or df.empty or 'timestamp' not in df.columns:
+            return None
+
+        cache = self._time_slice_cache.get(cache_key)
+        expected_len = len(df)
+        if cache is None or cache.get('length') != expected_len:
+            ts_series = self._get_cached_timestamp_series(cache_key, df)
+            idx_obj = pd.DatetimeIndex(ts_series)
+            if not getattr(idx_obj, 'is_monotonic_increasing', False):
+                self._time_slice_cache[cache_key] = {
+                    'length': expected_len,
+                    'disabled': True,
+                }
+                return None
+            cache = {
+                'length': expected_len,
+                'idx_obj': idx_obj,
+                'idx_tz': getattr(idx_obj, 'tz', None),
+            }
+            self._time_slice_cache[cache_key] = cache
+
+        if cache.get('disabled', False):
+            return None
+
+        ts_cmp = self._align_timestamp_to_index_tz(
+            pd.Timestamp(bar_timestamp),
+            cache.get('idx_tz'),
+            cache=tz_align_cache,
+        )
+        idx_obj = cache['idx_obj']
+        cut = int(idx_obj.searchsorted(ts_cmp, side='left'))
+        return df.iloc[:cut].copy()
+
+    def _get_market_data_time_indexed(
+        self,
+        cache_key: str,
+        df: pd.DataFrame,
+    ) -> Optional[pd.DataFrame]:
+        """Return timestamp-indexed market data with optional cache for repeated lookups."""
+        if df is None or df.empty:
+            return None
+        if isinstance(df.index, pd.DatetimeIndex):
+            return df
+        if 'timestamp' not in df.columns:
+            return None
+        if not self._use_fast_market_data_index_cache:
+            return df.set_index('timestamp')
+
+        cached = self._market_data_index_cache.get(cache_key)
+        expected_len = len(df)
+        if cached is not None and cached.get('length') == expected_len:
+            return cached['df']
+
+        idx_df = df.set_index('timestamp')
+        self._market_data_index_cache[cache_key] = {
+            'length': expected_len,
+            'df': idx_df,
+        }
+        return idx_df
+
+    def _slice_precalc_indexed_before_timestamp_fast(
+        self,
+        cache_key: str,
+        df: pd.DataFrame,
+        bar_timestamp: pd.Timestamp,
+        tz_align_cache: Optional[Dict[Any, pd.Timestamp]] = None,
+    ) -> Optional[pd.DataFrame]:
+        """Return pre-calculated indicator rows before timestamp from cached timestamp-indexed view."""
+        if not self._use_fast_precalc_indexed_slice:
+            return None
+        if df is None or df.empty or 'timestamp' not in df.columns:
+            return None
+
+        cache = self._precalc_indexed_slice_cache.get(cache_key)
+        expected_len = len(df)
+        if cache is None or cache.get('length') != expected_len:
+            ts_series = self._get_cached_timestamp_series(cache_key, df)
+            idx_obj = pd.DatetimeIndex(ts_series)
+            if not getattr(idx_obj, 'is_monotonic_increasing', False):
+                self._precalc_indexed_slice_cache[cache_key] = {
+                    'length': expected_len,
+                    'disabled': True,
+                }
+                return None
+            indexed_df = df.set_index('timestamp')
+            cache = {
+                'length': expected_len,
+                'idx_obj': idx_obj,
+                'idx_tz': getattr(idx_obj, 'tz', None),
+                'indexed_df': indexed_df,
+            }
+            self._precalc_indexed_slice_cache[cache_key] = cache
+
+        if cache.get('disabled', False):
+            return None
+
+        ts_cmp = self._align_timestamp_to_index_tz(
+            pd.Timestamp(bar_timestamp),
+            cache.get('idx_tz'),
+            cache=tz_align_cache,
+        )
+        idx_obj = cache['idx_obj']
+        cut = int(idx_obj.searchsorted(ts_cmp, side='left'))
+        return cache['indexed_df'].iloc[:cut].copy()
+
     # ============================================================
     # EXECUTION FLOW METHODS
     # ============================================================
@@ -5535,6 +6148,18 @@ class InstitutionalBacktestEngine:
                 key=lambda t: 0 if t.get('side', '').lower() == 'sell' else 1
             )
 
+            execution_symbol_bar_cache = {} if self._use_fast_execution_symbol_bar_cache else None
+            cached_cp45_tracer = None
+            cached_cp45_enabled = False
+            cached_cp4 = None
+            cached_cp5 = None
+            if self._use_fast_trace_context_cache:
+                from core_engine.utils.pipeline_trace import get_tracer, CP4_ORDER_CREATE, CP5_FILL
+                cached_cp45_tracer = get_tracer()
+                cached_cp45_enabled = bool(cached_cp45_tracer.enabled)
+                cached_cp4 = CP4_ORDER_CREATE
+                cached_cp5 = CP5_FILL
+
             for auth_trade in authorized_trades:
                 try:
                     # Extract trade details from authorization dict
@@ -5550,7 +6175,7 @@ class InstitutionalBacktestEngine:
                     if self.risk_manager:
                         current_position = self.risk_manager.current_positions.get(symbol, 0.0)
                         allow_shorts = getattr(self.config, 'allow_shorts', False)
-                        eps_pos = 1e-9
+                        eps_pos = self.EPSILON
 
                         if side.lower() == 'buy' and current_position > eps_pos:
                             # Already LONG - skip duplicate BUY
@@ -5620,73 +6245,15 @@ class InstitutionalBacktestEngine:
 
                     # Prepare market data for simulator
                     # CRITICAL FIX (multi-symbol parity):
-                    # `current_bar` is the bar currently being iterated in the main loop and may belong to a
-                    # different symbol when we are executing pending signals for multiple symbols at the same
-                    # timestamp. For transaction cost modeling (impact), we MUST use the executed symbol's
-                    # own bar volume/high/low for this timestamp.
-                    sym_bar = current_bar
-                    try:
-                        cur_sym = None
-                        try:
-                            cur_sym = current_bar.get('symbol', None)
-                        except Exception:
-                            cur_sym = None
-
-                        if cur_sym is None or str(cur_sym) != str(symbol):
-                            # Prefer the loaded per-symbol OHLCV from self.market_data (authoritative).
-                            try:
-                                md = getattr(self, "market_data", None)
-                                sym_df = md.get(symbol) if isinstance(md, dict) else None
-                                if sym_df is not None and hasattr(sym_df, "empty") and not sym_df.empty:
-                                    # Index lookup if timestamp is the index; else use column filter
-                                    if getattr(sym_df.index, "dtype", None) is not None:
-                                        try:
-                                            ts_idx = pd.Timestamp(bar_timestamp)
-                                            if ts_idx in sym_df.index:
-                                                sym_bar = sym_df.loc[ts_idx]
-                                                if hasattr(sym_bar, "iloc"):
-                                                    sym_bar = sym_bar.iloc[-1] if len(sym_bar) > 0 else sym_bar
-                                        except Exception:
-                                            pass
-                                    if (sym_bar is current_bar) and ('timestamp' in getattr(sym_df, "columns", [])):
-                                        ts_ser = pd.to_datetime(sym_df['timestamp'])
-                                        m = ts_ser == pd.Timestamp(bar_timestamp)
-                                        if m.any():
-                                            sym_bar = sym_df.loc[m].iloc[-1]
-                            except Exception:
-                                pass
-
-                            # Fallback: pre_calculated_features if available (may contain per-symbol bars).
-                            dfp = getattr(self, "pre_calculated_features", None)
-                            if dfp is not None and hasattr(dfp, "empty") and not dfp.empty:
-                                df1 = dfp
-                                # Normalize timestamp access
-                                if 'timestamp' in df1.columns:
-                                    ts_ser = pd.to_datetime(df1['timestamp'])
-                                    m = (df1.get('symbol') == symbol) & (ts_ser == pd.Timestamp(bar_timestamp))
-                                    if m.any():
-                                        sym_bar = df1.loc[m].iloc[-1]
-                                else:
-                                    # timestamp index path
-                                    try:
-                                        df_sym = df1[df1.get('symbol') == symbol]
-                                        df_sym = df_sym.loc[:pd.Timestamp(bar_timestamp)]
-                                        if len(df_sym) > 0:
-                                            sym_bar = df_sym.iloc[-1]
-                                    except Exception:
-                                        pass
-                    except Exception:
-                        sym_bar = current_bar
-
-                    market_data = {
-                        'timestamp': bar_timestamp,
-                        'open': sym_bar.get('open', current_price),
-                        'high': sym_bar.get('high', current_price),
-                        'low': sym_bar.get('low', current_price),
-                        'close': current_price,  # Use current_price instead of potentially modified bar data
-                        'volume': sym_bar.get('volume', 0),
-                        'volatility': sym_bar.get('volatility', 0.02)  # 2% default
-                    }
+                    # `current_bar` may belong to a different symbol. Resolve the correct
+                    # bar for this symbol's volume/high/low for transaction cost modeling.
+                    if execution_symbol_bar_cache is not None and symbol in execution_symbol_bar_cache:
+                        sym_bar = execution_symbol_bar_cache[symbol]
+                    else:
+                        sym_bar = self._resolve_symbol_bar(symbol, bar_timestamp, current_bar)
+                        if execution_symbol_bar_cache is not None:
+                            execution_symbol_bar_cache[symbol] = sym_bar
+                    market_data = self._build_market_data_dict(sym_bar, bar_timestamp, current_price)
 
                     # SPRINT 0.3: Simulate fill with rejection handling (GAP 4-3)
                     # Prepare regime context dict
@@ -5718,13 +6285,23 @@ class InstitutionalBacktestEngine:
                     )
 
                     # --- CP4: Pipeline Trace - Order Creation (backtest path) ---
-                    from core_engine.utils.pipeline_trace import get_tracer, CP4_ORDER_CREATE, CP5_FILL
-                    _cp45_tracer = get_tracer()
-                    if _cp45_tracer.enabled:
+                    if self._use_fast_trace_context_cache:
+                        _cp45_tracer = cached_cp45_tracer
+                        _cp45_enabled = cached_cp45_enabled
+                        _cp4_checkpoint = cached_cp4
+                        _cp5_checkpoint = cached_cp5
+                    else:
+                        from core_engine.utils.pipeline_trace import get_tracer, CP4_ORDER_CREATE, CP5_FILL
+                        _cp45_tracer = get_tracer()
+                        _cp45_enabled = bool(_cp45_tracer.enabled)
+                        _cp4_checkpoint = CP4_ORDER_CREATE
+                        _cp5_checkpoint = CP5_FILL
+
+                    if _cp45_enabled:
                         _cp4_auth_obj = auth_trade.get('authorization')
                         _cp45_tracer.emit(
                             trace_id=_auth_id or f"order_{symbol}_{bar_timestamp}",
-                            checkpoint=CP4_ORDER_CREATE,
+                            checkpoint=_cp4_checkpoint,
                             component="InstitutionalBacktestEngine",
                             method="simulate_execution",
                             symbol=symbol,
@@ -5816,10 +6393,10 @@ class InstitutionalBacktestEngine:
                             logger.warning(f"OMS routing failed (non-fatal): {_oms_err}")
 
                     # --- CP5: Pipeline Trace - Fill (backtest path) ---
-                    if _cp45_tracer.enabled:
+                    if _cp45_enabled:
                         _cp45_tracer.emit(
                             trace_id=simulated_fill.fill_id or _auth_id or f"fill_{symbol}_{bar_timestamp}",
-                            checkpoint=CP5_FILL,
+                            checkpoint=_cp5_checkpoint,
                             component="InstitutionalBacktestEngine",
                             method="simulate_execution",
                             symbol=symbol,
@@ -5977,51 +6554,6 @@ class InstitutionalBacktestEngine:
         except Exception as e:
             logger.error(f"❌ Execution simulation failed: {e}", exc_info=True)
             return []
-
-    # ============================================================
-    # PHASE 7: INTEGRATION & ORCHESTRATION
-    # ============================================================
-
-    async def integrate_phase7(self) -> None:
-        """
-        Phase 7: Integrate and orchestrate all components for live trading
-
-        This phase integrates:
-        - Connects all components for live trading
-        - Validates inter-component dependencies
-        - Initializes any remaining components
-        - Performs final checks and balances
-
-        Usage:
-            engine = InstitutionalBacktestEngine(config)
-            await engine.initialize()
-            await engine.integrate_phase7()
-        """
-        logger.info("\n" + "=" * 80)
-        logger.info("🔗 PHASE 7: INTEGRATION & ORCHESTRATION")
-        logger.info("=" * 80)
-
-        try:
-            # Validate all components are initialized
-            if not self.is_initialized:
-                raise RuntimeError("Engine not initialized. Cannot integrate Phase 7.")
-
-            # Validate inter-component links
-            if not self.risk_manager:
-                raise RuntimeError("CentralRiskManager is not initialized - cannot proceed with integration")
-
-            if not self.trading_engine or not self.execution_engine:
-                raise RuntimeError("Trading engines are not initialized - cannot proceed with integration")
-
-            # Perform any final initialization steps for Phase 7
-            # For now, this is just a check - in future, we may have more logic here
-
-            logger.info("✅ Phase 7 integration complete")
-            logger.info("=" * 80)
-
-        except Exception as e:
-            logger.error(f"❌ Phase 7 integration failed: {e}", exc_info=True)
-            raise RuntimeError(f"Phase 7 integration failed: {e}")
 
     # ============================================================
     # Lifecycle Management

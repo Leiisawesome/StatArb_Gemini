@@ -21,7 +21,6 @@ Expected Duration: Varies (10-90 minutes depending on windows)
 Author: StatArb_Gemini Core Engine
 """
 
-import asyncio
 from datetime import datetime
 import time
 from typing import Dict, Any, List, Tuple
@@ -372,15 +371,5 @@ class WalkForwardAnalysis(BaseExperiment):
         df.to_csv(csv_path, index=False)
 
 if __name__ == "__main__":
-    # Example usage
-    async def run_example():
-        from backtest.utils.config_loader import load_config
-
-        config = load_config("backtest/configs/walk_forward.yaml")
-        experiment = WalkForwardAnalysis(config)
-        result = await experiment.run()
-        experiment.print_summary(result)
-        experiment.save_results(result)
-
-    asyncio.run(run_example())
+    WalkForwardAnalysis.main("backtest/configs/walk_forward.yaml")
 

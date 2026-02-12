@@ -10,12 +10,15 @@ Author: StatArb_Gemini Core Engine
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Type
 from datetime import datetime
+import asyncio
 import json
 import logging
+import sys
 from pathlib import Path
 
+from core_engine.config import BacktestConfig
 from backtest.utils.paths import backtest_results_dir
 from backtest.utils import trade_timestamp_key
 
@@ -117,6 +120,71 @@ class BaseExperiment(ABC):
             Human-readable description
         """
 
+    def _create_backtest_config(self, source_config: Optional[Dict[str, Any]] = None) -> BacktestConfig:
+        """
+        Create BacktestConfig from flat YAML configuration dict.
+
+        This is the canonical config builder used by all experiments.
+        Override only if you need fundamentally different logic (e.g. parameter sweep).
+
+        Args:
+            source_config: Optional config dict override. Defaults to self.config.
+
+        Returns:
+            BacktestConfig ready for InstitutionalBacktestEngine
+        """
+        config_source = source_config or self.config
+
+        config_dict = {
+            'backtest_name': config_source.get('experiment_name', 'Experiment'),
+            'symbols': config_source.get('symbols', ['AAPL']),
+            'interval': config_source.get('interval', '1min'),
+            'start_date': config_source.get('start_date', '2024-01-02'),
+            'end_date': config_source.get('end_date', '2024-01-02'),
+            'warmup_bars': config_source.get('warmup_bars', None),
+            'initial_capital': config_source.get('initial_capital', 100000),
+            'allow_shorts': config_source.get('allow_shorts', False),
+            'max_position_size': config_source.get('max_position_size', 0.10),
+            'max_position_pct': config_source.get('max_position_pct', None),
+            'max_concentration': config_source.get('max_concentration', 0.20),
+            'min_signal_confidence': config_source.get('min_signal_confidence', 0.60),
+            'min_confidence_threshold': config_source.get('min_confidence_threshold', 0.60),
+            'enable_multi_strategy_coordination': config_source.get('enable_multi_strategy_coordination', True),
+            'enable_signal_aggregation': config_source.get('enable_signal_aggregation', True),
+            'enable_conflict_resolution': config_source.get('enable_conflict_resolution', True),
+            'enable_dynamic_weighting': config_source.get('enable_dynamic_weighting', True),
+            'output_directory': str(backtest_results_dir()),
+        }
+
+        # Regime risk multipliers
+        if 'regime_risk_multipliers' in config_source:
+            config_dict['regime_risk_multipliers'] = config_source['regime_risk_multipliers']
+        else:
+            config_dict['regime_risk_multipliers'] = {
+                'low_volatility': 1.0,
+                'normal_volatility': 1.0,
+                'high_volatility': 0.7,
+            }
+
+        # Strategies (prefer list, support singular 'strategy' key)
+        if 'strategies' in config_source:
+            config_dict['strategies'] = config_source['strategies']
+        elif 'strategy' in config_source:
+            config_dict['strategies'] = [config_source['strategy']]
+        else:
+            config_dict['strategies'] = [{
+                'type': 'mean_reversion',
+                'name': 'MR_Simple',
+                'allocation_pct': 1.0,
+                'parameters': {
+                    'lookback': 20,
+                    'z_entry': 2.0,
+                    'z_exit': 0.5,
+                },
+            }]
+
+        return BacktestConfig(**config_dict)
+
     def print_summary(self, result: ExperimentResult):
         """
         Print concise run summary to console.
@@ -125,10 +193,10 @@ class BaseExperiment(ABC):
             result: Experiment result to summarize
         """
         print("\n" + "="*80)
-        print(f"📊 EXPERIMENT SUMMARY: {result.experiment_name}")
+        print(f"[SUMMARY] EXPERIMENT SUMMARY: {result.experiment_name}")
         print("="*80)
         print(f"Type:           {result.experiment_type}")
-        print(f"Status:         {'✅ SUCCESS' if result.success else '❌ FAILED'}")
+        print(f"Status:         {'SUCCESS' if result.success else 'FAILED'}")
         print(f"Duration:       {result.duration_seconds:.2f}s")
         print()
 
@@ -226,9 +294,45 @@ class BaseExperiment(ABC):
                         strat_label = _strategy_label(strategy_run)
                         print(f"  {i:<3} {timestamp:<20} {strat_label:<8} {symbol:<8} {action:<6} {str_display} {conf_display} {quantity:>8.2f} ${price:>9.2f} {pnl_str}")
         else:
-            print(f"❌ Error: {result.error_message}")
+            print(f"[ERROR] Error: {result.error_message}")
 
         print("="*80)
+
+    # ------------------------------------------------------------------
+    # Convenience entry point for experiment scripts
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def main(cls, default_config_path: str, **kwargs):
+        """
+        Standard __main__ entry point for any experiment subclass.
+
+        Usage in an experiment file::
+
+            if __name__ == "__main__":
+                MyExperiment.main("backtest/configs/my_experiment.yaml")
+
+        This replaces the duplicated async-def-run_example boilerplate that
+        was copy-pasted across every experiment script.
+
+        Args:
+            default_config_path: Path to the default YAML config file.
+            **kwargs: Extra keyword arguments forwarded to the constructor.
+        """
+        import asyncio
+        from backtest.utils.config_loader import load_config
+
+        config = load_config(default_config_path)
+        experiment = cls(config, **kwargs)
+
+        async def _run():
+            result = await experiment.run()
+            experiment.print_summary(result)
+            experiment.save_results(result)
+            return result
+
+        result = asyncio.run(_run())
+        raise SystemExit(0 if result.success else 1)
 
     def save_results(self, result: ExperimentResult):
         """

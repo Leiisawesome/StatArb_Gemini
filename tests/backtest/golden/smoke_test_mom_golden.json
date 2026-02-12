@@ -1,0 +1,261 @@
+{
+  "_comment": "AUTO-GENERATED golden baseline. Regenerate with: pytest tests/backtest/test_regression_golden.py --update-golden",
+  "trades": [
+    {
+      "timestamp": "2024-12-18 09:57:00",
+      "symbol": "TSLA",
+      "side": "buy",
+      "quantity": 17.186567,
+      "fill_price": 472.2218
+    },
+    {
+      "timestamp": "2024-12-18 10:00:00",
+      "symbol": "TSLA",
+      "side": "sell",
+      "quantity": 17.186567,
+      "fill_price": 469.2211
+    },
+    {
+      "timestamp": "2024-12-18 11:33:00",
+      "symbol": "TSLA",
+      "side": "buy",
+      "quantity": 33.573553,
+      "fill_price": 482.9421
+    },
+    {
+      "timestamp": "2024-12-18 11:38:00",
+      "symbol": "TSLA",
+      "side": "sell",
+      "quantity": 33.573553,
+      "fill_price": 483.782
+    },
+    {
+      "timestamp": "2024-12-18 11:40:00",
+      "symbol": "TSLA",
+      "side": "buy",
+      "quantity": 16.690003,
+      "fill_price": 485.8893
+    },
+    {
+      "timestamp": "2024-12-18 11:46:00",
+      "symbol": "TSLA",
+      "side": "sell",
+      "quantity": 16.690003,
+      "fill_price": 486.9999
+    },
+    {
+      "timestamp": "2024-12-18 11:47:00",
+      "symbol": "TSLA",
+      "side": "buy",
+      "quantity": 16.62889,
+      "fill_price": 487.7196
+    },
+    {
+      "timestamp": "2024-12-18 12:03:00",
+      "symbol": "TSLA",
+      "side": "sell",
+      "quantity": 16.62889,
+      "fill_price": 483.3267
+    },
+    {
+      "timestamp": "2024-12-18 14:16:00",
+      "symbol": "TSLA",
+      "side": "sell",
+      "quantity": 17.273892,
+      "fill_price": 468.6104
+    },
+    {
+      "timestamp": "2024-12-18 14:46:00",
+      "symbol": "TSLA",
+      "side": "buy",
+      "quantity": 17.273892,
+      "fill_price": 465.8094
+    },
+    {
+      "timestamp": "2024-12-18 15:16:00",
+      "symbol": "TSLA",
+      "side": "buy",
+      "quantity": 18.059831,
+      "fill_price": 449.2447
+    },
+    {
+      "timestamp": "2024-12-18 15:23:00",
+      "symbol": "TSLA",
+      "side": "sell",
+      "quantity": 18.059831,
+      "fill_price": 449.09
+    },
+    {
+      "timestamp": "2024-12-18 15:48:00",
+      "symbol": "TSLA",
+      "side": "buy",
+      "quantity": 18.479369,
+      "fill_price": 438.8278
+    },
+    {
+      "timestamp": "2024-12-18 15:55:00",
+      "symbol": "TSLA",
+      "side": "sell",
+      "quantity": 18.479369,
+      "fill_price": 447.2385
+    },
+    {
+      "timestamp": "2024-12-19 09:33:00",
+      "symbol": "TSLA",
+      "side": "buy",
+      "quantity": 18.019461,
+      "fill_price": 450.4803
+    },
+    {
+      "timestamp": "2024-12-19 09:52:00",
+      "symbol": "TSLA",
+      "side": "sell",
+      "quantity": 18.019461,
+      "fill_price": 451.3056
+    },
+    {
+      "timestamp": "2024-12-19 12:49:00",
+      "symbol": "TSLA",
+      "side": "buy",
+      "quantity": 18.980154,
+      "fill_price": 428.0266
+    },
+    {
+      "timestamp": "2024-12-19 12:59:00",
+      "symbol": "TSLA",
+      "side": "sell",
+      "quantity": 18.980154,
+      "fill_price": 430.9242
+    },
+    {
+      "timestamp": "2024-12-19 13:01:00",
+      "symbol": "TSLA",
+      "side": "buy",
+      "quantity": 18.88402,
+      "fill_price": 430.3525
+    },
+    {
+      "timestamp": "2024-12-19 13:20:00",
+      "symbol": "TSLA",
+      "side": "sell",
+      "quantity": 18.88402,
+      "fill_price": 431.9104
+    },
+    {
+      "timestamp": "2024-12-20 09:48:00",
+      "symbol": "TSLA",
+      "side": "sell",
+      "quantity": 19.220115,
+      "fill_price": 422.6373
+    },
+    {
+      "timestamp": "2024-12-20 09:51:00",
+      "symbol": "TSLA",
+      "side": "buy",
+      "quantity": 19.220115,
+      "fill_price": 418.5147
+    },
+    {
+      "timestamp": "2024-12-20 10:02:00",
+      "symbol": "TSLA",
+      "side": "buy",
+      "quantity": 19.112909,
+      "fill_price": 425.874
+    },
+    {
+      "timestamp": "2024-12-20 10:10:00",
+      "symbol": "TSLA",
+      "side": "sell",
+      "quantity": 19.112909,
+      "fill_price": 428.417
+    },
+    {
+      "timestamp": "2024-12-20 10:13:00",
+      "symbol": "TSLA",
+      "side": "buy",
+      "quantity": 18.815755,
+      "fill_price": 432.452
+    },
+    {
+      "timestamp": "2024-12-20 10:19:00",
+      "symbol": "TSLA",
+      "side": "sell",
+      "quantity": 18.815755,
+      "fill_price": 432.1051
+    },
+    {
+      "timestamp": "2024-12-20 10:22:00",
+      "symbol": "TSLA",
+      "side": "buy",
+      "quantity": 18.85675,
+      "fill_price": 431.6818
+    },
+    {
+      "timestamp": "2024-12-20 10:26:00",
+      "symbol": "TSLA",
+      "side": "sell",
+      "quantity": 18.85675,
+      "fill_price": 433.7851
+    },
+    {
+      "timestamp": "2024-12-20 10:33:00",
+      "symbol": "TSLA",
+      "side": "buy",
+      "quantity": 18.59267,
+      "fill_price": 438.0412
+    },
+    {
+      "timestamp": "2024-12-20 10:42:00",
+      "symbol": "TSLA",
+      "side": "sell",
+      "quantity": 18.59267,
+      "fill_price": 441.6134
+    },
+    {
+      "timestamp": "2024-12-20 10:44:00",
+      "symbol": "TSLA",
+      "side": "buy",
+      "quantity": 18.441155,
+      "fill_price": 442.0318
+    },
+    {
+      "timestamp": "2024-12-20 10:50:00",
+      "symbol": "TSLA",
+      "side": "sell",
+      "quantity": 18.441155,
+      "fill_price": 437.3937
+    },
+    {
+      "timestamp": "2024-12-20 10:51:00",
+      "symbol": "TSLA",
+      "side": "sell",
+      "quantity": 18.527327,
+      "fill_price": 438.9376
+    },
+    {
+      "timestamp": "2024-12-20 11:16:00",
+      "symbol": "TSLA",
+      "side": "buy",
+      "quantity": 18.527327,
+      "fill_price": 441.7671
+    }
+  ],
+  "metrics": {
+    "total_return_pct": 0.3118534849860298,
+    "sharpe_ratio": 7.678986427794268,
+    "max_drawdown_pct": 0.19547112394873134,
+    "total_trades": 17,
+    "win_rate": 64.70588235294117
+  },
+  "funnel": {
+    "CP0": 1,
+    "CP1": 1,
+    "CP2": 41,
+    "CP3": 58,
+    "CP4": 34,
+    "CP5": 34,
+    "CP6": 34,
+    "CP7": 34
+  },
+  "trade_count": 34
+}

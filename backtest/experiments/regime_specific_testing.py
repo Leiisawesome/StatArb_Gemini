@@ -21,7 +21,6 @@ Expected Duration: 5-30 minutes (depending on period length)
 Author: StatArb_Gemini Core Engine
 """
 
-import asyncio
 from datetime import datetime, timedelta
 import time
 from typing import Dict, List, Tuple
@@ -279,15 +278,5 @@ class RegimeSpecificTesting(BaseExperiment):
             json.dump(regime_results, f, indent=2, default=str)
 
 if __name__ == "__main__":
-    # Example usage
-    async def run_example():
-        from backtest.utils.config_loader import load_config
-
-        config = load_config("backtest/configs/regime_specific.yaml")
-        experiment = RegimeSpecificTesting(config)
-        result = await experiment.run()
-        experiment.print_summary(result)
-        experiment.save_results(result)
-
-    asyncio.run(run_example())
+    RegimeSpecificTesting.main("backtest/configs/regime_specific.yaml")
 

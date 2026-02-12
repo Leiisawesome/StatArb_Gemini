@@ -27,7 +27,6 @@ Expected Duration: 10-30 minutes
 Author: StatArb_Gemini Core Engine
 """
 
-import asyncio
 from datetime import datetime
 import time
 from typing import Dict, Any, List
@@ -261,15 +260,5 @@ class CorrelationStressTesting(BaseExperiment):
             json.dump(scenario_results, f, indent=2, default=str)
 
 if __name__ == "__main__":
-    # Example usage
-    async def run_example():
-        from backtest.utils.config_loader import load_config
-
-        config = load_config("backtest/configs/correlation_stress.yaml")
-        experiment = CorrelationStressTesting(config)
-        result = await experiment.run()
-        experiment.print_summary(result)
-        experiment.save_results(result)
-
-    asyncio.run(run_example())
+    CorrelationStressTesting.main("backtest/configs/correlation_stress.yaml")
 

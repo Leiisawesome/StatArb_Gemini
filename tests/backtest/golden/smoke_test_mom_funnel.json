@@ -1,0 +1,16 @@
+{
+  "funnel": {
+    "CP0": 1,
+    "CP1": 1,
+    "CP2": 41,
+    "CP3": 58,
+    "CP4": 34,
+    "CP5": 34,
+    "CP6": 34,
+    "CP7": 34
+  },
+  "authorized": 34,
+  "rejected": 24,
+  "total_trades": 17,
+  "bars_processed": 1167
+}

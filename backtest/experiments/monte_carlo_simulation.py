@@ -21,7 +21,6 @@ Expected Duration: 10-60 minutes (depending on N simulations)
 Author: StatArb_Gemini Core Engine
 """
 
-import asyncio
 from datetime import datetime
 import time
 from typing import Dict, Any, List
@@ -308,15 +307,5 @@ class MonteCarloSimulation(BaseExperiment):
             }, f, indent=2, default=str)
 
 if __name__ == "__main__":
-    # Example usage
-    async def run_example():
-        from backtest.utils.config_loader import load_config
-
-        config = load_config("backtest/configs/monte_carlo.yaml")
-        experiment = MonteCarloSimulation(config)
-        result = await experiment.run()
-        experiment.print_summary(result)
-        experiment.save_results(result)
-
-    asyncio.run(run_example())
+    MonteCarloSimulation.main("backtest/configs/monte_carlo.yaml")
 
