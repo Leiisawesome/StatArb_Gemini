@@ -14,12 +14,15 @@ Priority cascade
 ----------------
   1. VOL_STOP              — Hard circuit breaker (price loss limit)
   2. DIRECTION_REVERSAL    — Composite-z sign flip (thesis dead instantly)
-  3. TRANSITION_EXHAUSTION — Health < critical (thesis dying)
-  4. TRANSITION_TAKE_PROFIT— Thesis weakening + in profit (lock gains)
+  3. ALIGNMENT_BREAKDOWN   — Short + medium momentum both reversed against
+                             entry direction (causal chain L1 inverse)
+  4. TRANSITION_EXHAUSTION — Health < critical (thesis dying; health now
+                             includes alignment_health + flow_health)
+  5. TRANSITION_TAKE_PROFIT— Thesis weakening + in profit (lock gains)
      a) Acceleration exhaustion: accel against entry direction + profit
      b) Dynamic TP: PnL > decaying target + health declining
-  5. LIQUIDITY_STOP        — Operational risk
-  6. TIME_STOP             — Adaptive last resort (max hold scales with
+  6. LIQUIDITY_STOP        — Operational risk
+  7. TIME_STOP             — Adaptive last resort (max hold scales with
                              entry transition strength)
 
 Graceful degradation
@@ -61,13 +64,20 @@ def _compute_transition_health(
     # Entry-time state (from position metadata)
     entry_coherence: Optional[float],
     entry_composite_z: Optional[float],
+    # Causal chain entry state (from position metadata)
+    entry_flow_confirmed: Optional[bool] = None,
     # Current bar state
     current_coherence: Optional[float],
     current_composite_accel: Optional[float],
     current_vol_of_vol: Optional[float],
     current_composite_z: Optional[float],
+    # Causal chain current state
+    current_short_momentum: Optional[float] = None,
+    current_medium_momentum: Optional[float] = None,
+    current_volume_ratio: Optional[float] = None,
     # Noise tolerance
     direction_reversal_z: float = 0.3,
+    momentum_noise_floor: float = 0.001,
 ) -> Tuple[float, Dict[str, float]]:
     """
     Compute transition health in [0, 1] by comparing current market state
@@ -78,8 +88,8 @@ def _compute_transition_health(
     preserves the "any-zero-kills" property while keeping the scale
     interpretable: health ≈ average component quality.
 
-    Components
-    ----------
+    Components (original transition lifecycle)
+    ------------------------------------------
     direction_health  : float →  1.0 if aligned, decays toward 0 when
                                   composite_z moves against entry direction.
                                   Uses a soft threshold (not binary sign flip)
@@ -89,6 +99,18 @@ def _compute_transition_health(
                                   (neutral is healthy, not 50/50).
     coherence_health  : float →  min(current / entry, 1.0), [0, 1]
     vov_health        : float →  1 − vol_of_vol, [0, 1]
+
+    Components (causal chain — mirrors entry logic)
+    ------------------------------------------------
+    alignment_health  : float →  1.0 if short + medium momentum still agree
+                                  with entry direction above noise floor.
+                                  0.5 if one horizon disagrees. 0.1 if both
+                                  reversed. Matches entry's L1 alignment gate.
+    flow_health       : float →  1.0 if flow still present (or entry didn't
+                                  rely on flow). 0.3 if entry relied on flow
+                                  and flow has evaporated. Matches entry's L3
+                                  structural confirmation hierarchy where flow
+                                  is the highest-conviction confirmation.
 
     Returns (health, components_dict) for monitoring.
     """
@@ -153,13 +175,52 @@ def _compute_transition_health(
     else:
         vov_health = 0.75  # Unknown → assume stable
 
+    # --- Alignment health (causal chain L1) ---
+    # Entry required short + medium momentum to agree on direction above a
+    # noise floor.  Exit monitors whether that agreement persists.
+    # Categorical: both aligned → 1.0, one disagrees → 0.5, both reversed → 0.1.
+    if current_short_momentum is not None and current_medium_momentum is not None:
+        short_aligned = (float(current_short_momentum) * entry_direction) > momentum_noise_floor
+        medium_aligned = (float(current_medium_momentum) * entry_direction) > momentum_noise_floor
+        if short_aligned and medium_aligned:
+            alignment_health = 1.0
+        elif short_aligned or medium_aligned:
+            alignment_health = 0.5  # One horizon disagrees — caution
+        else:
+            alignment_health = 0.1  # Both horizons reversed — thesis dead
+    else:
+        alignment_health = 1.0  # Can't evaluate → assume aligned (graceful degradation)
+
+    # --- Flow health (causal chain L3) ---
+    # If entry was confirmed by volume flow (the highest-conviction structural
+    # signal), monitor whether flow persists.  The volume_ratio feature is
+    # centered at 0 (negative = below average).  A value > 0 indicates
+    # above-average activity; values < -0.2 indicate flow drought.
+    if entry_flow_confirmed is not None and entry_flow_confirmed and current_volume_ratio is not None:
+        if float(current_volume_ratio) > 0.0:
+            flow_health = 1.0   # Flow still present
+        elif float(current_volume_ratio) > -0.3:
+            flow_health = 0.6   # Flow fading but not gone
+        else:
+            flow_health = 0.25  # Flow evaporated — entry basis gone
+    elif entry_flow_confirmed is not None and not entry_flow_confirmed:
+        # Entry did NOT rely on flow (it passed via higher z-score).
+        # Flow absence is expected, not alarming.
+        flow_health = 0.80
+    else:
+        flow_health = 0.80  # Unknown → neutral (graceful degradation)
+
     # --- Geometric mean (N-th root of product) ---
     # Preserves "any zero kills health" but keeps scale interpretable:
     #   three 0.7s → 0.7  (not 0.34 as with raw product)
     #   three 0.5s → 0.5  (not 0.125)
     # This prevents the systematic downward bias of raw multiplication.
-    product = direction_health * accel_health * coherence_health * vov_health
-    n_components = 4.0
+    # 6 components: 4 transition lifecycle + 2 causal chain.
+    product = (
+        direction_health * accel_health * coherence_health * vov_health
+        * alignment_health * flow_health
+    )
+    n_components = 6.0
     if product > 0:
         health = product ** (1.0 / n_components)
     else:
@@ -170,6 +231,8 @@ def _compute_transition_health(
         "accel_health": round(accel_health, 4),
         "coherence_health": round(coherence_health, 4),
         "vov_health": round(vov_health, 4),
+        "alignment_health": round(alignment_health, 4),
+        "flow_health": round(flow_health, 4),
     }
     return health, components
 
@@ -192,15 +255,22 @@ def decide_exit(
     entry_vol_of_vol: Optional[float] = None,
     entry_transition_score: Optional[float] = None,
     entry_composite_z: Optional[float] = None,
+    # --- Causal chain entry state (from position.metadata) ---
+    entry_flow_confirmed: Optional[bool] = None,
     # --- Current bar transition state ---
     current_coherence: Optional[float] = None,
     current_composite_accel: Optional[float] = None,
     current_vol_of_vol: Optional[float] = None,
     current_composite_z: Optional[float] = None,
+    # --- Causal chain current state ---
+    current_short_momentum: Optional[float] = None,
+    current_medium_momentum: Optional[float] = None,
+    current_volume_ratio: Optional[float] = None,
     # --- Transition health thresholds ---
     health_critical_threshold: float = 0.15,
     accel_exhaustion_threshold: float = -0.3,
     direction_reversal_z: float = 0.3,
+    momentum_noise_floor: float = 0.001,
     # --- Dynamic take-profit ---
     tp_initial_pct: float = 2.0,
     tp_floor_pct: float = 0.3,
@@ -213,15 +283,17 @@ def decide_exit(
     liquidity_details: Optional[Dict[str, Any]] = None,
 ) -> ExitDecision:
     """
-    Evaluate exit rules using the transition lifecycle model.
+    Evaluate exit rules using the transition lifecycle model, enriched with
+    causal-chain dimensions that mirror entry logic.
 
     Priority:
       1) Vol stop (hard circuit breaker)
       2) Direction reversal (composite_z sign flip)
-      3) Transition exhaustion (health < critical)
-      4) Transition take-profit (thesis weakening + in profit)
-      5) Liquidity stop
-      6) Time stop (adaptive last resort)
+      3) Alignment breakdown (short + medium momentum both reversed)
+      4) Transition exhaustion (health < critical)
+      5) Transition take-profit (thesis weakening + in profit)
+      6) Liquidity stop
+      7) Time stop (adaptive last resort)
 
     All transition-based exits (#2-#4) degrade gracefully when metadata
     is missing: health defaults to ~0.25 and only hard stops + time fire.
@@ -281,11 +353,16 @@ def decide_exit(
         is_long=is_long,
         entry_coherence=entry_coherence,
         entry_composite_z=entry_composite_z,
+        entry_flow_confirmed=entry_flow_confirmed,
         current_coherence=current_coherence,
         current_composite_accel=current_composite_accel,
         current_vol_of_vol=current_vol_of_vol,
         current_composite_z=current_composite_z,
+        current_short_momentum=current_short_momentum,
+        current_medium_momentum=current_medium_momentum,
+        current_volume_ratio=current_volume_ratio,
         direction_reversal_z=direction_reversal_z,
+        momentum_noise_floor=momentum_noise_floor,
     )
 
     health_details = {
@@ -312,10 +389,30 @@ def decide_exit(
         )
 
     # =================================================================
-    # 3) TRANSITION EXHAUSTION — health < critical threshold
+    # 3) ALIGNMENT BREAKDOWN — causal chain L1 fully reversed
+    #    Entry required short + medium momentum to agree on direction.
+    #    If both horizons have now reversed, the directional thesis is
+    #    structurally dead — this is the exit-side inverse of entry L1.
+    #    More granular than direction_health (which uses blended composite_z)
+    #    because it checks the individual horizons independently.
+    # =================================================================
+    if health_components["alignment_health"] <= 0.1:
+        return ExitDecision(
+            should_exit=True,
+            reason="ALIGNMENT_BREAKDOWN",
+            details={
+                **health_details,
+                "current_short_momentum": float(current_short_momentum) if current_short_momentum is not None else None,
+                "current_medium_momentum": float(current_medium_momentum) if current_medium_momentum is not None else None,
+            },
+        )
+
+    # =================================================================
+    # 4) TRANSITION EXHAUSTION — health < critical threshold
     #    Multi-dimensional thesis breakdown: some combination of
     #    decelerating momentum + coherence decay + vol instability
-    #    has driven the transition health below survivable levels.
+    #    + alignment breakdown + flow evaporation has driven the
+    #    transition health below survivable levels.
     # =================================================================
     if health < health_critical_threshold:
         return ExitDecision(
@@ -328,7 +425,7 @@ def decide_exit(
         )
 
     # =================================================================
-    # 4) TRANSITION TAKE-PROFIT — thesis weakening + in profit
+    # 5) TRANSITION TAKE-PROFIT — thesis weakening + in profit
     #
     #    Two sub-triggers (first match wins):
     #
@@ -378,7 +475,7 @@ def decide_exit(
             )
 
     # =================================================================
-    # 5) LIQUIDITY STOP — operational risk
+    # 6) LIQUIDITY STOP — operational risk
     # =================================================================
     if liquidity_bad:
         return ExitDecision(
@@ -391,7 +488,7 @@ def decide_exit(
         )
 
     # =================================================================
-    # 6) TIME STOP — adaptive last resort
+    # 7) TIME STOP — adaptive last resort
     #
     #    Base max_holding_minutes is scaled by entry transition strength:
     #      adaptive_max = base × (1 + entry_transition_score)

@@ -2692,12 +2692,17 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
                         _entry_vov = _sf(pos_meta.get("entry_vol_of_vol"))
                         _entry_ts = _sf(pos_meta.get("transition_score"))
                         _entry_cz = _sf(pos_meta.get("composite_z"))
+                        # Causal chain entry state
+                        _entry_flow = pos_meta.get("entry_flow_confirmed")
 
                         # Current state (from latest enriched data store)
                         _cur_coh = None
                         _cur_accel = None
                         _cur_vov = None
                         _cur_cz = None
+                        _cur_short_mom = None
+                        _cur_medium_mom = None
+                        _cur_vol_ratio = None
                         try:
                             if hasattr(self, "_latest_enriched") and symbol in self._latest_enriched:
                                 _enriched = self._latest_enriched[symbol]
@@ -2705,6 +2710,12 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
                                 _cur_accel = _sf(_enriched.get("composite_accel_norm"))
                                 _cur_vov = _sf(_enriched.get("vol_of_vol"))
                                 _cur_cz = _sf(_enriched.get("composite_z"))
+                                _cur_vol_ratio = _sf(_enriched.get("volume_ratio"))
+                                # Resolve strategy-specific momentum columns
+                                _short_col = pos_meta.get("entry_short_momentum_col", "momentum_10")
+                                _medium_col = pos_meta.get("entry_medium_momentum_col", "momentum_20")
+                                _cur_short_mom = _sf(_enriched.get(_short_col))
+                                _cur_medium_mom = _sf(_enriched.get(_medium_col))
                         except Exception:
                             pass
 
@@ -2723,17 +2734,23 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
                             pnl_pct=pnl_pct,
                             is_long=pos_is_long,
                             stop_loss_pct=stop_loss_pct_val,
-                            # Entry state
+                            # Entry transition state
                             entry_coherence=_entry_coh,
                             entry_composite_accel=_entry_accel,
                             entry_vol_of_vol=_entry_vov,
                             entry_transition_score=_entry_ts,
                             entry_composite_z=_entry_cz,
-                            # Current state
+                            # Causal chain entry state
+                            entry_flow_confirmed=_entry_flow,
+                            # Current transition state
                             current_coherence=_cur_coh,
                             current_composite_accel=_cur_accel,
                             current_vol_of_vol=_cur_vov,
                             current_composite_z=_cur_cz,
+                            # Causal chain current state
+                            current_short_momentum=_cur_short_mom,
+                            current_medium_momentum=_cur_medium_mom,
+                            current_volume_ratio=_cur_vol_ratio,
                             # Config
                             health_critical_threshold=_health_crit,
                             accel_exhaustion_threshold=_accel_exhaust,

@@ -11,7 +11,7 @@
 papertest:
   data:
     symbols: ["TSLA"]
-    start_date: "2024-12-18"
+    start_date: "2024-12-16"
     end_date: "2024-12-20"
     interval: "1min"
     replay_speed: "FAST_1000X"
@@ -40,6 +40,11 @@ papertest:
         scan_all_bars: false
         scan_interval: 1
 
+        # Opening Range Filter: skip first N minutes after 09:30 open.
+        # The ORB period is dominated by overnight order imbalance
+        # clearing — momentum indicators are unreliable during this window.
+        orb_minutes: 15
+
         # EOD liquidation + risk-side exits (Rule 7)
         enable_eod_liquidation: true
         eod_close_time: "15:55"
@@ -53,9 +58,26 @@ papertest:
         long_period: 50
         lookback_period: 60
 
-        # Permissive composite thresholds: focus is gate wiring/coverage, not selectivity.
-        composite_z_entry: 0.0
-        composite_pct_entry: 50.0
+        # Structural entry thresholds: composite z-score and percentile must
+        # represent a meaningful departure from recent history to qualify as
+        # a momentum setup.  These values work with the threshold floor
+        # (composite_z_floor=0.5, composite_pct_floor=60.0) to ensure real
+        # selectivity even if accidentally set too low.
+        composite_z_entry: 0.8
+        composite_pct_entry: 65.0
+
+        # Structural confirmation: without price structure, volume expansion,
+        # or volatility breakout, require z-score 2x higher to enter.
+        unconfirmed_z_multiplier: 2.0
+
+        # Multi-horizon alignment: minimum momentum magnitude for alignment
+        momentum_noise_floor: 0.001
+
+        # Volume confirmation threshold (volume_ratio above this)
+        volume_confirm_threshold: 0.3
+
+        # Volatility breakout threshold (short_vol / long_vol above this)
+        vol_expansion_threshold: 1.3
 
         # Momentum thresholds
         momentum_threshold: 0.02

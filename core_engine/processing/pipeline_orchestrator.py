@@ -33,10 +33,9 @@ from core_engine.data.manager import ClickHouseDataManager
 from core_engine.data.liquidity_engine import LiquidityAssessmentEngine
 from core_engine.processing.indicators.engine import EnhancedTechnicalIndicators
 from core_engine.processing.features.engineer import EnhancedFeatureEngineer
-from core_engine.processing.signals.generator import EnhancedSignalGenerator
 
 # Import configurations
-from core_engine.config import DataConfig, IndicatorConfig, FeatureConfig, SignalConfig
+from core_engine.config import DataConfig, IndicatorConfig, FeatureConfig
 
 logger = logging.getLogger(__name__)
 
@@ -211,7 +210,7 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
         data_config: Optional[Any] = None,
         indicator_config: Optional[Any] = None,
         feature_config: Optional[Any] = None,
-        signal_config: Optional[Any] = None,
+        signal_config: Optional[Any] = None,  # DEPRECATED — kept for backward compat, ignored
         liquidity_config: Optional[Any] = None,
         data_manager: Optional[Any] = None
     ):
@@ -222,7 +221,7 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
             data_config: Configuration for DataManager
             indicator_config: Configuration for TechnicalIndicators
             feature_config: Configuration for FeatureEngineer
-            signal_config: Configuration for SignalGenerator
+            signal_config: DEPRECATED — signal generation is the strategy's responsibility
             data_manager: Optional existing DataManager instance to share
         """
         # Component state (ISystemComponent)
@@ -236,14 +235,16 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
         self.data_config = data_config or DataConfig()
         self.indicator_config = indicator_config or IndicatorConfig()
         self.feature_config = feature_config or FeatureConfig()
-        self.signal_config = signal_config or SignalConfig()
         self.liquidity_config = liquidity_config or {}
 
         # Pipeline components (initialized in initialize())
+        # NOTE: signal_generator removed — signal generation is the strategy's
+        # responsibility (Rule 7).  The pipeline produces enriched DataFrames
+        # (OHLCV + indicators + features); strategies consume them directly.
         self.data_manager = data_manager
         self.indicators_engine: Optional[Any] = None
         self.feature_engineer: Optional[Any] = None
-        self.signal_generator: Optional[Any] = None
+        self.signal_generator: Optional[Any] = None  # DEPRECATED — kept for backward compat
         self.liquidity_engine: Optional[Any] = None
 
         # Regime awareness (IRegimeAware)
@@ -319,15 +320,11 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
                 await self.feature_engineer.initialize()
             logger.debug("✅ FeatureEngineer initialized")
 
-            # Initialize Signal Generator (Phase 4)
-            logger.debug("Phase 4: Initializing SignalGenerator...")
-            self.signal_generator = EnhancedSignalGenerator(self.signal_config)
-            if hasattr(self.signal_generator, 'initialize'):
-                await self.signal_generator.initialize()
-            logger.debug("✅ SignalGenerator initialized")
+            # Phase 4 (Signal Generation) removed — strategies own signal
+            # generation per Rule 7.  Pipeline delivers enriched DataFrames.
 
             self.is_initialized = True
-            logger.info("✅ Pipeline orchestrator initialized successfully (all 4 phases ready)")
+            logger.info("✅ Pipeline orchestrator initialized successfully (Phases 1-3 ready)")
             return True
 
         except Exception as e:
@@ -1115,7 +1112,34 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
             
             # PHASE 1.5: Apply Data Quality Mask
             symbol_data = self._apply_data_quality_mask(symbol_data, symbol)
-            
+
+            # --- CP0: Pipeline Trace - Market Data Ingestion ---
+            try:
+                from core_engine.utils.pipeline_trace import get_tracer, CP0_MARKET_DATA
+                _cp0_tracer = get_tracer()
+                if _cp0_tracer.enabled:
+                    _cp0_tracer.emit(
+                        trace_id=f"ingest_{symbol}",
+                        checkpoint=CP0_MARKET_DATA,
+                        component="ProcessingPipelineOrchestrator",
+                        method="_process_single_symbol",
+                        symbol=symbol,
+                        bar_timestamp=(
+                            symbol_data.index[-1]
+                            if symbol_data is not None and not symbol_data.empty
+                            else "unknown"
+                        ),
+                        input_data=symbol,
+                        output_data=symbol_data,
+                        metadata={
+                            "bars": len(symbol_data),
+                            "columns": sorted(symbol_data.columns.tolist()),
+                            "timeframe": timeframe,
+                        },
+                    )
+            except Exception:
+                pass  # Tracing must never break the pipeline
+
             liquidity_sequence = self._assess_liquidity(symbol, symbol_data)
             liquidity_context_first = liquidity_sequence[0] if liquidity_sequence else None
 
@@ -1133,6 +1157,38 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
                 if self.regime_engine:
                     regime_result = self.regime_engine.process_market_data(symbol_data)
                     regime_sequence = regime_result.get('regime_sequence', []) if isinstance(regime_result, dict) else []
+
+                    # --- CP0r: Pipeline Trace - Regime Detection ---
+                    try:
+                        from core_engine.utils.pipeline_trace import get_tracer, CP0r_REGIME_DETECT
+                        _cp0r_tracer = get_tracer()
+                        if _cp0r_tracer.enabled:
+                            _regime_changes = regime_result.get('regime_changes_count', 0) if isinstance(regime_result, dict) else 0
+                            _first_regime = regime_sequence[0] if regime_sequence else {}
+                            _cp0r_tracer.emit(
+                                trace_id=f"regime_{symbol}",
+                                checkpoint=CP0r_REGIME_DETECT,
+                                component="ProcessingPipelineOrchestrator",
+                                method="_process_single_symbol",
+                                symbol=symbol,
+                                bar_timestamp=(
+                                    symbol_data.index[-1]
+                                    if symbol_data is not None and not symbol_data.empty
+                                    else "unknown"
+                                ),
+                                input_data={"bars": len(symbol_data)},
+                                output_data={
+                                    "regime_changes_count": _regime_changes,
+                                    "regime_sequence_length": len(regime_sequence),
+                                    "processing_path": "multi_segment" if _regime_changes > 0 else "single_regime" if regime_sequence else "no_regime",
+                                    "primary_regime": _first_regime.get('regime', 'unknown') if isinstance(_first_regime, dict) else str(_first_regime),
+                                },
+                                metadata={
+                                    "processing_path": "multi_segment" if _regime_changes > 0 else "single_regime" if regime_sequence else "no_regime",
+                                },
+                            )
+                    except Exception:
+                        pass  # Tracing must never break the pipeline
 
                     if regime_sequence:
                         regime_changes_count = regime_result.get('regime_changes_count', 0)
@@ -1183,6 +1239,45 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
                 self.processing_times['indicators'].append(phase2_time)
                 self.processing_times['features'].append(phase3_time)
                 self.processing_times['signals'].append(phase4_time)
+
+                # --- CP1: Pipeline Trace - Feature/Indicator Enrichment ---
+                # Placed here (after ALL processing paths) so it fires regardless
+                # of whether the single-regime or multi-regime branch was taken.
+                try:
+                    from core_engine.utils.pipeline_trace import get_tracer, CP1_ENRICHMENT
+                    _cp1_tracer = get_tracer()
+                    if _cp1_tracer.enabled:
+                        import numpy as _cp1_np
+                        _cp1_nan_count = (
+                            int(features_df.select_dtypes(include=[_cp1_np.number]).isna().sum().sum())
+                            if features_df is not None and not features_df.empty
+                            else 0
+                        )
+                        _cp1_tracer.emit(
+                            trace_id=f"enrich_{symbol}",
+                            checkpoint=CP1_ENRICHMENT,
+                            component="ProcessingPipelineOrchestrator",
+                            method="_process_single_symbol",
+                            symbol=symbol,
+                            bar_timestamp=(
+                                features_df.index[-1]
+                                if features_df is not None and not features_df.empty
+                                   and hasattr(features_df.index, '__len__') and len(features_df) > 0
+                                else "unknown"
+                            ),
+                            input_data=symbol_data,
+                            output_data=features_df,
+                            metadata={
+                                "indicator_columns": sorted(indicators_df.columns.tolist()) if indicators_df is not None and not indicators_df.empty else [],
+                                "feature_columns": sorted(features_df.columns.tolist()) if features_df is not None and not features_df.empty else [],
+                                "nan_count": _cp1_nan_count,
+                                "phase2_time_s": phase2_time,
+                                "phase3_time_s": phase3_time,
+                            },
+                            elapsed_ms=(phase2_time + phase3_time) * 1000,
+                        )
+                except Exception:
+                    pass  # Tracing must never break the pipeline
 
                 enriched = EnrichedMarketData(
                     symbol=symbol, timeframe=timeframe, raw_data=symbol_data,
@@ -1277,37 +1372,15 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
         # Merge liquidity features
         features_df = self._merge_liquidity_features(features_df, symbol)
 
-        # --- CP1: Pipeline Trace - Feature/Indicator Enrichment ---
-        from core_engine.utils.pipeline_trace import get_tracer, CP1_ENRICHMENT
-        _cp1_tracer = get_tracer()
-        if _cp1_tracer.enabled:
-            import numpy as _cp1_np
-            _cp1_nan_count = int(features_df.select_dtypes(include=[_cp1_np.number]).isna().sum().sum()) if features_df is not None and not features_df.empty else 0
-            _cp1_tracer.emit(
-                trace_id=f"enrich_{symbol}",
-                checkpoint=CP1_ENRICHMENT,
-                component="ProcessingPipelineOrchestrator",
-                method="_process_pipeline_stages",
-                symbol=symbol,
-                bar_timestamp=features_df.index[-1] if features_df is not None and not features_df.empty and hasattr(features_df.index, '__len__') and len(features_df) > 0 else "unknown",
-                input_data=symbol_data,
-                output_data=features_df,
-                metadata={
-                    "indicator_columns": sorted(indicators_df.columns.tolist()) if indicators_df is not None else [],
-                    "feature_columns": sorted(features_df.columns.tolist()) if features_df is not None else [],
-                    "nan_count": _cp1_nan_count,
-                    "phase2_time_s": phase2_time,
-                    "phase3_time_s": phase3_time,
-                },
-                elapsed_ms=(phase2_time + phase3_time) * 1000,
-            )
+        # NOTE: CP1 emission moved to _process_single_symbol() so it fires
+        # regardless of whether single-regime or multi-regime path was taken.
 
-        # Phase 4: Generate signals
-        phase4_start = datetime.now()
-        signals_df = await self._generate_signals(features_df)
-        phase4_time = (datetime.now() - phase4_start).total_seconds()
+        # Phase 4 (signal generation) removed — strategies own signal generation.
+        # Return features_df as signals_df for backward compat with callers
+        # that expect a 6-tuple.
+        signals_df = features_df
 
-        return indicators_df, features_df, signals_df, phase2_time, phase3_time, phase4_time
+        return indicators_df, features_df, signals_df, phase2_time, phase3_time, 0.0
 
     # ================================================================
     # Internal Pipeline Stages
@@ -1501,50 +1574,13 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
             return data.copy()
 
     async def _generate_signals(self, data: pd.DataFrame) -> pd.DataFrame:
+        """DEPRECATED — Signal generation is the strategy's responsibility (Rule 7).
+
+        This method is a no-op pass-through retained only for backward
+        compatibility with external callers (e.g., persist_enriched_data.py).
+        The pipeline now terminates at Phase 3 (Feature Engineering).
         """
-        Phase 4: Generate preliminary trading signals
-
-        Args:
-            data: DataFrame with OHLCV + indicators + features
-
-        Returns:
-            DataFrame with OHLCV + indicators + features (signals are generated separately as TradingSignal objects)
-
-        Note: generate_signals() returns List[TradingSignal], not a DataFrame.
-        The enriched DataFrame (features + indicators) is what strategies consume.
-        TradingSignal objects are generated separately by strategies.
-        """
-        if not self.signal_generator:
-            logger.warning("Signal generator not available, returning data as-is")
-            return data.copy()
-
-        try:
-            # P1-7 FIX: Capture signal generator output and attach signal scores
-            # to the DataFrame so downstream strategies can consume them.
-            # Previously, the List[TradingSignal] was discarded entirely.
-            trading_signals = self.signal_generator.generate_signals(data)
-            result_df = data.copy()
-
-            # Attach signal metadata to the DataFrame for strategy consumption
-            if trading_signals:
-                for signal in trading_signals:
-                    symbol = getattr(signal, 'symbol', None)
-                    strength = getattr(signal, 'strength', getattr(signal, 'confidence', 0.0))
-                    signal_type = getattr(signal, 'signal_type', 'unknown')
-                    if symbol:
-                        # Add signal columns for each symbol's signals
-                        mask = result_df.get('symbol', pd.Series()) == symbol
-                        if mask.any():
-                            result_df.loc[mask, 'signal_strength'] = strength
-                            result_df.loc[mask, 'signal_type'] = str(signal_type)
-
-                logger.debug(f"📡 Attached {len(trading_signals)} signal(s) to DataFrame")
-
-            return result_df
-
-        except Exception as e:
-            logger.error(f"Signal generation failed: {e}")
-            return data.copy()
+        return data
 
     # ================================================================
     # Regime-Segmented Processing Methods (Rule 2 Enhancement)
@@ -2061,10 +2097,9 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
             if _numeric_feat_cols:
                 features_df[_numeric_feat_cols] = features_df[_numeric_feat_cols].ffill()
 
-        # PHASE 4: Generate signals (process entire combined DataFrame)
-        # Signals are already filtered bar-by-bar in _filter_signals()
+        # Phase 4 (signal generation) removed — strategies own signal generation.
         features_df = self._merge_liquidity_features(features_df, symbol)
-        signals_df = await self._generate_signals(features_df)
+        signals_df = features_df
 
         # Track processing times
         # Note: Segment processing time is distributed across multiple calls

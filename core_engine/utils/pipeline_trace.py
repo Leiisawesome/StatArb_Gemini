@@ -53,14 +53,18 @@ logger = logging.getLogger(__name__)
 # Checkpoint enum constants
 # ---------------------------------------------------------------------------
 CP0_MARKET_DATA = "CP0"
+CP0r_REGIME_DETECT = "CP0r"
 CP1_ENRICHMENT = "CP1"
+CP1s_BAR_SLICE = "CP1s"
 CP2_SIGNAL_GEN = "CP2"
+CP2q_QUANTITY_SIZING = "CP2q"
 CP3_RISK_AUTH = "CP3"
 CP4_ORDER_CREATE = "CP4"
 CP5_FILL = "CP5"
 CP6_POSITION_UPDATE = "CP6"
 CP7_PNL = "CP7"
 
+# Primary checkpoints (the original CP0-CP7 funnel)
 ALL_CHECKPOINTS = [
     CP0_MARKET_DATA,
     CP1_ENRICHMENT,
@@ -71,6 +75,16 @@ ALL_CHECKPOINTS = [
     CP6_POSITION_UPDATE,
     CP7_PNL,
 ]
+
+# Sub-checkpoints for fine-grained plumbing inspection
+SUB_CHECKPOINTS = [
+    CP0r_REGIME_DETECT,
+    CP1s_BAR_SLICE,
+    CP2q_QUANTITY_SIZING,
+]
+
+# All checkpoints including sub-checkpoints
+ALL_CHECKPOINTS_EXTENDED = ALL_CHECKPOINTS + SUB_CHECKPOINTS
 
 # Checkpoint ordering map for verification
 CHECKPOINT_ORDER = {cp: idx for idx, cp in enumerate(ALL_CHECKPOINTS)}
@@ -410,21 +424,35 @@ class PipelineTracer:
         """Return checkpoint counts in pipeline order (the 'funnel')."""
         return {cp: self._stats["checkpoints_by_type"].get(cp, 0) for cp in ALL_CHECKPOINTS}
 
+    def get_extended_funnel_summary(self) -> Dict[str, int]:
+        """Return checkpoint counts including sub-checkpoints."""
+        ordered = [
+            CP0_MARKET_DATA, CP0r_REGIME_DETECT,
+            CP1_ENRICHMENT, CP1s_BAR_SLICE,
+            CP2_SIGNAL_GEN, CP2q_QUANTITY_SIZING,
+            CP3_RISK_AUTH,
+            CP4_ORDER_CREATE, CP5_FILL, CP6_POSITION_UPDATE, CP7_PNL,
+        ]
+        return {cp: self._stats["checkpoints_by_type"].get(cp, 0) for cp in ordered}
+
     def print_funnel(self) -> str:
         """Print a human-readable pipeline funnel summary."""
-        funnel = self.get_funnel_summary()
+        funnel = self.get_extended_funnel_summary()
         lines = ["Pipeline Trace Funnel", "=" * 50]
         labels = {
             CP0_MARKET_DATA: "Market Data Ingestion",
+            CP0r_REGIME_DETECT: "  └─ Regime Detection",
             CP1_ENRICHMENT: "Feature/Indicator Enrichment",
+            CP1s_BAR_SLICE: "  └─ Bar Feature Slice (per-bar)",
             CP2_SIGNAL_GEN: "Signal Generation",
+            CP2q_QUANTITY_SIZING: "  └─ Quantity Sizing",
             CP3_RISK_AUTH: "Risk Authorization (6-Gate)",
             CP4_ORDER_CREATE: "Order Creation (OMS)",
             CP5_FILL: "Execution / Fill",
             CP6_POSITION_UPDATE: "Position Book Update",
             CP7_PNL: "PnL Calculation",
         }
-        for cp in ALL_CHECKPOINTS:
+        for cp in funnel:
             count = funnel.get(cp, 0)
             label = labels.get(cp, cp)
             lines.append(f"  {cp}: {count:>6}  {label}")

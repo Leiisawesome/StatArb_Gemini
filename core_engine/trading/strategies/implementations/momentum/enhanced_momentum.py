@@ -695,7 +695,25 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
 
             # --- ADS v3.1: ENHANCED COMPOSITE ENTRY LOGIC ---
             # Use multi-horizon momentum and composite indicators for high-probability setups.
-            
+
+            # ================================================================
+            # OPENING RANGE FILTER (ORB)
+            # The first N minutes after market open are dominated by overnight
+            # order imbalance clearing, not information-driven momentum.
+            # Momentum indicators during ORB measure gap continuation, which
+            # reverses more often than it persists.  Block entries until the
+            # opening range has been established.
+            # ================================================================
+            orb_minutes = int(getattr(self.config, 'orb_minutes', 15))
+            if orb_minutes > 0:
+                bar_ts = current_data.name if isinstance(current_data.name, datetime) else None
+                if bar_ts is not None:
+                    market_open_minutes = 9 * 60 + 30  # 09:30 ET
+                    bar_minutes = bar_ts.hour * 60 + bar_ts.minute
+                    minutes_since_open = bar_minutes - market_open_minutes
+                    if 0 <= minutes_since_open < orb_minutes:
+                        return None
+
             # Get indicators for the current bar
             indicators = self.indicators[symbol]
 
@@ -1120,6 +1138,18 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                             # Microstructure Quality Score (v3.3)
                             'entry_mqs': getattr(self, '_current_mqs', 1.0),
                             'entry_mqs_penalty': getattr(self, '_current_mqs_penalty', 1.0),
+                            # Causal chain exit contract — top-level fields consumed
+                            # by multi_exit_engine for health computation.
+                            'entry_flow_confirmed': bool(
+                                getattr(self, '_last_confirmation', {}).get('has_flow_confirmation', False)
+                            ),
+                            'entry_alignment_score': float(
+                                getattr(self, '_last_entry_diag', {}).get('L1_alignment', {}).get('score', 0.0)
+                            ),
+                            'entry_short_momentum_col': f'momentum_{self.config.short_period}',
+                            'entry_medium_momentum_col': f'momentum_{self.config.medium_period}',
+                            # Structural Entry Diagnostics (3-level causal chain)
+                            'entry_diag': getattr(self, '_last_entry_diag', {}),
                         }
                     )
                     signal.additional_data.update(
@@ -1131,6 +1161,7 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                             ads_r=ads_ctx.get("ads_regime_vector_obj"),
                         )
                     )
+
                     return signal
 
             # No entry signal
@@ -1819,6 +1850,19 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
         pct_threshold = float(thresholds.get("pct_threshold", BASE_PCT_THRESHOLD))
         adjustment_reason = thresholds.get("adjustment_reason", "none")
 
+        # ================================================================
+        # THRESHOLD FLOOR: Ensure minimum selectivity
+        # Thresholds below these floors are mathematically vacuous —
+        # a z-score > 0.0 passes ~50% of bars, providing no alpha
+        # selectivity.  The floor ensures the composite entry is a
+        # genuine filter even when config uses permissive test values.
+        # ================================================================
+        z_floor = float(getattr(self.config, "composite_z_floor", 0.5))
+        pct_floor = float(getattr(self.config, "composite_pct_floor", 60.0))
+        long_threshold = max(long_threshold, z_floor)
+        short_threshold = max(short_threshold, z_floor)
+        pct_threshold = max(pct_threshold, pct_floor)
+
         # CRITICAL FIX #2: Pre-Inflection Detection
         inflection_data = None
         if enriched_data is not None and current_idx is not None:
@@ -1843,6 +1887,15 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
             )
             # Avoid per-bar debug logging inside alpha.
 
+        # ================================================================
+        # LEVEL 1: MULTI-HORIZON MOMENTUM ALIGNMENT
+        # Short and medium horizons must agree on direction above a noise
+        # floor.  Without alignment, there is no momentum — only noise.
+        # ================================================================
+        alignment = self._check_momentum_alignment(enriched_data, current_idx)
+        if not alignment['long_aligned'] and not alignment['short_aligned']:
+            return False, None
+
         # LONG entry: Composite threshold + structure + momentum
         long_condition_met = (
             composite_z > long_threshold and
@@ -1850,51 +1903,71 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
             momentum_slope > 0  # NEW: Momentum must be trending up
         )
 
-        # Add inflection boost (allows earlier entry if inflection detected)
+        # Inflection boost: lower thresholds if a momentum inflection is detected.
+        # Now functional because thresholds have meaningful floors (> 0).
         if inflection_data and inflection_data.get('inflection_detected') and inflection_data.get('inflection_type') == 'bullish':
-            # Avoid per-bar INFO spam; diagnostic lives in signal additional_data if emitted.
             long_condition_met = (
-                composite_z > long_threshold * 0.8 and  # 20% lower threshold if inflection
-                composite_pct > pct_threshold * 0.9 and  # 10% lower percentile
+                composite_z > long_threshold * 0.8 and
+                composite_pct > pct_threshold * 0.9 and
                 inflection_data.get('momentum_accel', 0) > 0
             )
 
-        # Add structure validation (prefer higher lows or pivot confirmation)
-        if structure_data:
-            structure_confirms_long = (
-                structure_data.get('structure_type') == 'higher_lows' or
-                structure_data.get('pivot_confirmed') or
-                structure_data.get('basing_detected')
+        # ================================================================
+        # LEVEL 3: STRUCTURAL CONFIRMATION (LONG)
+        # At least one structural signal must confirm the setup:
+        # price structure, volume expansion, or volatility breakout.
+        # Without confirmation, require a much stronger z-score.
+        # ================================================================
+        if long_condition_met:
+            confirmation = self._check_structural_confirmation(
+                symbol, enriched_data, current_idx, 'BUY'
             )
-            if not structure_confirms_long:
-                # Avoid per-bar debug logging inside alpha.
-                long_condition_met = long_condition_met and composite_z > long_threshold * 1.2  # Require stronger signal
+            self._last_confirmation = confirmation
+            if not confirmation['confirmed']:
+                unconfirmed_mult = float(getattr(self.config, "unconfirmed_z_multiplier", 2.0))
+                long_condition_met = composite_z > long_threshold * unconfirmed_mult
+
+            # MOMENTUM STALL GUARD: When flow is absent and momentum slope
+            # is near-zero, the entry is a late-entry trap — backward-looking
+            # price structure from the previous wave without current
+            # participant commitment.  Block entry.
+            if long_condition_met and not confirmation.get('has_flow_confirmation', False):
+                stall_threshold = float(getattr(self.config, 'momentum_stall_threshold', 0.0003))
+                if momentum_slope < stall_threshold:
+                    long_condition_met = False
 
         # SHORT entry: Composite threshold + structure + momentum
         short_condition_met = (
             composite_z < -short_threshold and
             composite_pct < (100 - pct_threshold) and
-            momentum_slope < 0  # NEW: Momentum must be trending down
+            momentum_slope < 0
         )
 
-        # Add inflection boost for shorts
+        # Inflection boost for shorts
         if inflection_data and inflection_data.get('inflection_detected') and inflection_data.get('inflection_type') == 'bearish':
-            # Avoid per-bar INFO spam; diagnostic lives in signal additional_data if emitted.
             short_condition_met = (
                 composite_z < -short_threshold * 0.8 and
                 composite_pct < (100 - pct_threshold * 0.9) and
                 inflection_data.get('momentum_accel', 0) < 0
             )
 
-        # Add structure validation for shorts
-        if structure_data:
-            structure_confirms_short = (
-                structure_data.get('structure_type') == 'lower_highs' or
-                structure_data.get('pivot_confirmed')
+        # ================================================================
+        # LEVEL 3: STRUCTURAL CONFIRMATION (SHORT)
+        # ================================================================
+        if short_condition_met:
+            confirmation = self._check_structural_confirmation(
+                symbol, enriched_data, current_idx, 'SELL'
             )
-            if not structure_confirms_short:
-                # Avoid per-bar debug logging inside alpha.
-                short_condition_met = short_condition_met and composite_z < -short_threshold * 1.2
+            self._last_confirmation = confirmation
+            if not confirmation['confirmed']:
+                unconfirmed_mult = float(getattr(self.config, "unconfirmed_z_multiplier", 2.0))
+                short_condition_met = composite_z < -short_threshold * unconfirmed_mult
+
+            # MOMENTUM STALL GUARD (short side mirror)
+            if short_condition_met and not confirmation.get('has_flow_confirmation', False):
+                stall_threshold = float(getattr(self.config, 'momentum_stall_threshold', 0.0003))
+                if abs(momentum_slope) < stall_threshold:
+                    short_condition_met = False
 
         # Transaction-based confirmation (optional)
         if bool(getattr(self.config, "enable_transactions_confirm", False)):
@@ -1917,6 +1990,31 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                 long_condition_met = long_condition_met and composite_z > long_threshold * 1.2
                 short_condition_met = short_condition_met and composite_z < -short_threshold * 1.2
 
+        # Store entry diagnostics for signal metadata + tracing
+        side_label = "LONG" if long_condition_met else ("SHORT" if short_condition_met else None)
+        if side_label:
+            self._last_entry_diag = {
+                'side': side_label,
+                'L1_alignment': {
+                    'short_m': round(alignment.get('short_m', 0), 6),
+                    'medium_m': round(alignment.get('medium_m', 0), 6),
+                    'long_m': round(alignment.get('long_m', 0), 6),
+                    'dominant': alignment.get('dominant_direction', 'mixed'),
+                    'score': round(alignment.get('alignment_score', 0), 4),
+                },
+                'L2_composite': {
+                    'composite_z': round(float(composite_z), 4),
+                    'composite_pct': round(float(composite_pct), 2),
+                    'z_threshold': round(float(long_threshold if long_condition_met else short_threshold), 4),
+                    'pct_threshold': round(float(pct_threshold), 2),
+                    'momentum_slope': round(float(momentum_slope), 6),
+                    'inflection_active': bool(
+                        inflection_data and inflection_data.get('inflection_detected')
+                    ),
+                },
+                'L3_confirmation': getattr(self, '_last_confirmation', {}),
+            }
+
         if long_condition_met:
             return True, SignalType.LONG_ENTRY
         if short_condition_met:
@@ -1925,6 +2023,235 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
         return False, None
 
     # NOTE (Rule 7): Exit authority lives in CentralRiskManager (+ exit policy). Momentum alpha is entry-only.
+
+    # ========================================
+    # STRUCTURAL ENTRY VALIDATION (Levels 1 & 3)
+    # ========================================
+
+    def _check_momentum_alignment(
+        self,
+        enriched_data: pd.DataFrame,
+        current_idx: int,
+    ) -> Dict[str, Any]:
+        """
+        Level 1: Multi-horizon momentum alignment check.
+
+        A genuine momentum setup requires at least the short and medium
+        horizons to agree on direction above a noise floor.  Conflicting
+        horizons indicate chop or mean-reversion — not momentum.
+
+        The long horizon provides a conviction bonus but does NOT block
+        entry (at 1-min resolution, the 50-bar horizon can legitimately
+        lag at trend inflection points).
+
+        Returns:
+            dict with long_aligned, short_aligned, alignment_score,
+            dominant_direction, and per-horizon values.
+        """
+        result = {
+            'long_aligned': False,
+            'short_aligned': False,
+            'alignment_score': 0.0,
+            'dominant_direction': 'mixed',
+            'short_m': 0.0,
+            'medium_m': 0.0,
+            'long_m': 0.0,
+        }
+        if enriched_data is None or current_idx is None:
+            return result
+
+        actual_idx = current_idx if current_idx >= 0 else len(enriched_data) + current_idx
+        if actual_idx < 0 or actual_idx >= len(enriched_data):
+            return result
+
+        short_col = f'momentum_{self.config.short_period}'
+        medium_col = f'momentum_{self.config.medium_period}'
+        long_col = f'momentum_{self.config.long_period}'
+
+        def _get_mom(col: str, period: int) -> float:
+            if col in enriched_data.columns:
+                val = enriched_data[col].iloc[actual_idx]
+                return float(val) if not pd.isna(val) else 0.0
+            # Fallback: simple return
+            if 'close' in enriched_data.columns and actual_idx >= period:
+                c0 = float(enriched_data['close'].iloc[actual_idx - period])
+                c1 = float(enriched_data['close'].iloc[actual_idx])
+                return (c1 / c0 - 1.0) if c0 > 0 else 0.0
+            return 0.0
+
+        short_m = _get_mom(short_col, int(self.config.short_period))
+        medium_m = _get_mom(medium_col, int(self.config.medium_period))
+        long_m = _get_mom(long_col, int(self.config.long_period))
+
+        result['short_m'] = short_m
+        result['medium_m'] = medium_m
+        result['long_m'] = long_m
+
+        # Noise floor: momentum below this is indistinguishable from noise
+        noise_floor = float(getattr(self.config, 'momentum_noise_floor', 0.001))
+
+        # Primary alignment: short AND medium must agree (actionable horizons)
+        short_pos = short_m > noise_floor
+        short_neg = short_m < -noise_floor
+        medium_pos = medium_m > noise_floor
+        medium_neg = medium_m < -noise_floor
+
+        # Long horizon: direction only (no magnitude requirement)
+        long_pos = long_m > 0
+        long_neg = long_m < 0
+
+        long_aligned = short_pos and medium_pos
+        short_aligned = short_neg and medium_neg
+
+        # Alignment score: weighted directional agreement across horizons
+        signs = [float(np.sign(short_m)), float(np.sign(medium_m)), float(np.sign(long_m))]
+        weights = [0.5, 0.3, 0.2]  # Short horizon matters most at 1-min
+        weighted_sign = sum(s * w for s, w in zip(signs, weights))
+        alignment_score = abs(weighted_sign)
+
+        # Conviction bonus if long horizon confirms
+        if long_aligned and long_pos:
+            alignment_score = min(alignment_score * 1.2, 1.0)
+        elif short_aligned and long_neg:
+            alignment_score = min(alignment_score * 1.2, 1.0)
+
+        if long_aligned:
+            dominant = 'long'
+        elif short_aligned:
+            dominant = 'short'
+        else:
+            dominant = 'mixed'
+
+        result['long_aligned'] = long_aligned
+        result['short_aligned'] = short_aligned
+        result['alignment_score'] = float(alignment_score)
+        result['dominant_direction'] = dominant
+        return result
+
+    def _check_structural_confirmation(
+        self,
+        symbol: str,
+        enriched_data: pd.DataFrame,
+        current_idx: int,
+        side: str,
+    ) -> Dict[str, Any]:
+        """
+        Level 3: Structural confirmation of momentum setup.
+
+        A momentum entry needs observable structural evidence that the
+        setup is genuine (not noise).  The three signal types have
+        different causal weight:
+
+          1. Volume Expansion (FLOW) — directional flow alignment with
+             above-average volume.  This is the strongest confirmation
+             because it indicates *participant commitment*: real buyers
+             or sellers are stepping in.
+
+          2. Price Structure (STRUCTURE) — higher lows, pivot, basing.
+             Indicates supply/demand imbalance is resolving in a
+             directional pattern.
+
+          3. Volatility Breakout (STATISTICAL) — short-term vol expanding
+             after contraction.  Weakest on its own: it indicates price
+             displacement, but not necessarily sustained directional flow.
+
+        Confirmation hierarchy:
+          - volume_expansion present         → confirmed (flow is causal)
+          - price_structure + vol_breakout   → confirmed (structure + energy)
+          - price_structure alone            → confirmed (structure is real)
+          - volatility_breakout alone        → NOT confirmed (displacement
+            without flow is ambiguous — could be a one-bar spike or a
+            reversal).  Entry still possible but requires higher z-score
+            via the unconfirmed_z_multiplier.
+
+        Returns:
+            dict with confirmed, confirmations, confirmation_count,
+            has_flow_confirmation.
+        """
+        confirmations = []
+        actual_idx = current_idx if current_idx >= 0 else len(enriched_data) + current_idx
+
+        # 1. Price Structure (reuses existing _detect_price_structure)
+        try:
+            if actual_idx >= 7:
+                sd = self._detect_price_structure(symbol, enriched_data, actual_idx, lookback=5)
+                if side == 'BUY':
+                    if (sd.get('structure_type') == 'higher_lows'
+                            or sd.get('pivot_confirmed')
+                            or sd.get('basing_detected')):
+                        confirmations.append('price_structure')
+                else:
+                    if (sd.get('structure_type') == 'lower_highs'
+                            or sd.get('pivot_confirmed')):
+                        confirmations.append('price_structure')
+        except Exception:
+            pass
+
+        # 2. Volume Expansion with directional flow alignment
+        has_flow = False
+        try:
+            row = enriched_data.iloc[actual_idx]
+            vol_ratio = float(row.get('volume_ratio', 0.0))
+            vol_confirm_threshold = float(getattr(self.config, 'volume_confirm_threshold', 0.3))
+            buy_vol_pct = float(row.get('buy_volume_pct', 0.5))
+
+            if side == 'BUY':
+                if vol_ratio > vol_confirm_threshold and buy_vol_pct > 0.55:
+                    confirmations.append('volume_expansion')
+                    has_flow = True
+            else:
+                if vol_ratio > vol_confirm_threshold and (1.0 - buy_vol_pct) > 0.55:
+                    confirmations.append('volume_expansion')
+                    has_flow = True
+        except Exception:
+            pass
+
+        # 3. Volatility Breakout — DIRECTION-AWARE
+        #
+        # Vol expansion must be in the SAME direction as the intended trade.
+        # A downward vol expansion on a BUY is a counter-signal (bearish
+        # energy release), not a confirmation.  We check the sign of the
+        # short-window mean return against the trade direction.
+        try:
+            if 'close' in enriched_data.columns and actual_idx >= 20:
+                prices = enriched_data['close'].iloc[max(0, actual_idx - 20):actual_idx + 1]
+                rets = prices.pct_change().dropna()
+                if len(rets) >= 10:
+                    short_rets = rets.tail(5)
+                    short_vol = float(short_rets.std())
+                    long_vol = float(rets.iloc[:-5].std()) if len(rets) > 5 else short_vol
+                    if long_vol > 1e-8:
+                        vol_ratio_atr = short_vol / long_vol
+                        vol_expansion_thresh = float(getattr(
+                            self.config, 'vol_expansion_threshold', 1.3))
+                        if vol_ratio_atr > vol_expansion_thresh:
+                            # Direction check: is the vol expansion aligned
+                            # with the trade direction?
+                            short_mean_ret = float(short_rets.mean())
+                            direction_aligned = (
+                                (side == 'BUY' and short_mean_ret > 0) or
+                                (side == 'SELL' and short_mean_ret < 0)
+                            )
+                            if direction_aligned:
+                                confirmations.append('volatility_breakout')
+                            # else: vol expanded AGAINST trade direction —
+                            # this is bearish energy on a BUY (or vice versa),
+                            # not a confirmation.
+        except Exception:
+            pass
+
+        # Confirmation hierarchy:
+        # - Any flow-based confirmation → confirmed
+        # - price_structure (without flow) → confirmed (structure is real)
+        # - volatility_breakout ALONE → NOT confirmed (displacement ≠ flow)
+        confirmed = has_flow or ('price_structure' in confirmations)
+
+        return {
+            'confirmed': confirmed,
+            'confirmations': confirmations,
+            'confirmation_count': len(confirmations),
+            'has_flow_confirmation': has_flow,
+        }
 
     # ========================================
     # CRITICAL FIX #1-3: MICRO-STRUCTURE & PRE-INFLECTION DETECTION

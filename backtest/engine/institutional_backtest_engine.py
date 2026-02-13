@@ -1321,7 +1321,7 @@ class InstitutionalBacktestEngine:
         try:
             from core_engine.processing.pipeline_orchestrator import ProcessingPipelineOrchestrator
             from core_engine.config import (
-                DataConfig, IndicatorConfig, FeatureConfig, SignalConfig
+                DataConfig, IndicatorConfig, FeatureConfig,
             )
 
             # Create pipeline configs (use backtest config for customization)
@@ -1344,15 +1344,13 @@ class InstitutionalBacktestEngine:
             # Use default feature config
             feature_config = FeatureConfig()
 
-            # Use default signal config
-            signal_config = SignalConfig()
-
             # Create ProcessingPipelineOrchestrator
+            # NOTE: signal_config removed — signal generation is the strategy's
+            # responsibility (Rule 7).  Pipeline delivers enriched DataFrames.
             self.pipeline_orchestrator = ProcessingPipelineOrchestrator(
                 data_config=data_config,
                 indicator_config=indicator_config,
                 feature_config=feature_config,
-                signal_config=signal_config,
                 data_manager=self.data_manager
             )
 
@@ -1379,7 +1377,7 @@ class InstitutionalBacktestEngine:
             # Extract internal components for backward compatibility
             self.indicators_engine = self.pipeline_orchestrator.indicators_engine
             self.feature_engineer = self.pipeline_orchestrator.feature_engineer
-            self.signal_generator = self.pipeline_orchestrator.signal_generator
+            # signal_generator no longer extracted — strategies own signal generation
 
             logger.info(f"✅ ProcessingPipelineOrchestrator registered (component_id: {component_id})")
             logger.info(f"   Initialization Order: 15 (after LiquidityEngine=12)")
@@ -3607,6 +3605,56 @@ class InstitutionalBacktestEngine:
                                 _fill_price = _fc_fill.fill_price
                                 _total_cost_bps = _fc_fill.costs.total_cost_bps
 
+                            # --- CP4 + CP5: Pipeline Trace for backtest-end close ---
+                            from core_engine.utils.pipeline_trace import get_tracer, CP4_ORDER_CREATE, CP5_FILL
+                            _ec_tracer = get_tracer()
+                            if _ec_tracer.enabled:
+                                _ec_trace_id = f"end_close_{sym}_{timestamp}"
+                                _ec_tracer.emit(
+                                    trace_id=_ec_trace_id,
+                                    checkpoint=CP4_ORDER_CREATE,
+                                    component="InstitutionalBacktestEngine",
+                                    method="backtest_end_close",
+                                    symbol=sym,
+                                    bar_timestamp=str(timestamp),
+                                    input_data={
+                                        "authorization_id": f'END_CLOSE_{sym}',
+                                        "symbol": sym,
+                                        "side": close_side,
+                                        "quantity": float(close_qty),
+                                        "decision_price": float(sym_close),
+                                        "execution_price": float(_fill_price),
+                                        "strategy_id": "BACKTEST_END_CLOSE",
+                                    },
+                                    output_data={"success": True, "backtest_end_close": True},
+                                    metadata={"regime": "backtest_end"},
+                                )
+                                _ec_tracer.emit(
+                                    trace_id=_ec_trace_id,
+                                    checkpoint=CP5_FILL,
+                                    component="InstitutionalBacktestEngine",
+                                    method="backtest_end_close",
+                                    symbol=sym,
+                                    bar_timestamp=str(timestamp),
+                                    input_data={
+                                        "fill_id": _ec_trace_id,
+                                        "symbol": sym,
+                                        "side": close_side,
+                                        "quantity": float(close_qty),
+                                        "decision_price": float(sym_close),
+                                        "market_price": float(sym_close),
+                                        "price": float(_fill_price),
+                                        "fill_price": float(_fill_price),
+                                        "success": True,
+                                    },
+                                    output_data={
+                                        "total_cost_bps": float(_total_cost_bps),
+                                    },
+                                    metadata={
+                                        "backtest_end_close": True,
+                                    },
+                                )
+
                             # G3 FIX: Capture return value to get realized_pnl.
                             position_update = await self.risk_manager.update_position(
                                 symbol=sym, side=close_side, quantity=close_qty,
@@ -4052,6 +4100,63 @@ class InstitutionalBacktestEngine:
                     'liquidity_score': self.DEFAULT_LIQUIDITY_SCORE,
                 }
                 fill_price_for_pnl = fill_price_fallback
+
+            # --- CP4 + CP5: Pipeline Trace for EOD liquidation path ---
+            from core_engine.utils.pipeline_trace import get_tracer, CP4_ORDER_CREATE, CP5_FILL
+            _eod_tracer = get_tracer()
+            if _eod_tracer.enabled:
+                _eod_trace_id = execution.get('fill_id') or execution.get('authorization_id') or f"eod_{symbol}_{timestamp}"
+                _eod_tracer.emit(
+                    trace_id=_eod_trace_id,
+                    checkpoint=CP4_ORDER_CREATE,
+                    component="InstitutionalBacktestEngine",
+                    method="_check_eod_liquidation",
+                    symbol=symbol,
+                    bar_timestamp=str(timestamp),
+                    input_data={
+                        "authorization_id": execution.get('authorization_id', ''),
+                        "symbol": symbol,
+                        "side": side,
+                        "quantity": float(qty),
+                        "decision_price": float(close_price),
+                        "execution_price": float(execution['fill_price']),
+                        "strategy_id": execution.get('strategy_id', 'EOD_LIQUIDATION'),
+                    },
+                    output_data={"success": True, "eod_liquidation": True},
+                    metadata={"regime": execution.get('regime', 'eod_close')},
+                )
+                _eod_tracer.emit(
+                    trace_id=_eod_trace_id,
+                    checkpoint=CP5_FILL,
+                    component="InstitutionalBacktestEngine",
+                    method="_check_eod_liquidation",
+                    symbol=symbol,
+                    bar_timestamp=str(timestamp),
+                    input_data={
+                        "fill_id": execution.get('fill_id', ''),
+                        "symbol": symbol,
+                        "side": side,
+                        "quantity": float(qty),
+                        "decision_price": float(close_price),
+                        "market_price": float(execution.get('market_price', close_price)),
+                        "price": float(execution['fill_price']),
+                        "fill_price": float(execution['fill_price']),
+                        "success": True,
+                    },
+                    output_data={
+                        "total_cost_bps": float(execution.get('total_cost_bps', 0)),
+                        "spread_cost_bps": float(execution.get('spread_cost_bps', 0)),
+                        "market_impact_bps": float(execution.get('market_impact_bps', 0)),
+                        "slippage_bps": float(execution.get('slippage_bps', 0)),
+                        "commission_bps": float(execution.get('commission_bps', 0)),
+                        "total_cost_dollars": float(execution.get('total_cost_dollars', 0)),
+                        "implementation_shortfall_bps": float(execution.get('implementation_shortfall_bps', 0)),
+                    },
+                    metadata={
+                        "eod_liquidation": True,
+                        "arrival_cost_bps": float(execution.get('arrival_cost_bps', 0)),
+                    },
+                )
 
             # Update position via CentralRiskManager (Rule 4)
             # H4: Pass backtest_fill=True to skip CRM's internal cost deduction
@@ -4631,10 +4736,60 @@ class InstitutionalBacktestEngine:
                             except Exception as _merge_err:
                                 logger.debug(f"Feature column merge for {sym}: {_merge_err}")
 
-                        # NOTE: CP0 (raw market data) and CP1 (enrichment) are emitted
-                        # during the pre-calculation phase in run_backtest(), before the
-                        # bar loop starts.  The enriched_data_per_symbol here is a slice
-                        # of the already pre-calculated indicator DataFrame.
+                        # --- CP1s: Pipeline Trace - Bar Feature Slice (lookahead guard) ---
+                        # This is the most dangerous data handoff in the pipeline.
+                        # Records what the strategy actually receives so post-hoc
+                        # auditing can verify no-lookahead for every single bar.
+                        try:
+                            from core_engine.utils.pipeline_trace import get_tracer, CP1s_BAR_SLICE
+                            _cp1s_tracer = get_tracer()
+                            if _cp1s_tracer.enabled:
+                                # Determine the last timestamp in the feature slice
+                                _primary_sym = self.config.symbols[0] if self.config.symbols else None
+                                _slice_df = enriched_data_per_symbol.get(_primary_sym)
+                                _slice_end_ts = None
+                                _slice_rows = 0
+                                if _slice_df is not None and not _slice_df.empty:
+                                    _slice_rows = len(_slice_df)
+                                    if 'timestamp' in _slice_df.columns:
+                                        _slice_end_ts = str(_slice_df['timestamp'].iloc[-1])
+                                    elif hasattr(_slice_df.index, 'max'):
+                                        _slice_end_ts = str(_slice_df.index[-1])
+
+                                _lookahead_safe = True
+                                if _slice_end_ts is not None:
+                                    try:
+                                        _slice_end_pd = pd.Timestamp(_slice_end_ts)
+                                        _bar_ts_pd = pd.Timestamp(bar_timestamp)
+                                        _lookahead_safe = _slice_end_pd < _bar_ts_pd
+                                    except Exception:
+                                        pass
+
+                                _cp1s_tracer.emit(
+                                    trace_id=f"slice_{_primary_sym}_{bar_timestamp}",
+                                    checkpoint=CP1s_BAR_SLICE,
+                                    component="InstitutionalBacktestEngine",
+                                    method="_process_single_bar",
+                                    symbol=_primary_sym or "",
+                                    bar_timestamp=str(bar_timestamp),
+                                    input_data={
+                                        "bar_timestamp": str(bar_timestamp),
+                                        "bar_index": bar_index,
+                                        "pre_calc_index": pre_calc_index,
+                                    },
+                                    output_data={
+                                        "slice_end_timestamp": _slice_end_ts,
+                                        "slice_rows": _slice_rows,
+                                        "symbols_in_slice": list(enriched_data_per_symbol.keys()),
+                                        "lookahead_safe": _lookahead_safe,
+                                    },
+                                    metadata={
+                                        "lookahead_safe": _lookahead_safe,
+                                    },
+                                )
+                        except Exception:
+                            pass  # Tracing must never break the bar loop
+
                         signals_result = await self.strategy_manager.generate_signals(
                             self.config.symbols,
                             enriched_data_per_symbol,
@@ -4736,21 +4891,11 @@ class InstitutionalBacktestEngine:
                                 signals_df = signals_result
                     except Exception as e:
                         logger.error(f"Fallback strategy generation failed: {e}", exc_info=True)
-                        # Final fallback to pipeline signal generator only as last resort
-                        logger.warning(f"   Falling back to pipeline signal generator (not ideal)")
-                        signals_result = self.signal_generator.generate_signals(features_df) if self.signal_generator and features_df is not None else None
-                        if isinstance(signals_result, list) and signals_result:
-                            signals_df = pd.DataFrame([_signal_to_dict(s) for s in signals_result])
-                        elif isinstance(signals_result, pd.DataFrame):
-                            signals_df = signals_result
+                        # No further fallback — signal generation is the strategy's
+                        # responsibility.  If the strategy fails, no signals for this bar.
                 else:
-                    # No strategy manager, use pipeline signal generator as fallback
-                    logger.warning("[WARN] No strategy manager available, using pipeline signal generator")
-                    signals_result = self.signal_generator.generate_signals(features_df) if self.signal_generator and features_df is not None else None
-                    if isinstance(signals_result, list) and signals_result:
-                        signals_df = pd.DataFrame([_signal_to_dict(s) for s in signals_result])
-                    elif isinstance(signals_result, pd.DataFrame):
-                        signals_df = signals_result
+                    # No strategy manager — cannot generate signals.
+                    logger.warning("[WARN] No strategy manager available, skipping signal generation")
 
                 if signals_df is not None and not signals_df.empty:
                     bar_results['signals_generated'] = len(signals_df)
@@ -5053,8 +5198,20 @@ class InstitutionalBacktestEngine:
                         'vol_of_vol': _sf(pos_meta.get("entry_vol_of_vol")),
                         'transition_score': _sf(pos_meta.get("transition_score")),
                         'composite_z': _sf(pos_meta.get("composite_z")),
+                        # Causal chain entry state
+                        'flow_confirmed': pos_meta.get("entry_flow_confirmed"),
                     }
                     current_state = self._lookup_current_exit_features(sym, timestamp)
+
+                    # Resolve strategy-specific momentum columns from position metadata
+                    _short_mom = None
+                    _medium_mom = None
+                    _feat_row = current_state.pop('_feat_row', None)
+                    if _feat_row is not None:
+                        _short_col = pos_meta.get("entry_short_momentum_col", "momentum_10")
+                        _medium_col = pos_meta.get("entry_medium_momentum_col", "momentum_20")
+                        _short_mom = _sf(_feat_row.get(_short_col))
+                        _medium_mom = _sf(_feat_row.get(_medium_col))
 
                     # Config parameters (strategy-specific)
                     _health_crit = float(self._get_strategy_param("health_critical_threshold", 0.15, strategy_id=strat_id))
@@ -5064,23 +5221,35 @@ class InstitutionalBacktestEngine:
                     _tp_decay = float(self._get_strategy_param("tp_decay_minutes", 30.0, strategy_id=strat_id))
                     _health_tp = float(self._get_strategy_param("health_tp_trigger", 0.7, strategy_id=strat_id))
 
+                    _noise_floor = float(self._get_strategy_param("momentum_noise_floor", 0.001, strategy_id=strat_id))
+
                     decision = decide_exit(
                         now=timestamp,
                         opened_at=opened_at,
                         pnl_pct=float(pnl_pct),
                         is_long=pos_is_long,
                         stop_loss_pct=stop_loss_pct_val,
+                        # Entry transition state
                         entry_coherence=entry_state['coherence'],
                         entry_composite_accel=entry_state['composite_accel'],
                         entry_vol_of_vol=entry_state['vol_of_vol'],
                         entry_transition_score=entry_state['transition_score'],
                         entry_composite_z=entry_state['composite_z'],
+                        # Causal chain entry state
+                        entry_flow_confirmed=entry_state.get('flow_confirmed'),
+                        # Current transition state
                         current_coherence=current_state.get('coherence'),
                         current_composite_accel=current_state.get('composite_accel'),
                         current_vol_of_vol=current_state.get('vol_of_vol'),
                         current_composite_z=current_state.get('composite_z'),
+                        # Causal chain current state
+                        current_short_momentum=_short_mom,
+                        current_medium_momentum=_medium_mom,
+                        current_volume_ratio=current_state.get('volume_ratio'),
+                        # Thresholds
                         health_critical_threshold=_health_crit,
                         accel_exhaustion_threshold=_accel_exhaust,
+                        momentum_noise_floor=_noise_floor,
                         tp_initial_pct=_tp_init,
                         tp_floor_pct=_tp_floor,
                         tp_decay_minutes=_tp_decay,
@@ -5205,6 +5374,12 @@ class InstitutionalBacktestEngine:
                 result['composite_accel'] = _sf(_feat_row.get("composite_accel_norm"))
                 result['vol_of_vol'] = _sf(_feat_row.get("vol_of_vol"))
                 result['composite_z'] = _sf(_feat_row.get("composite_z"))
+                # Causal chain features (for alignment_health + flow_health)
+                result['volume_ratio'] = _sf(_feat_row.get("volume_ratio"))
+                # Momentum columns are strategy-specific (e.g. momentum_10,
+                # momentum_20).  The caller provides the column names from
+                # position metadata so this lookup is strategy-agnostic.
+                result['_feat_row'] = _feat_row  # Expose raw row for column lookup
         except Exception as _feat_err:
             if not getattr(self, "_exit_feat_err_logged", False):
                 self._exit_feat_err_logged = True

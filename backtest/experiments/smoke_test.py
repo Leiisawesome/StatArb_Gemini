@@ -103,7 +103,7 @@ class SmokeTest(BaseExperiment):
                 success=True
             )
 
-            # --- Finalize pipeline tracer ---
+            # --- Finalize pipeline tracer + automatic audit ---
             if self.config.get('enable_pipeline_trace', False):
                 from core_engine.utils.pipeline_trace import get_tracer
                 _tracer = get_tracer()
@@ -111,6 +111,21 @@ class SmokeTest(BaseExperiment):
                     _tracer.print_funnel()
                     result.custom_metrics['trace_funnel'] = _tracer.get_funnel_summary()
                     result.custom_metrics['trace_stats'] = _tracer.stats
+
+                    # --- Pipeline Audit: automatic plumbing verification ---
+                    try:
+                        from core_engine.utils.pipeline_auditor import PipelineAuditor
+                        _initial_capital = float(self.config.get('initial_capital', 100000))
+                        _auditor = PipelineAuditor.from_tracer()
+                        _audit_report = _auditor.run_all(initial_capital=_initial_capital)
+                        _audit_report.print_summary()
+                        result.custom_metrics['audit_passed'] = _audit_report.passed
+                        result.custom_metrics['audit_errors'] = _audit_report.error_count
+                        result.custom_metrics['audit_warnings'] = _audit_report.warning_count
+                    except Exception as _audit_err:
+                        self.logger.warning(f"Pipeline audit failed (non-fatal): {_audit_err}")
+                        result.custom_metrics['audit_passed'] = None
+
                     _tracer.close()
 
             self.logger.info(f"[OK] Smoke test completed in {duration:.2f}s")
