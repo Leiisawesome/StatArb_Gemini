@@ -184,6 +184,15 @@ class BacktestConfig:
     circuit_breaker_drawdown_limit: float = -0.05
     """Max drawdown limit for circuit breaker (negative decimal, e.g. -0.05 = -5%)."""
 
+    # Intraday session isolation (day-boundary state reset)
+    intraday_session_isolation: bool = False
+    """When True, reset all runtime state at each trading-day boundary so that
+    each day is independent.  This ensures multi-day backtest PnL equals the
+    sum of individual per-day PnLs (intraday additivity invariant).
+    Prior-day bars are replayed through stateful components (price history,
+    regime EWMA) in read-only mode to provide warm context without leaking
+    trading state across sessions."""
+
     # Performance settings
     parallel_execution: bool = False
     max_workers: int = 4

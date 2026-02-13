@@ -139,6 +139,30 @@ class RealTimeRegimeSensor(ISystemComponent, IRegimePolicy):
 
         self.logger.info(f"🚀 Real-Time Regime Sensor initialized with ID: {self.sensor_id}")
 
+    # ------------------------------------------------------------------
+    # Intraday Session Isolation — Day-Boundary Reset
+    # ------------------------------------------------------------------
+    def reset_intraday_state(self) -> None:
+        """Reset runtime EWMA / sequence state at a trading-day boundary.
+
+        Called by the backtest engine when ``intraday_session_isolation``
+        is enabled.  Clears accumulated per-bar state so the next day
+        starts with a clean observation window (optionally re-primed by
+        a warmup replay).
+
+        NOTE: ``current_regime`` is intentionally preserved — the last
+        known regime is a reasonable prior until new bars arrive.
+        """
+        self._fast_state.clear()
+        self.regime_sequence.clear()
+        self.regime_by_timestamp.clear()
+        self.market_data_buffer.clear()
+        self.price_history.clear()
+        for tf_buf in self.timeframe_buffers.values():
+            tf_buf.clear()
+        self._regime_history.clear()
+        self.logger.debug("Regime sensor: intraday state reset")
+
     def _fast_regime_enabled(self) -> bool:
         return bool(getattr(self.config, "enable_per_bar_fast", False))
 

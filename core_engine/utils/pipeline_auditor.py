@@ -162,7 +162,7 @@ class PipelineAuditor:
     # Master entry point
     # ------------------------------------------------------------------
 
-    def run_all(self, initial_capital: float = 100_000.0) -> AuditReport:
+    def run_all(self, initial_capital: float = 100_000.0, **kwargs) -> AuditReport:
         """Run all audit checks and return a consolidated report."""
         report = AuditReport(total_records=len(self.records))
 
@@ -495,8 +495,16 @@ class PipelineAuditor:
     # 8. Capital Conservation
     # ------------------------------------------------------------------
 
-    def check_capital_conservation(self, initial_capital: float = 100_000.0) -> List[CheckResult]:
-        """Verify cash accounting identity: initial + Σ(cash_change) == final_cash."""
+    def check_capital_conservation(
+        self,
+        initial_capital: float = 100_000.0,
+        **_kwargs,
+    ) -> List[CheckResult]:
+        """Verify cash accounting identity: initial + Σ(cash_change) == final_cash.
+
+        Cash compounds across sessions (no reset at day boundaries), so the
+        cumulative identity holds regardless of session isolation settings.
+        """
         results = []
 
         cp6_records = self._by_cp.get(CP6_POSITION_UPDATE, [])

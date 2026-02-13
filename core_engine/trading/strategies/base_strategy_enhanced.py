@@ -643,7 +643,7 @@ class EnhancedBaseStrategy(ISystemComponent, ABC):
 
             if data.empty:
                 if skip_empty_frames:
-                    logger.warning(f"    {symbol} has empty DataFrame, skipping")
+                    logger.debug(f"    {symbol} has empty DataFrame, skipping")
                     continue
                 raise ValueError(f"{symbol} has empty DataFrame")
 

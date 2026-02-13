@@ -156,6 +156,10 @@ class BaseExperiment(ABC):
             'output_directory': str(backtest_results_dir()),
         }
 
+        # Intraday session isolation
+        if 'intraday_session_isolation' in config_source:
+            config_dict['intraday_session_isolation'] = bool(config_source['intraday_session_isolation'])
+
         # Regime risk multipliers
         if 'regime_risk_multipliers' in config_source:
             config_dict['regime_risk_multipliers'] = config_source['regime_risk_multipliers']

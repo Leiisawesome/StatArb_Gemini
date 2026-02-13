@@ -371,6 +371,40 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
         logger.info("Central Risk Manager initialized - Governance Hub Ready (using centralized RiskConfig)")
 
     # ========================================================================
+    # INTRADAY SESSION ISOLATION — Day-Boundary Reset
+    # ========================================================================
+
+    def reset_intraday_state(self) -> None:
+        """Reset runtime state that leaks across trading-day boundaries.
+
+        Called by the backtest engine at each new trading-day open when
+        ``intraday_session_isolation`` is enabled.  This ensures that
+        volatility-based stop distances (σ_eff, Δρ), cooldown trackers,
+        Kelly sizing history, and drawdown HWM all start fresh, making
+        each day fully independent.
+        """
+        # 1. Rolling price history → vol stops + correlation change
+        self._price_history.clear()
+
+        # 2. PVSI cooldown trackers (per-strategy)
+        self._strategy_cooldowns.clear()
+
+        # 3. Exit-in-flight guard
+        self._exit_in_flight.clear()
+
+        # 4. Strategy trade outcomes (Kelly / PVSI sizing history)
+        self._strategy_trade_outcomes.clear()
+
+        # 5. Portfolio high-water mark → drawdown gating
+        initial_capital = float(getattr(self.config, 'initial_capital', 100000))
+        self._portfolio_hwm = initial_capital
+
+        logger.debug(
+            "CRM: intraday state reset (price_history, cooldowns, "
+            "exit-in-flight, trade_outcomes, portfolio_hwm)"
+        )
+
+    # ========================================================================
     # CONFIGURATION HELPER PROPERTIES (backward compatibility)
     # ========================================================================
 

@@ -260,6 +260,13 @@ class InstitutionalBacktestEngine:
         # EOD guard (extracted helper — owns all EOD time parsing & signal gating)
         self.eod_guard = EODGuard(config)
 
+        # Intraday Session Isolation (day-boundary state reset)
+        self._intraday_session_isolation: bool = bool(
+            getattr(config, "intraday_session_isolation", False)
+        )
+        self._current_trading_date = None  # date object — tracks current trading day
+        self._session_start_timestamp = None  # timestamp of first bar in current session
+
         logger.info(f"✅ InstitutionalBacktestEngine created: {self.backtest_name}")
 
     # ============================================================
@@ -3380,6 +3387,10 @@ class InstitutionalBacktestEngine:
             # ============================================================
             # C2 FIX: Route pre-calculation through PipelineOrchestrator
             # so BT, papertest, and live share the same code path.
+            #
+            # When intraday_session_isolation is enabled, features are
+            # computed PER TRADING DAY so that expanding normalization
+            # uses the same data window as an individual-day run.
             # ============================================================
             logger.info("🔧 Pre-calculating indicators and features via PipelineOrchestrator...")
             pre_calc_start = datetime.now()
@@ -3399,23 +3410,25 @@ class InstitutionalBacktestEngine:
                         sym_data = sym_data.reset_index()
                     raw_data_per_symbol[sym] = sym_data
 
-                # Route through pipeline_orchestrator.process_preloaded_data()
-                # This ensures indicators, features, and signals are calculated
-                # through the exact same code path used by papertest/live.
-                enriched_results = await self.pipeline_orchestrator.process_preloaded_data(
-                    raw_data_per_symbol=raw_data_per_symbol,
-                    timeframe=self.config.interval,
-                )
-
-                # Extract indicators and features from EnrichedMarketData containers
-                for sym, enriched in enriched_results.items():
-                    self.pre_calculated_indicators_per_symbol[sym] = enriched.indicators
-                    self.pre_calculated_features_per_symbol[sym] = enriched.features
-                    logger.info(
-                        f"   ✅ {sym}: {len(enriched.features)} bars "
-                        f"({enriched.indicator_columns} indicators, "
-                        f"{enriched.feature_columns} features)"
+                if self._intraday_session_isolation:
+                    # Per-session pre-calculation: each day uses warmup + day
+                    # data so expanding normalization is scoped identically
+                    # to what an individual-day run would see.
+                    await self._pre_calculate_per_session(raw_data_per_symbol)
+                else:
+                    # Standard: compute features across entire dataset at once
+                    enriched_results = await self.pipeline_orchestrator.process_preloaded_data(
+                        raw_data_per_symbol=raw_data_per_symbol,
+                        timeframe=self.config.interval,
                     )
+                    for sym, enriched in enriched_results.items():
+                        self.pre_calculated_indicators_per_symbol[sym] = enriched.indicators
+                        self.pre_calculated_features_per_symbol[sym] = enriched.features
+                        logger.info(
+                            f"   ✅ {sym}: {len(enriched.features)} bars "
+                            f"({enriched.indicator_columns} indicators, "
+                            f"{enriched.feature_columns} features)"
+                        )
 
                 # Backward compatibility: set primary symbol aliases
                 primary_symbol = self.config.symbols[0] if self.config.symbols else None
@@ -3493,6 +3506,37 @@ class InstitutionalBacktestEngine:
                 # Use MarketCalendar (asset-class aware) instead of hardcoding 09:30–16:00.
                 if not self._is_within_rth(timestamp, idx):
                     continue
+
+                # ============================================================
+                # INTRADAY SESSION ISOLATION — Day-Boundary State Reset
+                #
+                # Both first-day and day-boundary cases use the SAME warmup
+                # source (historical_data) with the SAME cap to guarantee
+                # that multi-day and individual-day runs see identical state.
+                # ============================================================
+                if self._intraday_session_isolation:
+                    bar_date = pd.Timestamp(timestamp).date()
+                    if self._current_trading_date is None or bar_date != self._current_trading_date:
+                        is_first = self._current_trading_date is None
+                        label = (
+                            f"First trading day {bar_date}"
+                            if is_first
+                            else f"Day boundary {self._current_trading_date} → {bar_date}"
+                        )
+                        logger.info(f"\n🔄 SESSION ISOLATION: {label}")
+
+                        # Always collect warmup from historical_data (deterministic)
+                        warmup_bars_snapshot = self._collect_warmup_bars_before_date(bar_date)
+                        self._reset_session_state()
+                        if warmup_bars_snapshot:
+                            self._warmup_replay(warmup_bars_snapshot)
+
+                        # Record the day's start timestamp so that
+                        # features_historical in _process_single_bar is
+                        # clipped to the current session only.
+                        self._session_start_timestamp = pd.Timestamp(timestamp)
+
+                    self._current_trading_date = bar_date
 
                 self.current_bar_index = idx
 
@@ -3790,6 +3834,300 @@ class InstitutionalBacktestEngine:
             if bar_index == 0:
                 logger.debug(f"RTH gate check skipped (non-fatal): {e}")
             return True
+
+    # ================================================================
+    # INTRADAY SESSION ISOLATION — Helper Methods
+    # ================================================================
+
+    async def _pre_calculate_per_session(
+        self,
+        raw_data_per_symbol: Dict[str, pd.DataFrame],
+    ) -> None:
+        """Compute features per trading day for session-isolated backtests.
+
+        Each day's features are computed from a data window of
+        ``warmup_bars`` prior bars + the day's bars.  Between days we reset
+        the pipeline orchestrator's cache and the regime engine so that no
+        state leaks between per-session pipeline calls.
+        """
+        warmup_cap = int(getattr(self.config, 'warmup_bars', 200) or 200)
+        sim_start = None
+        if hasattr(self, 'simulation_start_dt'):
+            sim_start = pd.Timestamp(self.simulation_start_dt).date()
+
+        for sym, full_df in raw_data_per_symbol.items():
+            if full_df.empty:
+                continue
+
+            # Identify unique trading dates
+            ts_col = full_df['timestamp'] if 'timestamp' in full_df.columns else full_df.index
+            dates_series = pd.to_datetime(ts_col)
+            full_df = full_df.copy()
+            full_df['_ts_date'] = dates_series.dt.date.values
+
+            if sim_start is not None:
+                sim_dates = sorted(set(d for d in full_df['_ts_date'].unique() if d >= sim_start))
+            else:
+                sim_dates = sorted(full_df['_ts_date'].unique())
+
+            if not sim_dates:
+                logger.warning(f"   ⚠️ No simulation dates for {sym}")
+                continue
+
+            all_day_indicators = []
+            all_day_features = []
+
+            # Save the real regime engine and restore after the loop
+            saved_regime_engine = getattr(self.pipeline_orchestrator, 'regime_engine', None)
+            regime_config = None
+            if saved_regime_engine is not None:
+                cfg_obj = getattr(saved_regime_engine, 'config', None)
+                if cfg_obj is not None and hasattr(cfg_obj, '__dict__'):
+                    regime_config = cfg_obj.__dict__
+
+            for day in sim_dates:
+                day_mask = full_df['_ts_date'] == day
+                before_mask = full_df['_ts_date'] < day
+
+                before_bars = full_df[before_mask]
+                day_bars = full_df[day_mask]
+
+                if len(before_bars) > warmup_cap:
+                    before_bars = before_bars.iloc[-warmup_cap:]
+
+                window_df = pd.concat([before_bars, day_bars], ignore_index=True)
+                window_df_clean = window_df.drop(columns=['_ts_date'], errors='ignore')
+
+                # ── Reset ALL inter-call state so each day is independent ──
+                # 1. Clear pipeline cache (keyed by symbol)
+                if hasattr(self.pipeline_orchestrator, '_cache_entries'):
+                    self.pipeline_orchestrator._cache_entries.clear()
+                # 2. Install a BRAND NEW regime engine for each day so that
+                #    regime detection starts with zero state (identical to a
+                #    freshly-created engine in an individual-day run).
+                if regime_config is not None:
+                    try:
+                        from core_engine.regime.engine import RealTimeRegimeSensor
+                        fresh_regime = RealTimeRegimeSensor(regime_config)
+                        fresh_regime.is_initialized = True
+                        fresh_regime.is_operational = True
+                        self.pipeline_orchestrator.regime_engine = fresh_regime
+                    except Exception as exc:
+                        logger.debug(f"Fresh regime creation failed: {exc}")
+                elif saved_regime_engine is not None:
+                    if hasattr(saved_regime_engine, 'reset_intraday_state'):
+                        saved_regime_engine.reset_intraday_state()
+                    saved_regime_engine.current_regime = None
+
+                window_data = {sym: window_df_clean}
+                try:
+                    enriched_results = await self.pipeline_orchestrator.process_preloaded_data(
+                        raw_data_per_symbol=window_data,
+                        timeframe=self.config.interval,
+                    )
+
+                    if sym in enriched_results:
+                        enriched = enriched_results[sym]
+                        feat_df = enriched.features.copy()
+                        ind_df = enriched.indicators.copy()
+
+                        # Keep only the day's rows (tail = day bars)
+                        n_day = len(day_bars)
+                        if len(feat_df) > n_day:
+                            feat_df = feat_df.iloc[-n_day:].reset_index(drop=True)
+                        if len(ind_df) > n_day:
+                            ind_df = ind_df.iloc[-n_day:].reset_index(drop=True)
+
+                        all_day_features.append(feat_df)
+                        all_day_indicators.append(ind_df)
+                except Exception as e:
+                    logger.warning(f"   ⚠️ Per-session pre-calc failed for {sym} on {day}: {e}")
+
+            # Restore the original regime engine for bar-loop processing
+            if saved_regime_engine is not None:
+                self.pipeline_orchestrator.regime_engine = saved_regime_engine
+
+            if all_day_features:
+                combined_features = pd.concat(all_day_features, ignore_index=True)
+                combined_indicators = pd.concat(all_day_indicators, ignore_index=True)
+                self.pre_calculated_features_per_symbol[sym] = combined_features
+                self.pre_calculated_indicators_per_symbol[sym] = combined_indicators
+                logger.info(
+                    f"   ✅ {sym}: {len(combined_features)} bars "
+                    f"(per-session, {len(sim_dates)} days)"
+                )
+
+    def _reset_session_state(self) -> None:
+        """Reset all runtime state that leaks across trading-day boundaries.
+
+        Called at each new trading-day open when ``intraday_session_isolation``
+        is enabled.  Resets *observation* / *decision* state AND portfolio
+        cash so that position sizing on each day is independent of prior
+        days' PnL (required for strict intraday additivity).
+        """
+        # 1. CentralRiskManager — price history, cooldowns, exit-in-flight,
+        #    trade outcomes, and portfolio HWM
+        if self.risk_manager and hasattr(self.risk_manager, 'reset_intraday_state'):
+            self.risk_manager.reset_intraday_state()
+
+        # 2. Regime engine — EWMA state, regime sequence, buffers
+        if self.regime_engine and hasattr(self.regime_engine, 'reset_intraday_state'):
+            self.regime_engine.reset_intraday_state()
+
+        # 3. Strategy state — ALL per-symbol caches, counters, queues
+        if self.strategy_manager and hasattr(self.strategy_manager, 'active_strategies'):
+            for _name, strategy in self.strategy_manager.active_strategies.items():
+                # Pending signal queue
+                if hasattr(strategy, 'pending_signals') and hasattr(strategy.pending_signals, 'clear'):
+                    strategy.pending_signals.clear()
+                # State machine
+                if hasattr(strategy, 'state_machine') and hasattr(strategy.state_machine, 'states'):
+                    strategy.state_machine.states.clear()
+                # Per-symbol indicators & momentum data
+                for attr in ('indicators', 'momentum_data'):
+                    container = getattr(strategy, attr, None)
+                    if isinstance(container, dict):
+                        container.clear()
+                # ADS regime vector cache
+                ads_cache = getattr(strategy, '_ads_regime_cache', None)
+                if ads_cache is not None:
+                    if hasattr(ads_cache, 'clear'):
+                        ads_cache.clear()
+                    elif hasattr(ads_cache, '_cache'):
+                        ads_cache._cache.clear()
+                # Scalar counters → reset to defaults
+                if hasattr(strategy, '_sm_entries_triggered'):
+                    strategy._sm_entries_triggered = 0
+                if hasattr(strategy, '_sm_entry_reasons'):
+                    strategy._sm_entry_reasons.clear()
+                if hasattr(strategy, '_current_mqs'):
+                    strategy._current_mqs = 1.0
+                if hasattr(strategy, '_current_mqs_penalty'):
+                    strategy._current_mqs_penalty = 1.0
+
+        # 4. Engine-level pending signals (next-bar execution queue)
+        self.pending_signals.clear()
+
+        # 5. On-the-fly historical market data accumulator
+        self.historical_market_data.clear()
+
+        # 6. EOD guard — reset liquidation tracking for new day
+        if hasattr(self.eod_guard, '_liquidated_dates'):
+            self.eod_guard._liquidated_dates.clear()
+
+        # 7. Portfolio cash — carry forward (compound across sessions).
+        #    Positions should be flat from EOD liquidation. Cash reflects
+        #    realised PnL from prior days, exactly as in live trading.
+        #    (No cash reset — position sizing uses current equity.)
+
+        # 8. RealTimePnLTracker — position cost basis, entry times, PnL
+        pnl_tracker = getattr(self, 'pnl_tracker', None)
+        if pnl_tracker:
+            for attr in ('position_cost_basis', 'position_pnl',
+                         'position_entry_time', 'position_sizes',
+                         'daily_pnl', 'trade_history'):
+                container = getattr(pnl_tracker, attr, None)
+                if container is not None and hasattr(container, 'clear'):
+                    container.clear()
+
+        logger.debug("Session state reset complete")
+
+    def _warmup_replay(self, warmup_bars: List) -> None:
+        """Replay prior-day bars through stateful components in read-only mode.
+
+        This primes price-history (for vol-stop σ_eff / Δρ) and regime EWMA
+        so the new trading day starts with context, without leaking any
+        trading decisions from the prior day.
+
+        No signals are generated, no trades are executed.
+        """
+        if not warmup_bars:
+            return
+
+        n = len(warmup_bars)
+        logger.info(f"   Replaying {n} prior-day bars for session warmup...")
+
+        for bar in warmup_bars:
+            bar_dict = self._bar_to_dict(bar) if hasattr(bar, 'to_dict') else dict(bar)
+            timestamp = bar.get('timestamp', None) or bar.name if hasattr(bar, 'name') else None
+
+            # Price history → feeds vol-stop computation
+            if self.risk_manager and hasattr(self.risk_manager, 'update_market_prices'):
+                prices = {}
+                for sym in self.config.symbols:
+                    close = bar_dict.get('close') or bar_dict.get('Close')
+                    if close is not None:
+                        try:
+                            prices[sym] = float(close)
+                        except (ValueError, TypeError):
+                            pass
+                if prices:
+                    import asyncio
+                    # update_market_prices is async; run synchronously in warmup
+                    try:
+                        loop = asyncio.get_event_loop()
+                        if loop.is_running():
+                            # We're already in an async context — use create_task workaround
+                            # Simpler: directly update the deque (same effect as the async method)
+                            for symbol, price in prices.items():
+                                p = float(price)
+                                if p > 0:
+                                    self.risk_manager._price_history[symbol].append(p)
+                                    self.risk_manager.current_prices[symbol] = p
+                        else:
+                            loop.run_until_complete(
+                                self.risk_manager.update_market_prices(prices, timestamp)
+                            )
+                    except Exception:
+                        # Direct fallback
+                        for symbol, price in prices.items():
+                            p = float(price)
+                            if p > 0:
+                                self.risk_manager._price_history[symbol].append(p)
+                                self.risk_manager.current_prices[symbol] = p
+
+            # Regime engine — feed bar for EWMA state priming
+            if self.regime_engine and hasattr(self.regime_engine, 'process_market_data'):
+                regime_bar = dict(bar_dict)
+                if timestamp is not None:
+                    regime_bar['timestamp'] = timestamp
+                try:
+                    self.regime_engine.process_market_data(regime_bar)
+                except Exception:
+                    pass  # Non-fatal during warmup
+
+        logger.info(f"   Session warmup complete ({n} bars replayed)")
+
+    def _collect_warmup_bars_before_date(self, target_date) -> List:
+        """Collect bars before ``target_date`` for session warmup.
+
+        Scans ``self.historical_data`` for all bars whose date is strictly
+        before ``target_date``, then returns the **last N** bars (where N
+        is ``warmup_bars`` from config, default 200).  Taking from the tail
+        ensures that multi-day and individual-day runs replay the *same*
+        bars — the most recent history before the target date — even if the
+        multi-day run has more historical data loaded.
+        """
+        if self.historical_data is None or self.historical_data.empty:
+            return []
+
+        all_prior = []
+        for _idx, row in self.historical_data.iterrows():
+            ts = row.get('timestamp', _idx)
+            try:
+                row_date = pd.Timestamp(ts).date()
+            except Exception:
+                continue
+            if row_date >= target_date:
+                break
+            all_prior.append(row)
+
+        # Cap to warmup_bars from config (deterministic, same in both paths)
+        warmup_cap = int(getattr(self.config, 'warmup_bars', 200) or 200)
+        if len(all_prior) > warmup_cap:
+            all_prior = all_prior[-warmup_cap:]
+
+        return all_prior
 
     def _update_current_prices_from_market_data(self, timestamp: Any) -> None:
         """Update risk-manager mark-to-market prices for all symbols."""
@@ -4535,6 +4873,18 @@ class InstitutionalBacktestEngine:
                         else:
                             features_historical = pd.DataFrame()  # Empty if out of bounds
 
+                    # SESSION ISOLATION: Clip features_historical to the
+                    # current trading day so that multi-day runs see the
+                    # same historical depth as individual-day runs.
+                    if (
+                        not features_historical.empty
+                        and self._intraday_session_isolation
+                        and self._session_start_timestamp is not None
+                        and 'timestamp' in features_historical.columns
+                    ):
+                        session_mask = features_historical['timestamp'] >= self._session_start_timestamp
+                        features_historical = features_historical[session_mask].copy()
+
                     if not features_historical.empty:
                         # ✅ CRITICAL FIX: Convert pre-calculated features to expected format
                         # Ensure features_historical is a DataFrame with correct columns
@@ -4735,6 +5085,25 @@ class InstitutionalBacktestEngine:
                                         df_ind[col] = _feat_indexed[col].reindex(df_ind.index).values
                             except Exception as _merge_err:
                                 logger.debug(f"Feature column merge for {sym}: {_merge_err}")
+
+                        # SESSION ISOLATION: Clip enriched data to the current
+                        # trading session so multi-day runs give the strategy
+                        # the same historical depth as individual-day runs.
+                        if (
+                            self._intraday_session_isolation
+                            and self._session_start_timestamp is not None
+                        ):
+                            for _iso_sym in list(enriched_data_per_symbol.keys()):
+                                _iso_df = enriched_data_per_symbol[_iso_sym]
+                                if _iso_df is None or _iso_df.empty:
+                                    continue
+                                # Determine which column / index holds timestamps
+                                if 'timestamp' in _iso_df.columns:
+                                    _iso_mask = _iso_df['timestamp'] >= self._session_start_timestamp
+                                    enriched_data_per_symbol[_iso_sym] = _iso_df[_iso_mask].copy()
+                                elif isinstance(_iso_df.index, pd.DatetimeIndex):
+                                    _iso_mask = _iso_df.index >= self._session_start_timestamp
+                                    enriched_data_per_symbol[_iso_sym] = _iso_df[_iso_mask].copy()
 
                         # --- CP1s: Pipeline Trace - Bar Feature Slice (lookahead guard) ---
                         # This is the most dangerous data handoff in the pipeline.

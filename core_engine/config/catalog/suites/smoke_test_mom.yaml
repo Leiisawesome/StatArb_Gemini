@@ -23,6 +23,7 @@ papertest:
 
   session:
     stall_threshold_seconds: 300.0
+    intraday_session_isolation: true
 
   # Smoke-test-only: allow lower-confidence entries through the multi-strategy aggregator.
   min_confidence_threshold: 0.40

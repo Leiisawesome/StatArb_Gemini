@@ -233,6 +233,13 @@ def _papertest_to_backtest_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     if trace.get("enable_pipeline_trace"):
         out["enable_pipeline_trace"] = True
 
+    # Intraday session isolation (day-boundary state reset)
+    session = pt.get("session", {}) or {}
+    if session.get("intraday_session_isolation") is not None:
+        out["intraday_session_isolation"] = bool(session["intraday_session_isolation"])
+    elif pt.get("intraday_session_isolation") is not None:
+        out["intraday_session_isolation"] = bool(pt["intraday_session_isolation"])
+
     # NOTE: We intentionally do not merge arbitrary flat keys here.
     # If you need a flat override, put it into the canonical papertest schema
     # (or add a dedicated override adapter).

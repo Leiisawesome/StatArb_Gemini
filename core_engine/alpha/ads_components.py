@@ -1123,6 +1123,10 @@ class PendingSignalQueue:
                 del self.pending[key]
         return mature
 
+    def clear(self):
+        """Remove all pending signals (used at day-boundary reset)."""
+        self.pending.clear()
+
     def __len__(self):
         return len(self.pending)
 
