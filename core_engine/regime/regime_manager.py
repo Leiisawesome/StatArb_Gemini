@@ -1,14 +1,35 @@
 """
-Regime Detection Engine - Central Regime Manager
-Central coordinator for regime-aware strategy adaptation, portfolio management,
-risk controls, and performance attribution by regime
+Regime Detection Engine — Central Regime Manager
+=================================================
+
+Central coordinator (BRICK #1) for all regime detection sub-components.
+
+Coordination DAG::
+
+    RegimeManager
+      ├─ RealTimeRegimeSensor  (engine.py)            per-bar EWMA regime sensing
+      ├─ RegimeDetector        (regime_detector.py)    batch statistical detection
+      ├─ MarketRegimeAnalyzer  (market_regime_analyzer.py)  cross-asset / macro
+      ├─ RegimeIndicatorEngine (regime_indicators.py)  indicator + transition signals
+      ├─ RegimeTransitionManager (regime_transition_manager.py)  prediction
+      ├─ RegimeAwarePortfolioManager (allocation.py)   allocation metadata
+      └─ RegimePerformanceAttributor (attribution.py)  attribution math
+
+RegimeClassifier (regime_classifier.py) is **not** wired into this coordinator;
+it is an optional ML-based classifier available for standalone use.
+
+Public interface consumed by the backtest engine:
+  - ``update_regime_analysis(market_data)``  → async regime update per bar
+  - ``detect_regime(df, symbol)``            → single-symbol regime detection
+  - ``get_regime_at_timestamp(ts)``          → lookup historical regime
+  - ``generate_regime_adaptation(state, strategies)``  → strategy adjustments
 """
 
 import logging
 import numpy as np
 import pandas as pd
 from datetime import datetime
-from typing import Dict, List, Optional, Any, TYPE_CHECKING
+from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 from enum import Enum
 import warnings
@@ -56,10 +77,6 @@ except ImportError:
 from ..type_definitions.regime import MarketRegime, MarketRegimeState, TimeframeRegime
 RegimeType = MarketRegime # Alias for backward compatibility
 RegimeState = MarketRegimeState # Alias for backward compatibility
-
-# Lazy import for heavy classifier module (33.85MB sklearn dependency)
-if TYPE_CHECKING:
-    from .regime_classifier import RegimeClassification
 
 # Import all regime components
 from .regime_detector import RegimeDetector, RegimeDetection

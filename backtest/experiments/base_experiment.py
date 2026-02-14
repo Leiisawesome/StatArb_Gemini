@@ -142,7 +142,7 @@ class BaseExperiment(ABC):
             'start_date': config_source.get('start_date', '2024-01-02'),
             'end_date': config_source.get('end_date', '2024-01-02'),
             'warmup_bars': config_source.get('warmup_bars', None),
-            'initial_capital': config_source.get('initial_capital', 100000),
+            'initial_capital': config_source.get('initial_capital', 1_000_000),
             'allow_shorts': config_source.get('allow_shorts', False),
             'max_position_size': config_source.get('max_position_size', 0.10),
             'max_position_pct': config_source.get('max_position_pct', None),

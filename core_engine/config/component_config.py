@@ -73,11 +73,11 @@ class RiskLimits:
     confidence_threshold: float = 0.6
     """Minimum signal confidence for execution. Default: 60%"""
 
-    max_drawdown: float = 0.10
-    """Maximum allowable drawdown. Default: 10%"""
+    max_drawdown: float = 0.20
+    """Maximum allowable drawdown. Default: 20% (aligned with BacktestConfig)"""
 
-    risk_free_rate: float = 0.02
-    """Risk-free rate for Sharpe ratio calculations. Default: 2% annual"""
+    risk_free_rate: float = 0.04
+    """Risk-free rate for Sharpe ratio calculations. Default: 4% annual (aligned with BacktestConfig)"""
 
     position_concentration_limit: float = 0.15
     """Maximum concentration per position. Default: 15%"""
@@ -1523,8 +1523,8 @@ class PortfolioConfig:
     """Timing configuration"""
 
     # Portfolio parameters
-    initial_cash: float = 100000.0
-    """Initial cash. Default: $100,000"""
+    initial_cash: float = 1_000_000.0
+    """Initial cash. Default: $1,000,000 (aligned with BacktestConfig.initial_capital)"""
 
     commission_rate: float = 0.001
     """Commission rate. Default: 0.1%"""
@@ -2020,8 +2020,8 @@ class PerformanceAnalyticsConfig:
     Professional performance analysis with institutional metrics.
     """
     # Risk-free rate
-    risk_free_rate: float = 0.02
-    """Annual risk-free rate for Sharpe/Sortino calculations. Default: 2%"""
+    risk_free_rate: float = 0.04
+    """Annual risk-free rate for Sharpe/Sortino calculations. Default: 4% (aligned with BacktestConfig)"""
 
     # Calculation parameters
     annualization_factor: int = 252
@@ -2080,8 +2080,8 @@ class MetricsCalculatorConfig:
     Advanced metrics calculation with regime awareness.
     """
     # Risk-free rate
-    risk_free_rate: float = 0.02
-    """Annual risk-free rate. Default: 2%"""
+    risk_free_rate: float = 0.04
+    """Annual risk-free rate. Default: 4% (aligned with BacktestConfig)"""
 
     # Calculation parameters
     var_confidence_level: float = 0.95

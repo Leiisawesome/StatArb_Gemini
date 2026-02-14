@@ -2,102 +2,42 @@
 Regime Detection Engine
 =======================
 
-Central regime detection and analysis system for StatArb_Gemini trading platform.
+Market regime detection and analysis for the StatArb_Gemini trading platform.
 
-This module provides comprehensive market regime detection, classification, and
-analysis capabilities to enable regime-aware trading strategies and risk management.
+Call DAG (backtest path)::
 
-Components:
------------
-- RegimeManager: [AUTHORITY] Central coordinator and primary system brick for regime analysis.
-- RealTimeRegimeSensor: [SENSOR] Low-latency per-bar signal processing (formerly EnhancedRegimeEngine).
-- RegimeDetector: Core regime detection using multiple methodologies.
-- RegimeClassifier: ML-based regime classification with feature engineering.
-- RegimeAwarePortfolioManager: Metadata-driven asset allocation by regime.
-- RegimePerformanceAttributor: Specialized performance math for regime analysis.
+    InstitutionalBacktestEngine
+      └─ RegimeManager (BRICK #1)               ← coordinator
+             ├─ RealTimeRegimeSensor (engine.py)  ← per-bar EWMA sensor
+             ├─ RegimeDetector                    ← batch statistical detection
+             ├─ MarketRegimeAnalyzer              ← cross-asset / macro analysis
+             ├─ RegimeIndicatorEngine             ← indicator + transition signals
+             ├─ RegimeTransitionManager           ← transition prediction
+             ├─ RegimeAwarePortfolioManager       ← allocation metadata
+             └─ RegimePerformanceAttributor       ← performance attribution
 
-- EnhancedRegimeEngine: [LEGACY ALIAS] Redirects to RealTimeRegimeSensor for backward compatibility.
-- RegimeIndicatorEngine: Regime-specific technical indicators.
-- MarketRegimeAnalyzer: Cross-asset and macro regime analysis.
-- RegimeTransitionManager: Regime transition prediction and management
+    SessionManagementMixin
+      └─ RealTimeRegimeSensor (fresh per day)    ← intraday state isolation
 
-Type Definitions:
------------------
-- RegimeType: Market regime types (bull, bear, sideways, high_vol, etc.)
-- RegimeState: Current regime state with metrics and implications
-- RegimeContext: Comprehensive regime context for system-wide distribution
-- RegimeDetection: Individual regime detection result
-- RegimeClassification: ML-based regime classification result
-
-Usage Example:
---------------
-```python
-from core_engine.regime import (
-    RegimeManager,
-    RegimeDetector,
-    RegimeClassifier,
-    RegimeType,
-    RegimeConfig
-)
-
-# Initialize with centralized configuration
-from core_engine.config import RegimeConfig
-
-config = RegimeConfig(
-    confidence_threshold=0.7,
-    lookback_window=60,
-    enable_ml_predictions=True
-)
-
-# Create regime manager
-regime_manager = RegimeManager(config)
-
-# Initialize for orchestrator integration (ISystemComponent)
-await regime_manager.initialize()
-await regime_manager.start()
-
-# Perform regime analysis
-regime_state = await regime_manager.update_regime_analysis(market_data)
-
-# Access regime information
-current_regime = regime_state.current_regime
-confidence = regime_state.regime_confidence
-implications = regime_state.portfolio_implications
-
-# Generate strategy adaptations
-adaptation = regime_manager.generate_regime_adaptation(
-    regime_state,
-    current_strategies
-)
-```
-
-Architecture:
--------------
-All components implement ISystemComponent for orchestrator integration:
-- initialize() -> bool: Initialize the component
-- start() -> bool: Start operations
-- stop() -> bool: Stop operations
-- health_check() -> Dict[str, Any]: Health monitoring
-- get_status() -> Dict[str, Any]: Status reporting
-
-All components use centralized RegimeConfig (Rule 1, Section 7):
-- Single source of configuration truth
-- Type-safe dataclass configuration
-- Built-in validation
-- Backward compatibility
-
-Author: StatArb_Gemini Team
-Version: 2.0.0
-Status: Production Ready
-Last Updated: October 21, 2025
+Components
+----------
+RegimeManager       Coordinator and primary system brick.
+RealTimeRegimeSensor  Low-latency per-bar signal processing (alias: EnhancedRegimeEngine).
+RegimeDetector      Statistical regime detection (Markov, GMM, volatility, threshold).
+MarketRegimeAnalyzer  Cross-asset and macro regime analysis.
+RegimeTransitionManager  Regime transition prediction and rebalancing.
+RegimeIndicatorEngine  Regime-specific technical indicators.
+RegimeClassifier    ML-based regime classification (optional — imports sklearn).
 """
 
-# Core Components
+# ---------------------------------------------------------------------------
+# Core components (always imported)
+# ---------------------------------------------------------------------------
 from .regime_manager import (
     RegimeManager,
     RegimeManagerStatus,
     AdaptationMode,
-    RegimeAdaptation
+    RegimeAdaptation,
 )
 from .allocation import RegimeAwarePortfolioManager
 from .attribution import RegimePerformanceAttributor
@@ -107,16 +47,7 @@ from .regime_detector import (
     RegimeType,
     RegimeDetection,
     DetectionMethod,
-    ConfidenceLevel
-)
-
-from .regime_classifier import (
-    RegimeClassifier,
-    RegimeClassification,
-    MLModel,
-    FeatureType,
-    FeatureImportance,
-    ModelPerformance
+    ConfidenceLevel,
 )
 
 from .engine import RealTimeRegimeSensor, EnhancedRegimeEngine
@@ -127,7 +58,7 @@ from .regime_indicators import (
     IndicatorType,
     TransitionSignal,
     RegimeStrengthMeasure,
-    SignalStrength
+    SignalStrength,
 )
 
 from .market_regime_analyzer import (
@@ -136,7 +67,7 @@ from .market_regime_analyzer import (
     MarketCycle,
     RiskEnvironment,
     AssetRegimeProfile,
-    CrossAssetRegime
+    CrossAssetRegime,
 )
 
 from .regime_transition_manager import (
@@ -146,15 +77,31 @@ from .regime_transition_manager import (
     TransitionPrediction,
     RebalancingTrigger,
     RebalancingRecommendation,
-    TransitionMonitoring
+    TransitionMonitoring,
 )
 
-# Export all
+# ---------------------------------------------------------------------------
+# Optional / ML component (deferred import to avoid eager sklearn load)
+# ---------------------------------------------------------------------------
+def __getattr__(name):
+    """Lazy-load RegimeClassifier and friends to avoid importing sklearn at
+    package-init time (~34 MB).  Only loaded when explicitly accessed."""
+    _classifier_names = {
+        'RegimeClassifier', 'RegimeClassification',
+        'MLModel', 'FeatureType', 'FeatureImportance', 'ModelPerformance',
+    }
+    if name in _classifier_names:
+        from . import regime_classifier as _rc
+        obj = getattr(_rc, name)
+        globals()[name] = obj  # cache for subsequent access
+        return obj
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 __all__ = [
     # Core Components
     'RegimeManager',
     'RegimeDetector',
-    'RegimeClassifier',
     'RealTimeRegimeSensor',
     'EnhancedRegimeEngine',
     'RegimeIndicatorEngine',
@@ -166,8 +113,6 @@ __all__ = [
     # RegimeManager Types
     'RegimeManagerStatus',
     'AdaptationMode',
-    'MarketRegimeState',
-    'RegimeState',
     'RegimeAdaptation',
 
     # RegimeDetector Types
@@ -176,14 +121,7 @@ __all__ = [
     'DetectionMethod',
     'ConfidenceLevel',
 
-    # RegimeClassifier Types
-    'RegimeClassification',
-    'MLModel',
-    'FeatureType',
-    'FeatureImportance',
-    'ModelPerformance',
-
-    # Engine Types
+    # Engine (alias)
 
     # Indicator Types
     'RegimeIndicator',
@@ -205,11 +143,14 @@ __all__ = [
     'TransitionPrediction',
     'RebalancingTrigger',
     'RebalancingRecommendation',
-    'TransitionMonitoring'
-]
+    'TransitionMonitoring',
 
-# Version information
-__version__ = '2.0.0'
-__author__ = 'StatArb_Gemini Team'
-__status__ = 'Production'
+    # ML Classifier (lazy-loaded)
+    'RegimeClassifier',
+    'RegimeClassification',
+    'MLModel',
+    'FeatureType',
+    'FeatureImportance',
+    'ModelPerformance',
+]
 

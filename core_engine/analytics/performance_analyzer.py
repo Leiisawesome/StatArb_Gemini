@@ -87,7 +87,7 @@ class PerformanceConfig:
     """Performance analysis configuration"""
     # Risk-free rate
     risk_free_rate_source: RiskFreeRateSource = RiskFreeRateSource.TREASURY_3M
-    custom_risk_free_rate: float = 0.02  # 2% annual
+    custom_risk_free_rate: float = 0.04  # 4% annual (aligned with BacktestConfig)
 
     # Calculation parameters
     trading_days_per_year: int = 252
@@ -2653,7 +2653,7 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
         """Calculate annualized volatility - delegates to core_metrics"""
         return core_volatility(returns, periods_per_year=252)
 
-    def calculate_sortino_ratio(self, returns: pd.Series, risk_free_rate: float = 0.02) -> float:
+    def calculate_sortino_ratio(self, returns: pd.Series, risk_free_rate: float = 0.04) -> float:
         """Calculate Sortino ratio - delegates to core_metrics"""
         from .core_metrics import calculate_sortino_ratio as core_sortino
         return core_sortino(returns, risk_free_rate=risk_free_rate, periods_per_year=252)

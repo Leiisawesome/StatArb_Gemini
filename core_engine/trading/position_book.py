@@ -416,7 +416,7 @@ class PositionBook(IPositionBook):
     Thread-safe implementation with event publishing.
 
     Usage:
-        book = PositionBook(initial_cash=Decimal('100000'))
+        book = PositionBook(initial_cash=Decimal('1000000'))
 
         # Subscribe to updates
         book.subscribe(lambda update: print(f"Position updated: {update}"))
@@ -432,7 +432,7 @@ class PositionBook(IPositionBook):
 
     def __init__(
         self,
-        initial_cash: Union[Decimal, float] = Decimal('100000'),
+        initial_cash: Union[Decimal, float] = Decimal('1000000'),
         book_id: str = "",
         default_commission_per_share: Union[Decimal, float] = Decimal('0.005'),
         default_slippage_bps: Union[Decimal, float] = Decimal('0.5')

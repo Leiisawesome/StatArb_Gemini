@@ -259,7 +259,7 @@ class TestMetricsCalculatorConfig:
     def test_initialization(self):
         """Test MetricsCalculatorConfig initialization with defaults."""
         config = MetricsCalculatorConfig()
-        assert config.risk_free_rate == 0.02
+        assert config.risk_free_rate == 0.04
         assert config.var_confidence_level == 0.95
         assert config.var_method == "historical"
         assert config.rolling_window == 60
@@ -326,7 +326,7 @@ class TestPerformanceAnalyticsConfig:
     def test_initialization(self):
         """Test PerformanceAnalyticsConfig initialization with defaults."""
         config = PerformanceAnalyticsConfig()
-        assert config.risk_free_rate == 0.02
+        assert config.risk_free_rate == 0.04
         assert config.annualization_factor == 252
         assert config.var_confidence_level == 0.95
         assert config.cvar_confidence_level == 0.95
@@ -443,7 +443,7 @@ class TestPortfolioConfig:
     def test_initialization(self):
         """Test PortfolioConfig initialization with defaults."""
         config = PortfolioConfig()
-        assert config.initial_cash == 100000.0
+        assert config.initial_cash == 1_000_000.0
         assert config.commission_rate == 0.001
         assert config.min_cash_reserve == 1000.0
         assert config.enable_short_selling is False

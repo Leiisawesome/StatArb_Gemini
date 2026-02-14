@@ -162,7 +162,7 @@ class PipelineAuditor:
     # Master entry point
     # ------------------------------------------------------------------
 
-    def run_all(self, initial_capital: float = 100_000.0, **kwargs) -> AuditReport:
+    def run_all(self, initial_capital: float = 1_000_000.0, **kwargs) -> AuditReport:
         """Run all audit checks and return a consolidated report."""
         report = AuditReport(total_records=len(self.records))
 
@@ -497,7 +497,7 @@ class PipelineAuditor:
 
     def check_capital_conservation(
         self,
-        initial_capital: float = 100_000.0,
+        initial_capital: float = 1_000_000.0,
         **_kwargs,
     ) -> List[CheckResult]:
         """Verify cash accounting identity: initial + Σ(cash_change) == final_cash.

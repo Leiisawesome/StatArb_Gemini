@@ -33,12 +33,13 @@ from core_engine.config.component_config import RegimeConfig as IndicatorConfig
 
 from core_engine.regime.regime_manager import (
     RegimeManagerStatus,
-    RegimeState,
     RegimeAdaptation,
-    RegimeAwarePortfolioManager,
-    RegimePerformanceAttribution,
-    RegimeManager
+    RegimeManager,
 )
+from core_engine.regime.allocation import RegimeAwarePortfolioManager
+from core_engine.regime.attribution import RegimePerformanceAttributor as RegimePerformanceAttribution
+from core_engine.type_definitions.regime import MarketRegimeState as RegimeState
+from core_engine.type_definitions.regime import MarketRegimeState as RegimeState
 from core_engine.config.component_config import RegimeConfig as RegimeManagerConfig
 
 class TestVolatilityRegimeIndicators:
@@ -309,25 +310,19 @@ class TestRegimeState:
 
         state = RegimeState(
             timestamp=timestamp,
-            current_regime=RegimeType.BULL_MARKET,
+            primary_regime=RegimeType.BULL_MARKET,
             regime_confidence=0.85,
             regime_duration=15,
             transition_probability=0.1,
             risk_adjustment_factor=1.2,
-            recommended_portfolio_adjustments={'max_position': 0.1, 'min_position': -0.1},
-            current_regime_performance=0.05,
-            last_update=timestamp
         )
 
         assert state.timestamp == timestamp
-        assert state.current_regime == RegimeType.BULL_MARKET
+        assert state.current_regime == RegimeType.BULL_MARKET  # property alias
         assert state.regime_confidence == 0.85
         assert state.regime_duration == 15
         assert state.transition_probability == 0.1
         assert state.risk_adjustment_factor == 1.2
-        assert state.recommended_portfolio_adjustments['max_position'] == 0.1
-        assert state.current_regime_performance == 0.05
-        assert state.last_update == timestamp
 
 class TestRegimeAdaptation:
     """Test RegimeAdaptation dataclass."""
@@ -539,8 +534,8 @@ class TestRegimeManager:
         # Create a mock regime state
         regime_state = RegimeState(
             timestamp=datetime.now(),
-            current_regime=RegimeType.BULL_MARKET,
-            regime_confidence=0.8
+            primary_regime=RegimeType.BULL_MARKET,
+            regime_confidence=0.8,
         )
 
         current_strategies = {'momentum': 0.6, 'mean_reversion': 0.4}

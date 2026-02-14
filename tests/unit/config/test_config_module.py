@@ -205,9 +205,11 @@ class TestUnifiedConfig:
         assert result == {"key": "value", "nested": {"subkey": "subvalue"}}
         assert config._loaded is True
 
-    @patch.dict(os.environ, {'TEST_PREFIX_KEY': 'value', 'TEST_PREFIX_NESTED_SUBKEY': 'subvalue'})
+    @patch.dict(os.environ, {'TEST_PREFIX_KEY': 'value', 'TEST_PREFIX_NESTED__SUBKEY': 'subvalue'})
     def test_load_env_config(self):
-        """Test loading environment variable configuration."""
+        """Test loading environment variable configuration.
+        Note: double-underscore (__) is the nesting separator (P2-18 convention).
+        """
         config = UnifiedConfig()
         config.add_env_source("TEST_PREFIX")
 

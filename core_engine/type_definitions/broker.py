@@ -79,7 +79,7 @@ class PaperBroker(BrokerInterface):
 
     def __init__(self, config: BrokerConfig):
         super().__init__(config)
-        self.cash = 100000.0  # Starting cash
+        self.cash = 1_000_000.0  # Starting cash (aligned with BacktestConfig)
         self.positions: Dict[str, float] = {}
         self.order_callbacks: List[Callable[[ExecutionResult], None]] = []
         self.commission_paid = 0.0

@@ -213,7 +213,7 @@ class PaperTradingConfig:
     per_trade_risk_pct: float = 0.005
 
     # Execution settings
-    initial_cash: float = 100_000.0
+    initial_cash: float = 1_000_000.0
     commission_per_share: float = 0.005
 
     # Regime evaluation semantics

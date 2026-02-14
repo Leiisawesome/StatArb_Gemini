@@ -219,7 +219,7 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
                 max_daily_var=config.get('max_daily_var', 0.05),
                 stop_loss_pct=config.get('stop_loss_pct', 0.02),
                 confidence_threshold=config.get('min_signal_confidence', 0.6),
-                max_drawdown=config.get('max_drawdown', 0.10)
+                max_drawdown=config.get('max_drawdown', 0.20)
             )
 
             self.config = RiskConfig(
@@ -326,7 +326,7 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
         self.liquidity_engine: Optional[Any] = None
 
         # Portfolio value and cash (synced from PositionBook when available)
-        initial_capital = config.get('initial_capital', 100000.0) if isinstance(config, dict) else 100000.0
+        initial_capital = config.get('initial_capital', 1_000_000.0) if isinstance(config, dict) else 1_000_000.0
         self.portfolio_value: float = initial_capital
         self.available_cash: float = initial_capital  # DEPRECATED: Use position_book.get_cash_balance()
         self.position_history: List[Dict[str, Any]] = []  # DEPRECATED: PositionBook tracks fill history
@@ -396,7 +396,7 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
         self._strategy_trade_outcomes.clear()
 
         # 5. Portfolio high-water mark → drawdown gating
-        initial_capital = float(getattr(self.config, 'initial_capital', 100000))
+        initial_capital = float(getattr(self.config, 'initial_capital', 1_000_000.0))
         self._portfolio_hwm = initial_capital
 
         logger.debug(
@@ -1716,7 +1716,7 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
                         current_dd = 0.0
                         if self._portfolio_hwm > 0:
                             current_dd = max(0.0, (float(self._portfolio_hwm) - float(self.portfolio_value)) / float(self._portfolio_hwm))
-                        max_dd = float(getattr(self.config.risk_limits, "max_drawdown", 0.10))
+                        max_dd = float(getattr(self.config.risk_limits, "max_drawdown", 0.20))
 
                         # Regime factor: use risk multiplier already applied by on_regime_change
                         regime_factor = float(getattr(self, "risk_multiplier", 1.0))
@@ -1970,428 +1970,418 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
 
         AUTHORITY: SINGLE SOURCE OF TRUTH for position updates (Rule 4)
 
-        ✅ PHASE 2: When PositionBook is configured, delegates to position_book.on_fill()
-        The PositionBook becomes the SSOT and this method syncs local state.
-
-        Args:
-            symbol: Trading symbol
-            side: 'buy' or 'sell'
-            quantity: Quantity traded
-            price: Execution price
-            timestamp: Trade timestamp (defaults to now)
-            strategy_id: Optional strategy identifier for attribution
-
-        Returns:
-            Dict with position update details
+        Delegates to ``_update_position_via_book`` when a PositionBook is
+        configured, otherwise falls back to ``_update_position_legacy``.
         """
-
         try:
             if timestamp is None:
                 timestamp = datetime.now()
 
-            # ============================================================
-            # PHASE 2: PositionBook Integration - Use SSOT when available
-            # ============================================================
             if self._position_book is not None:
-                # Runtime import to avoid circular dependency
-                from decimal import Decimal
-                from core_engine.trading.position_book import Fill, FillSide
-
-                # F3 FIX: Respect backtest_fill flag — when True, the
-                # HistoricalExecutionSimulator has already embedded all costs
-                # (spread, impact, slippage, commission) into fill_price.
-                # Applying commission again double-counts.
-                is_backtest_fill = kwargs.get('backtest_fill', False)
-                if is_backtest_fill:
-                    commission = 0.0
-                else:
-                    commission = max(1.0, quantity * price * 0.00005)
-
-                # Convert side string to enum
-                fill_side = FillSide.BUY if side.lower() == 'buy' else FillSide.SELL
-
-                fill = Fill(
-                    fill_id=f"fill_{timestamp.strftime('%Y%m%d%H%M%S%f')}",
-                    symbol=symbol,
-                    side=fill_side,
-                    quantity=Decimal(str(quantity)),
-                    price=Decimal(str(price)),
-                    commission=Decimal(str(commission)),
-                    timestamp=timestamp,
-                    strategy_id=strategy_id,
-                    metadata=metadata or {}
+                return await self._update_position_via_book(
+                    symbol, side, quantity, price, timestamp, strategy_id, metadata, **kwargs
                 )
-
-                # Delegate to PositionBook (SSOT)
-                position_update = self._position_book.on_fill(fill)
-
-                # The subscription callback in set_position_book already syncs:
-                # - self.current_positions
-                # - self.available_cash
-                # - self.current_prices
-                # So we just need to update portfolio metrics
-
-                self._update_portfolio_metrics()
-
-                # Sprint 1: Update P&L tracking (GAP 4-5)
-                if hasattr(self, 'pnl_tracker') and self.pnl_tracker:
-                    try:
-                        if side.lower() == 'buy':
-                            await self.pnl_tracker.update_position_entry(
-                                symbol=symbol,
-                                quantity=quantity,
-                                entry_price=price,
-                                strategy_id=strategy_id,
-                                timestamp=timestamp
-                            )
-                        elif side.lower() == 'sell':
-                            await self.pnl_tracker.update_position_close(
-                                symbol=symbol,
-                                quantity=quantity,
-                                exit_price=price,
-                                strategy_id=strategy_id,
-                                timestamp=timestamp
-                            )
-                        # P1: Record cost attribution from execution simulator
-                        _cost_attr_data = (metadata or {}).get('cost_attribution', {})
-                        if _cost_attr_data:
-                            self.pnl_tracker.record_cost_attribution(
-                                symbol=symbol,
-                                cost_attribution=_cost_attr_data,
-                                strategy_id=strategy_id,
-                            )
-                    except Exception as e:
-                        logger.warning(f"⚠️ P&L tracker update failed: {e}")
-
-                # Return compatible result
-                # Handle case where position is fully closed (position is None)
-                book_position = position_update.position
-                new_quantity = Decimal('0') if book_position is None else book_position.quantity
-
-                logger.info(
-                    f"[PB] PositionBook Update: {symbol} -> {float(new_quantity):.2f} shares | "
-                    f"Realized P&L: ${float(position_update.realized_pnl):,.2f} | "
-                    f"Cash: ${float(self._position_book.get_cash_balance()):,.2f}"
-                )
-
-                # Extract cost attribution from fill metadata (propagated from execution simulator)
-                _cost_attr = (metadata or {}).get('cost_attribution', {})
-
-                _result = {
-                    'success': True,
-                    'symbol': symbol,
-                    'previous_position': float(position_update.previous_quantity),
-                    'new_position': float(new_quantity),
-                    'position_value': float(new_quantity * Decimal(str(price))),
-                    'cash_change': float(position_update.cash_change),
-                    'available_cash': float(self._position_book.get_cash_balance()),
-                    'portfolio_value': self.portfolio_value,
-                    'timestamp': timestamp,
-                    'realized_pnl': float(position_update.realized_pnl),
-                    'cost_attribution': _cost_attr,
-                }
-
-                # --- CP7: Pipeline Trace - PnL Calculation ---
-                from core_engine.utils.pipeline_trace import get_tracer, CP7_PNL
-                _cp7_tracer = get_tracer()
-                if _cp7_tracer.enabled:
-                    realized_pnl = float(position_update.realized_pnl)
-                    unrealized_pnl = 0.0
-                    total_pnl = 0.0
-                    position_pnl = 0.0
-                    cost_basis = 0.0
-
-                    if hasattr(self, 'pnl_tracker') and self.pnl_tracker:
-                        realized_pnl = float(self.pnl_tracker.realized_pnl)
-                        unrealized_pnl = float(self.pnl_tracker.unrealized_pnl)
-                        total_pnl = float(self.pnl_tracker.total_pnl)
-                        position_pnl = float(self.pnl_tracker.position_pnl.get(symbol, 0.0))
-                        cost_basis = float(self.pnl_tracker.position_cost_basis.get(symbol, 0.0))
-                    else:
-                        try:
-                            unrealized_pnl = float(self._position_book.get_unrealized_pnl())
-                        except Exception:
-                            unrealized_pnl = 0.0
-                        total_pnl = realized_pnl + unrealized_pnl
-
-                    if total_pnl == 0.0 and (realized_pnl != 0.0 or unrealized_pnl != 0.0):
-                        total_pnl = realized_pnl + unrealized_pnl
-
-                    _cp7_tracer.emit(
-                        trace_id=fill.fill_id,
-                        checkpoint=CP7_PNL,
-                        component="CentralRiskManager",
-                        method="update_position",
-                        symbol=symbol,
-                        bar_timestamp=str(timestamp),
-                        input_data={
-                            "fill_id": fill.fill_id,
-                            "side": side,
-                            "quantity": float(quantity),
-                            "price": float(price),
-                            "previous_position": float(position_update.previous_quantity),
-                            "previous_quantity": float(position_update.previous_quantity),
-                            "new_position": float(new_quantity),
-                            "new_quantity": float(new_quantity),
-                            "cost_basis": cost_basis,
-                            "event_type": position_update.event_type.value if hasattr(position_update.event_type, 'value') else str(position_update.event_type),
-                            "realized_pnl": float(position_update.realized_pnl),
-                            "cash_change": float(position_update.cash_change),
-                            "new_avg_price": float(position_update.new_avg_price),
-                            "total_realized_pnl": float(self._position_book._total_realized_pnl),
-                        },
-                        output_data={
-                            "realized_pnl": realized_pnl,
-                            "unrealized_pnl": unrealized_pnl,
-                            "total_pnl": total_pnl,
-                            "position_pnl": position_pnl,
-                            "cash_change": float(position_update.cash_change),
-                            "cash_balance": float(self._position_book.get_cash_balance()),
-                            "portfolio_value": self.portfolio_value,
-                        },
-                        metadata={
-                            "positions_count": len(self.current_positions),
-                            "total_realized_pnl": float(self._position_book._total_realized_pnl),
-                            "cost_attribution": _cost_attr,
-                        },
-                    )
-
-                return _result
-
-            # ============================================================
-            # LEGACY PATH: Direct position tracking (backward compatibility)
-            # ============================================================
-            current_position = self.current_positions.get(symbol, 0.0)
-            previous_cash = self.available_cash
-
-            # H4 COST OWNERSHIP BOUNDARY:
-            # In backtest mode, the HistoricalExecutionSimulator has ALREADY
-            # embedded all transaction costs (spread, impact, slippage, commission)
-            # into the fill_price. The price passed here IS the cost-adjusted fill.
-            # Therefore, we set transaction_cost = 0 in backtest mode to avoid
-            # double-counting. In live/paper mode, the broker fill price is the
-            # raw fill and costs must be deducted separately.
-            is_backtest_fill = kwargs.get('backtest_fill', False)
-            if is_backtest_fill:
-                commission = 0.0
-                slippage_cost = 0.0
-            else:
-                commission = max(1.0, quantity * price * 0.00005)  # Greater of $1 or 0.50 bps
-                slippage_bps = 0.5
-                slippage_cost = quantity * price * (slippage_bps / 10000)
-
-            total_transaction_cost = commission + slippage_cost
-
-            # Calculate new position and cash impact
-            if side.lower() == 'buy':
-                new_position = current_position + quantity
-                cash_change = -(quantity * price)  # Cash decreases for purchase
-                cash_change -= total_transaction_cost  # Subtract transaction costs
-
-                # H4 R3 FIX + C2 R4 FIX: Cash balance gate.
-                # If covering a short, only the EXCESS portion (going long beyond
-                # the cover) requires cash. A pure cover frees margin, not spends cash.
-                is_covering_short = current_position < 0
-                if is_covering_short:
-                    cover_qty = min(quantity, abs(current_position))
-                    excess_long_qty = quantity - cover_qty
-                    if excess_long_qty > 0:
-                        # AXIS3 FIX: The FULL trade costs cash = quantity * price + costs.
-                        # The cover portion costs cover_qty * price in cash outflow.
-                        # The excess portion costs excess_long_qty * price.
-                        # Validate the TOTAL won't make cash negative.
-                        if (self.available_cash + cash_change) < 0:
-                            logger.warning(
-                                f"❌ BUY REJECTED: {symbol} {quantity} @ ${price:.2f} — "
-                                f"covers {cover_qty} short + excess {excess_long_qty} long "
-                                f"total cash impact ${cash_change:,.2f} exceeds "
-                                f"available ${self.available_cash:,.2f}"
-                            )
-                            return {
-                                'success': False,
-                                'error': f'Insufficient cash for cover+long reversal'
-                            }
-                elif (self.available_cash + cash_change) < 0:
-                    logger.warning(
-                        f"❌ BUY REJECTED: {symbol} {quantity} @ ${price:.2f} — "
-                        f"insufficient cash (${self.available_cash:,.2f} + ${cash_change:,.2f} < 0)"
-                    )
-                    return {
-                        'success': False,
-                        'error': f'Insufficient cash: need ${abs(cash_change):,.2f}, have ${self.available_cash:,.2f}'
-                    }
-
-                self.available_cash += cash_change
-
-                logger.info(
-                    f"💰 BUY: {symbol} {quantity} @ ${price:.2f} | "
-                    f"Cash: ${previous_cash:,.2f} → ${self.available_cash:,.2f} "
-                    f"(${cash_change:,.2f}) | Costs: ${total_transaction_cost:.2f} (comm: ${commission:.2f}, slip: ${slippage_cost:.2f})"
-                )
-
-            elif side.lower() == 'sell':
-                new_position = current_position - quantity
-                cash_change = +(quantity * price)  # Cash increases from sale
-                cash_change -= total_transaction_cost  # Subtract transaction costs
-                self.available_cash += cash_change
-
-                logger.info(
-                    f"💰 SELL: {symbol} {quantity} @ ${price:.2f} | "
-                    f"Cash: ${previous_cash:,.2f} → ${self.available_cash:,.2f} "
-                    f"(+${cash_change:,.2f}) | Costs: ${total_transaction_cost:.2f} (comm: ${commission:.2f}, slip: ${slippage_cost:.2f})"
-                )
-            else:
-                logger.warning(f"Unknown side: {side}")
-                return {
-                    'success': False,
-                    'error': f'Invalid side: {side}'
-                }
-
-            # Update position - remove from dict if closed
-            if new_position != 0.0:
-                self.current_positions[symbol] = new_position
-            else:
-                # Position fully closed - remove from dict
-                if symbol in self.current_positions:
-                    del self.current_positions[symbol]
-                    logger.debug(f"📘 current_positions[{symbol}] removed (position closed)")
-
-            # ✅ FIX: Store current price for portfolio valuation
-            if price > 0:
-                self.current_prices[symbol] = price
-
-            # Calculate position value
-            position_value = new_position * price if price > 0 else 0.0
-
-            # Record position change in history (including transaction costs)
-            position_change = {
-                'timestamp': timestamp,
-                'symbol': symbol,
-                'side': side,
-                'quantity': quantity,
-                'price': price,
-                'previous_position': current_position,
-                'new_position': new_position,
-                'position_value': position_value,
-                'cash_change': cash_change,
-                'previous_cash': previous_cash,
-                'new_cash': self.available_cash,
-                'commission': commission,
-                'slippage_cost': slippage_cost,
-                'total_transaction_cost': total_transaction_cost
-            }
-            self.position_history.append(position_change)
-
-            # Update portfolio metrics
-            self._update_portfolio_metrics()
-
-            # C4 R3 FIX: Compute realized P&L for the legacy path (no PositionBook).
-            # Logic: closing or reducing a position realizes P&L. Opening increases
-            # the cost basis. Direction is inferred from current_position sign.
-            realized_pnl = 0.0
-            is_closing = False
-            if side.lower() == 'buy' and current_position < 0:
-                # Buying to cover a short — this is a close
-                close_qty = min(quantity, abs(current_position))
-                avg_entry = getattr(self, '_avg_entry_prices', {}).get(symbol, price)
-                realized_pnl = close_qty * (avg_entry - price)  # Short P&L: entry - exit
-                is_closing = True
-            elif side.lower() == 'sell' and current_position > 0:
-                # Selling a long — this is a close
-                close_qty = min(quantity, current_position)
-                avg_entry = getattr(self, '_avg_entry_prices', {}).get(symbol, price)
-                realized_pnl = close_qty * (price - avg_entry)  # Long P&L: exit - entry
-                is_closing = True
-
-            # Update average entry price for new/increased positions
-            if not hasattr(self, '_avg_entry_prices'):
-                self._avg_entry_prices = {}
-
-            if not is_closing:
-                # Opening or adding to position — update avg entry
-                existing_qty = abs(current_position)
-                existing_entry = self._avg_entry_prices.get(symbol, 0.0)
-                total_qty = existing_qty + quantity
-                if total_qty > 0:
-                    self._avg_entry_prices[symbol] = (
-                        (existing_entry * existing_qty + price * quantity) / total_qty
-                    )
-            elif abs(new_position) < 1e-9:
-                # Fully closed — remove entry price
-                self._avg_entry_prices.pop(symbol, None)
-            elif (current_position > 0 and new_position < 0) or \
-                 (current_position < 0 and new_position > 0):
-                # C1 R4 FIX: Position REVERSED (long→short or short→long).
-                # The closing leg P&L was already computed above.
-                # Now track the entry price for the NEW direction at current price.
-                self._avg_entry_prices[symbol] = price
-
-            # AXIS3 FIX: pnl_tracker integration with correct quantities.
-            # For reversals, close the old leg with close_qty, then open the new leg.
-            _strategy_id = kwargs.get('strategy_id', None)
-            if hasattr(self, 'pnl_tracker') and self.pnl_tracker:
-                try:
-                    if is_closing:
-                        # Use close_qty (not full quantity) — the actual closed portion
-                        _close_qty = close_qty if close_qty > 0 else quantity
-                        await self.pnl_tracker.update_position_close(
-                            symbol=symbol,
-                            quantity=_close_qty,
-                            exit_price=price,
-                            strategy_id=_strategy_id,
-                            timestamp=timestamp
-                        )
-                        # For reversals, also record the opening leg of the new direction
-                        _is_reversal = (
-                            (current_position > 0 and new_position < 0) or
-                            (current_position < 0 and new_position > 0)
-                        )
-                        if _is_reversal and abs(new_position) > 1e-9:
-                            await self.pnl_tracker.update_position_entry(
-                                symbol=symbol,
-                                quantity=abs(new_position),
-                                entry_price=price,
-                                strategy_id=_strategy_id,
-                                timestamp=timestamp
-                            )
-                    else:
-                        await self.pnl_tracker.update_position_entry(
-                            symbol=symbol,
-                            quantity=quantity,
-                            entry_price=price,
-                            strategy_id=_strategy_id,
-                            timestamp=timestamp
-                        )
-                    logger.debug(f"✅ P&L tracker updated for {symbol}")
-                except Exception as e:
-                    logger.warning(f"⚠️ P&L tracker update failed: {e}")
-
-            logger.info(
-                f"📊 Position Update Complete (Rule 7.3, Phase 10): {symbol} "
-                f"{current_position} → {new_position} | "
-                f"Portfolio Value: ${self.portfolio_value:,.2f} | "
-                f"Cash: ${self.available_cash:,.2f}"
+            return await self._update_position_legacy(
+                symbol, side, quantity, price, timestamp, strategy_id, metadata, **kwargs
             )
-
-            return {
-                'success': True,
-                'symbol': symbol,
-                'previous_position': current_position,
-                'new_position': new_position,
-                'position_value': position_value,
-                'cash_change': cash_change,
-                'available_cash': self.available_cash,
-                'portfolio_value': self.portfolio_value,
-                'timestamp': timestamp,
-                'realized_pnl': realized_pnl,  # C4 R3 FIX: always present
-            }
 
         except Exception as e:
             logger.error(f"Position update failed: {e}")
-            return {
-                'success': False,
-                'error': str(e)
-            }
+            return {'success': False, 'error': str(e)}
+
+    # ------------------------------------------------------------------
+    # update_position helpers (extracted for readability)
+    # ------------------------------------------------------------------
+
+    async def _update_position_via_book(
+        self, symbol: str, side: str, quantity: float, price: float,
+        timestamp: datetime, strategy_id: str, metadata: Optional[Dict[str, Any]], **kwargs
+    ) -> Dict[str, Any]:
+        """PositionBook path — delegates to position_book.on_fill() (SSOT)."""
+        from decimal import Decimal
+        from core_engine.trading.position_book import Fill, FillSide
+
+        # F3 FIX: backtest_fill flag means costs already embedded in price
+        is_backtest_fill = kwargs.get('backtest_fill', False)
+        commission = 0.0 if is_backtest_fill else max(1.0, quantity * price * 0.00005)
+
+        fill_side = FillSide.BUY if side.lower() == 'buy' else FillSide.SELL
+        fill = Fill(
+            fill_id=f"fill_{timestamp.strftime('%Y%m%d%H%M%S%f')}",
+            symbol=symbol,
+            side=fill_side,
+            quantity=Decimal(str(quantity)),
+            price=Decimal(str(price)),
+            commission=Decimal(str(commission)),
+            timestamp=timestamp,
+            strategy_id=strategy_id,
+            metadata=metadata or {}
+        )
+
+        position_update = self._position_book.on_fill(fill)
+        self._update_portfolio_metrics()
+
+        # P&L tracker update
+        await self._sync_pnl_tracker_book_path(
+            symbol, side, quantity, price, strategy_id, timestamp, metadata
+        )
+
+        # Build result dict
+        book_position = position_update.position
+        new_quantity = Decimal('0') if book_position is None else book_position.quantity
+
+        logger.info(
+            f"[PB] PositionBook Update: {symbol} -> {float(new_quantity):.2f} shares | "
+            f"Realized P&L: ${float(position_update.realized_pnl):,.2f} | "
+            f"Cash: ${float(self._position_book.get_cash_balance()):,.2f}"
+        )
+
+        _cost_attr = (metadata or {}).get('cost_attribution', {})
+
+        _result = {
+            'success': True,
+            'symbol': symbol,
+            'previous_position': float(position_update.previous_quantity),
+            'new_position': float(new_quantity),
+            'position_value': float(new_quantity * Decimal(str(price))),
+            'cash_change': float(position_update.cash_change),
+            'available_cash': float(self._position_book.get_cash_balance()),
+            'portfolio_value': self.portfolio_value,
+            'timestamp': timestamp,
+            'realized_pnl': float(position_update.realized_pnl),
+            'cost_attribution': _cost_attr,
+        }
+
+        # CP7 trace
+        self._emit_cp7_position_trace(
+            fill=fill, side=side, symbol=symbol, timestamp=timestamp,
+            quantity=quantity, price=price,
+            position_update=position_update, new_quantity=new_quantity,
+            cost_attr=_cost_attr,
+        )
+
+        return _result
+
+    async def _sync_pnl_tracker_book_path(
+        self, symbol: str, side: str, quantity: float, price: float,
+        strategy_id: str, timestamp: datetime, metadata: Optional[Dict[str, Any]]
+    ) -> None:
+        """Update P&L tracker after a PositionBook fill (buy/sell based)."""
+        if not (hasattr(self, 'pnl_tracker') and self.pnl_tracker):
+            return
+        try:
+            if side.lower() == 'buy':
+                await self.pnl_tracker.update_position_entry(
+                    symbol=symbol, quantity=quantity, entry_price=price,
+                    strategy_id=strategy_id, timestamp=timestamp,
+                )
+            elif side.lower() == 'sell':
+                await self.pnl_tracker.update_position_close(
+                    symbol=symbol, quantity=quantity, exit_price=price,
+                    strategy_id=strategy_id, timestamp=timestamp,
+                )
+            _cost_attr_data = (metadata or {}).get('cost_attribution', {})
+            if _cost_attr_data:
+                self.pnl_tracker.record_cost_attribution(
+                    symbol=symbol, cost_attribution=_cost_attr_data,
+                    strategy_id=strategy_id,
+                )
+        except Exception as e:
+            logger.warning(f"P&L tracker update failed: {e}")
+
+    def _emit_cp7_position_trace(
+        self, *, fill, side, symbol, timestamp, quantity, price,
+        position_update, new_quantity, cost_attr,
+    ) -> None:
+        """Emit CP7 pipeline trace for a PositionBook position update."""
+        from core_engine.utils.pipeline_trace import get_tracer, CP7_PNL
+        _cp7_tracer = get_tracer()
+        if not _cp7_tracer.enabled:
+            return
+
+        realized_pnl = float(position_update.realized_pnl)
+        unrealized_pnl = 0.0
+        total_pnl = 0.0
+        position_pnl = 0.0
+        cost_basis = 0.0
+
+        if hasattr(self, 'pnl_tracker') and self.pnl_tracker:
+            realized_pnl = float(self.pnl_tracker.realized_pnl)
+            unrealized_pnl = float(self.pnl_tracker.unrealized_pnl)
+            total_pnl = float(self.pnl_tracker.total_pnl)
+            position_pnl = float(self.pnl_tracker.position_pnl.get(symbol, 0.0))
+            cost_basis = float(self.pnl_tracker.position_cost_basis.get(symbol, 0.0))
+        else:
+            try:
+                unrealized_pnl = float(self._position_book.get_unrealized_pnl())
+            except Exception:
+                unrealized_pnl = 0.0
+            total_pnl = realized_pnl + unrealized_pnl
+
+        if total_pnl == 0.0 and (realized_pnl != 0.0 or unrealized_pnl != 0.0):
+            total_pnl = realized_pnl + unrealized_pnl
+
+        _cp7_tracer.emit(
+            trace_id=fill.fill_id,
+            checkpoint=CP7_PNL,
+            component="CentralRiskManager",
+            method="update_position",
+            symbol=symbol,
+            bar_timestamp=str(timestamp),
+            input_data={
+                "fill_id": fill.fill_id,
+                "side": side,
+                "quantity": float(quantity),
+                "price": float(price),
+                "previous_position": float(position_update.previous_quantity),
+                "previous_quantity": float(position_update.previous_quantity),
+                "new_position": float(new_quantity),
+                "new_quantity": float(new_quantity),
+                "cost_basis": cost_basis,
+                "event_type": position_update.event_type.value if hasattr(position_update.event_type, 'value') else str(position_update.event_type),
+                "realized_pnl": float(position_update.realized_pnl),
+                "cash_change": float(position_update.cash_change),
+                "new_avg_price": float(position_update.new_avg_price),
+                "total_realized_pnl": float(self._position_book._total_realized_pnl),
+            },
+            output_data={
+                "realized_pnl": realized_pnl,
+                "unrealized_pnl": unrealized_pnl,
+                "total_pnl": total_pnl,
+                "position_pnl": position_pnl,
+                "cash_change": float(position_update.cash_change),
+                "cash_balance": float(self._position_book.get_cash_balance()),
+                "portfolio_value": self.portfolio_value,
+            },
+            metadata={
+                "positions_count": len(self.current_positions),
+                "total_realized_pnl": float(self._position_book._total_realized_pnl),
+                "cost_attribution": cost_attr,
+            },
+        )
+
+    async def _update_position_legacy(
+        self, symbol: str, side: str, quantity: float, price: float,
+        timestamp: datetime, strategy_id: str, metadata: Optional[Dict[str, Any]], **kwargs
+    ) -> Dict[str, Any]:
+        """Legacy path — direct position tracking without PositionBook."""
+        current_position = self.current_positions.get(symbol, 0.0)
+        previous_cash = self.available_cash
+
+        # H4 COST OWNERSHIP BOUNDARY: backtest fills have costs embedded in price
+        is_backtest_fill = kwargs.get('backtest_fill', False)
+        if is_backtest_fill:
+            commission = 0.0
+            slippage_cost = 0.0
+        else:
+            commission = max(1.0, quantity * price * 0.00005)
+            slippage_bps = 0.5
+            slippage_cost = quantity * price * (slippage_bps / 10000)
+        total_transaction_cost = commission + slippage_cost
+
+        # ---------- Apply cash and position changes ----------
+        result_or_none = self._apply_legacy_cash_and_position(
+            symbol, side, quantity, price, current_position,
+            total_transaction_cost, commission, slippage_cost, previous_cash,
+        )
+        if result_or_none is not None:
+            # Rejection dict returned
+            return result_or_none
+
+        new_position = self.current_positions.get(symbol, 0.0)
+        cash_change = self.available_cash - previous_cash
+
+        # Store current price for portfolio valuation
+        if price > 0:
+            self.current_prices[symbol] = price
+
+        position_value = new_position * price if price > 0 else 0.0
+
+        # Record position change in history
+        self.position_history.append({
+            'timestamp': timestamp, 'symbol': symbol, 'side': side,
+            'quantity': quantity, 'price': price,
+            'previous_position': current_position, 'new_position': new_position,
+            'position_value': position_value, 'cash_change': cash_change,
+            'previous_cash': previous_cash, 'new_cash': self.available_cash,
+            'commission': commission, 'slippage_cost': slippage_cost,
+            'total_transaction_cost': total_transaction_cost,
+        })
+
+        self._update_portfolio_metrics()
+
+        # ---------- Realized P&L + avg-entry tracking ----------
+        realized_pnl = self._compute_legacy_realized_pnl(
+            symbol, side, quantity, price, current_position, new_position,
+        )
+
+        # ---------- P&L tracker integration ----------
+        await self._sync_pnl_tracker_legacy_path(
+            symbol, side, quantity, price, current_position, new_position,
+            realized_pnl, timestamp, kwargs.get('strategy_id'),
+        )
+
+        logger.info(
+            f"Position Update Complete: {symbol} "
+            f"{current_position} -> {new_position} | "
+            f"Portfolio Value: ${self.portfolio_value:,.2f} | "
+            f"Cash: ${self.available_cash:,.2f}"
+        )
+
+        return {
+            'success': True,
+            'symbol': symbol,
+            'previous_position': current_position,
+            'new_position': new_position,
+            'position_value': position_value,
+            'cash_change': cash_change,
+            'available_cash': self.available_cash,
+            'portfolio_value': self.portfolio_value,
+            'timestamp': timestamp,
+            'realized_pnl': realized_pnl,
+        }
+
+    def _apply_legacy_cash_and_position(
+        self, symbol, side, quantity, price, current_position,
+        total_transaction_cost, commission, slippage_cost, previous_cash,
+    ) -> Optional[Dict[str, Any]]:
+        """Apply buy/sell cash changes and update current_positions.
+
+        Returns a rejection dict if the trade is rejected (insufficient cash),
+        or ``None`` on success (caller reads updated state from ``self``).
+        """
+        if side.lower() == 'buy':
+            new_position = current_position + quantity
+            cash_change = -(quantity * price) - total_transaction_cost
+
+            # Cash balance gate (short-cover vs fresh buy)
+            is_covering_short = current_position < 0
+            if is_covering_short:
+                cover_qty = min(quantity, abs(current_position))
+                excess_long_qty = quantity - cover_qty
+                if excess_long_qty > 0 and (self.available_cash + cash_change) < 0:
+                    logger.warning(
+                        f"BUY REJECTED: {symbol} {quantity} @ ${price:.2f} -- "
+                        f"covers {cover_qty} short + excess {excess_long_qty} long "
+                        f"total cash impact ${cash_change:,.2f} exceeds "
+                        f"available ${self.available_cash:,.2f}"
+                    )
+                    return {'success': False, 'error': 'Insufficient cash for cover+long reversal'}
+            elif (self.available_cash + cash_change) < 0:
+                logger.warning(
+                    f"BUY REJECTED: {symbol} {quantity} @ ${price:.2f} -- "
+                    f"insufficient cash (${self.available_cash:,.2f} + ${cash_change:,.2f} < 0)"
+                )
+                return {
+                    'success': False,
+                    'error': f'Insufficient cash: need ${abs(cash_change):,.2f}, have ${self.available_cash:,.2f}',
+                }
+
+            self.available_cash += cash_change
+            logger.info(
+                f"BUY: {symbol} {quantity} @ ${price:.2f} | "
+                f"Cash: ${previous_cash:,.2f} -> ${self.available_cash:,.2f} "
+                f"(${cash_change:,.2f}) | Costs: ${total_transaction_cost:.2f}"
+            )
+
+        elif side.lower() == 'sell':
+            new_position = current_position - quantity
+            cash_change = +(quantity * price) - total_transaction_cost
+            self.available_cash += cash_change
+            logger.info(
+                f"SELL: {symbol} {quantity} @ ${price:.2f} | "
+                f"Cash: ${previous_cash:,.2f} -> ${self.available_cash:,.2f} "
+                f"(+${cash_change:,.2f}) | Costs: ${total_transaction_cost:.2f}"
+            )
+        else:
+            logger.warning(f"Unknown side: {side}")
+            return {'success': False, 'error': f'Invalid side: {side}'}
+
+        # Update position dict
+        if new_position != 0.0:
+            self.current_positions[symbol] = new_position
+        elif symbol in self.current_positions:
+            del self.current_positions[symbol]
+            logger.debug(f"current_positions[{symbol}] removed (position closed)")
+
+        return None  # success — caller reads state from self
+
+    def _compute_legacy_realized_pnl(
+        self, symbol, side, quantity, price, current_position, new_position,
+    ) -> float:
+        """Compute realized P&L and update avg-entry prices (legacy path)."""
+        realized_pnl = 0.0
+        is_closing = False
+        close_qty = 0.0
+
+        if side.lower() == 'buy' and current_position < 0:
+            close_qty = min(quantity, abs(current_position))
+            avg_entry = getattr(self, '_avg_entry_prices', {}).get(symbol, price)
+            realized_pnl = close_qty * (avg_entry - price)
+            is_closing = True
+        elif side.lower() == 'sell' and current_position > 0:
+            close_qty = min(quantity, current_position)
+            avg_entry = getattr(self, '_avg_entry_prices', {}).get(symbol, price)
+            realized_pnl = close_qty * (price - avg_entry)
+            is_closing = True
+
+        # Update average entry price
+        if not hasattr(self, '_avg_entry_prices'):
+            self._avg_entry_prices = {}
+
+        if not is_closing:
+            existing_qty = abs(current_position)
+            existing_entry = self._avg_entry_prices.get(symbol, 0.0)
+            total_qty = existing_qty + quantity
+            if total_qty > 0:
+                self._avg_entry_prices[symbol] = (
+                    (existing_entry * existing_qty + price * quantity) / total_qty
+                )
+        elif abs(new_position) < 1e-9:
+            self._avg_entry_prices.pop(symbol, None)
+        elif (current_position > 0 and new_position < 0) or \
+             (current_position < 0 and new_position > 0):
+            self._avg_entry_prices[symbol] = price
+
+        return realized_pnl
+
+    async def _sync_pnl_tracker_legacy_path(
+        self, symbol, side, quantity, price, current_position, new_position,
+        realized_pnl, timestamp, strategy_id,
+    ) -> None:
+        """Sync P&L tracker for the legacy (no-PositionBook) path."""
+        if not (hasattr(self, 'pnl_tracker') and self.pnl_tracker):
+            return
+        try:
+            is_closing = (
+                (side.lower() == 'buy' and current_position < 0) or
+                (side.lower() == 'sell' and current_position > 0)
+            )
+            if is_closing:
+                close_qty = min(quantity, abs(current_position))
+                _close_qty = close_qty if close_qty > 0 else quantity
+                await self.pnl_tracker.update_position_close(
+                    symbol=symbol, quantity=_close_qty, exit_price=price,
+                    strategy_id=strategy_id, timestamp=timestamp,
+                )
+                _is_reversal = (
+                    (current_position > 0 and new_position < 0) or
+                    (current_position < 0 and new_position > 0)
+                )
+                if _is_reversal and abs(new_position) > 1e-9:
+                    await self.pnl_tracker.update_position_entry(
+                        symbol=symbol, quantity=abs(new_position),
+                        entry_price=price, strategy_id=strategy_id,
+                        timestamp=timestamp,
+                    )
+            else:
+                await self.pnl_tracker.update_position_entry(
+                    symbol=symbol, quantity=quantity, entry_price=price,
+                    strategy_id=strategy_id, timestamp=timestamp,
+                )
+            logger.debug(f"P&L tracker updated for {symbol}")
+        except Exception as e:
+            logger.warning(f"P&L tracker update failed: {e}")
 
     def get_current_position(self, symbol: str) -> float:
         """Get current SIGNED position for symbol.
@@ -3852,49 +3842,59 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
         result['sizing_diagnostics']['requested_quantity'] = requested_qty
         result['sizing_diagnostics']['final_quantity'] = candidate_qty
 
-        # --- CP3: Pipeline Trace for ALL outcomes (auth + rejection) ---
+        self._emit_cp3_authorization_trace(
+            symbol, side, requested_qty, arrival_price, is_exit, signal,
+            result, _waterfall,
+        )
+
+        return result
+
+    def _emit_cp3_authorization_trace(
+        self, symbol, side, requested_qty, arrival_price, is_exit,
+        signal, result, waterfall,
+    ) -> None:
+        """Emit CP3 pipeline trace for authorization outcome."""
         try:
             from core_engine.utils.pipeline_trace import get_tracer, CP3_RISK_AUTH
             _cp3_tracer = get_tracer()
-            if _cp3_tracer.enabled:
-                _cp3_tracer.emit(
-                    trace_id=f"6gate_{symbol}",
-                    checkpoint=CP3_RISK_AUTH,
-                    component="CentralRiskManager",
-                    method="authorize_signal_6gate",
-                    symbol=symbol,
-                    bar_timestamp=str(signal.get('signal_timestamp', '')),
-                    input_data={
-                        "symbol": symbol,
-                        "side": side,
-                        "quantity": float(requested_qty),
-                        "signal_strength": float(signal.get('signal_strength', 0)),
-                        "confidence": float(signal.get('confidence', 0)),
-                        "arrival_price": float(arrival_price),
-                        "stop_loss_pct": float(signal.get('stop_loss_pct', 0)),
-                        "strategy_id": signal.get('strategy_id', ''),
-                        "is_exit": is_exit,
-                        "target_weight": signal.get('target_weight'),
-                    },
-                    output_data={
-                        "authorized": result['authorized'],
-                        "authorization_id": f"6gate_{symbol}",
-                        "authorized_quantity": float(result['authorized_quantity']),
-                        "rejection_reason": result['rejection_reason'] or None,
-                        "authorization_level": "AUTOMATIC" if result['authorized'] else "REJECTED",
-                        "gate_passed": result['gate_passed'],
-                    },
-                    metadata={
-                        "authorized": result['authorized'],
-                        "sizing_diagnostics": result['sizing_diagnostics'],
-                        "waterfall": _waterfall,
-                        "pipeline_elapsed_us": result['_pipeline_elapsed_us'],
-                    },
-                )
+            if not _cp3_tracer.enabled:
+                return
+            _cp3_tracer.emit(
+                trace_id=f"6gate_{symbol}",
+                checkpoint=CP3_RISK_AUTH,
+                component="CentralRiskManager",
+                method="authorize_signal_6gate",
+                symbol=symbol,
+                bar_timestamp=str(signal.get('signal_timestamp', '')),
+                input_data={
+                    "symbol": symbol,
+                    "side": side,
+                    "quantity": float(requested_qty),
+                    "signal_strength": float(signal.get('signal_strength', 0)),
+                    "confidence": float(signal.get('confidence', 0)),
+                    "arrival_price": float(arrival_price),
+                    "stop_loss_pct": float(signal.get('stop_loss_pct', 0)),
+                    "strategy_id": signal.get('strategy_id', ''),
+                    "is_exit": is_exit,
+                    "target_weight": signal.get('target_weight'),
+                },
+                output_data={
+                    "authorized": result['authorized'],
+                    "authorization_id": f"6gate_{symbol}",
+                    "authorized_quantity": float(result['authorized_quantity']),
+                    "rejection_reason": result['rejection_reason'] or None,
+                    "authorization_level": "AUTOMATIC" if result['authorized'] else "REJECTED",
+                    "gate_passed": result['gate_passed'],
+                },
+                metadata={
+                    "authorized": result['authorized'],
+                    "sizing_diagnostics": result['sizing_diagnostics'],
+                    "waterfall": waterfall,
+                    "pipeline_elapsed_us": result['_pipeline_elapsed_us'],
+                },
+            )
         except Exception:
             pass  # Trace emission must never break authorization
-
-        return result
 
     # ----------------------------------------------------------------
     # Gate helper methods
@@ -4290,7 +4290,7 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
                 current_dd = 0.0
                 if self._portfolio_hwm > 0:
                     current_dd = max(0.0, (float(self._portfolio_hwm) - float(portfolio_value)) / float(self._portfolio_hwm))
-                max_dd = float(getattr(self.config.risk_limits, "max_drawdown", 0.10))
+                max_dd = float(getattr(self.config.risk_limits, "max_drawdown", 0.20))
                 regime_factor = float(getattr(self, "risk_multiplier", 1.0))
 
                 pnls = self._strategy_trade_outcomes.get(strategy_id, [])

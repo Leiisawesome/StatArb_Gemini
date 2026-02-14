@@ -63,7 +63,7 @@ class ConfigurationBuilder:
                 }
             ],
             'risk': {
-                'initial_capital': 100000.0,
+                'initial_capital': 1_000_000.0,
                 'max_position_size': 0.10,
                 'max_daily_var': 0.05,
                 'max_concentration': 0.20

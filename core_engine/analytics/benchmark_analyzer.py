@@ -61,7 +61,7 @@ class BenchmarkConfig:
 
     # Risk-free rate proxy
     risk_free_symbol: str = "^TNX"  # 10-year Treasury
-    risk_free_rate: float = 0.02  # Fallback rate
+    risk_free_rate: float = 0.04  # Fallback rate (aligned with BacktestConfig)
 
     # Analysis settings
     comparison_methods: List[ComparisonMethod] = field(default_factory=lambda: [

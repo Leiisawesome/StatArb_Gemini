@@ -865,7 +865,7 @@ class SignalValidator:
     def validate_risk_limits(self, signal, market_data: Dict[str, Any]) -> Tuple[bool, ValidationStatus, str]:
         """Validate risk limits against market data"""
         max_position_size = self.config.get('max_position_size', 100000)
-        max_drawdown = self.config.get('max_drawdown', 0.1)
+        max_drawdown = self.config.get('max_drawdown', 0.20)
         max_volatility = self.config.get('max_volatility', 0.5)
 
         position_size = market_data.get('position_size', 0)

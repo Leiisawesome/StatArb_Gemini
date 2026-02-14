@@ -139,7 +139,7 @@ def calculate_cvar(
 
 def calculate_sharpe_ratio(
     returns: Union[np.ndarray, pd.Series],
-    risk_free_rate: float = 0.02,
+    risk_free_rate: float = 0.04,
     periods_per_year: int = 252
 ) -> float:
     """
@@ -179,7 +179,7 @@ def calculate_sharpe_ratio(
 
 def calculate_sortino_ratio(
     returns: Union[np.ndarray, pd.Series],
-    risk_free_rate: float = 0.02,
+    risk_free_rate: float = 0.04,
     periods_per_year: int = 252,
     target_return: float = 0.0
 ) -> float:
@@ -491,7 +491,7 @@ def calculate_beta(
 def calculate_alpha(
     returns: Union[np.ndarray, pd.Series],
     benchmark_returns: Union[np.ndarray, pd.Series],
-    risk_free_rate: float = 0.02,
+    risk_free_rate: float = 0.04,
     periods_per_year: int = 252
 ) -> float:
     """

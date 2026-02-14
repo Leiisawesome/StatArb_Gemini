@@ -67,7 +67,7 @@ class PortfolioSnapshot:
 @dataclass
 class PortfolioConfig:
     """Portfolio configuration"""
-    initial_cash: float = 100000.0
+    initial_cash: float = 1_000_000.0
     commission_rate: float = 0.001  # 0.1%
     min_cash_reserve: float = 1000.0
     max_position_size: float = 0.1  # 10% max per position

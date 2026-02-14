@@ -115,7 +115,7 @@ class SmokeTest(BaseExperiment):
                     # --- Pipeline Audit: automatic plumbing verification ---
                     try:
                         from core_engine.utils.pipeline_auditor import PipelineAuditor
-                        _initial_capital = float(self.config.get('initial_capital', 100000))
+                        _initial_capital = float(self.config.get('initial_capital', 1_000_000))
                         _auditor = PipelineAuditor.from_tracer()
                         _audit_report = _auditor.run_all(initial_capital=_initial_capital)
                         _audit_report.print_summary()
@@ -169,7 +169,7 @@ class SmokeTest(BaseExperiment):
         if external_configs:
             return await self._run_external_config_backtests(experiment_name, external_configs)
 
-        initial_capital = float(self.config.get('initial_capital', 100000))
+        initial_capital = float(self.config.get('initial_capital', 1_000_000))
         agg = RunAggregator(initial_capital=initial_capital)
 
         # H3 FIX: Compute capital allocation weights
@@ -224,7 +224,7 @@ class SmokeTest(BaseExperiment):
         from backtest.utils.config_loader import load_config
         from backtest.utils.isolated_runner import RunAggregator
 
-        initial_capital = float(self.config.get('initial_capital', 100000))
+        initial_capital = float(self.config.get('initial_capital', 1_000_000))
         agg = RunAggregator(initial_capital=initial_capital)
 
         # G7 FIX: Equal allocation (1/N) for external configs

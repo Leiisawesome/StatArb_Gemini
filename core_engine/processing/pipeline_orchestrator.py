@@ -272,6 +272,10 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
         # HOTSPOT 4: Concurrency control
         self._processing_semaphore = asyncio.Semaphore(4)  # Limit concurrent tasks
 
+        # Performance: quality metrics are diagnostic-only (used for logging).
+        # Disable in tight backtest loops to save ~2s per run.
+        self.enable_quality_metrics: bool = True
+
         logger.info("✅ ProcessingPipelineOrchestrator initialized (Rule 3 enforcement)")
 
     # ================================================================
@@ -716,39 +720,45 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
         Returns:
             Cleaned DataFrame
         """
-        df_clean = df.copy()
-        initial_nan = df_clean.isna().sum().sum()
+        # ---- Fast-path: check whether cleaning is needed BEFORE copying ----
+        numeric_cols = df.select_dtypes(include=[np.number]).columns
+        initial_nan = df[numeric_cols].isna().sum().sum() if len(numeric_cols) else 0
         initial_inf = 0
+        if len(numeric_cols):
+            # Vectorised Inf check across all numeric columns at once
+            inf_mask = np.isinf(df[numeric_cols].values)
+            initial_inf = int(inf_mask.sum())
 
-        # Count Inf values
-        numeric_cols = df_clean.select_dtypes(include=[np.number]).columns
-        for col in numeric_cols:
-            inf_count = np.isinf(df_clean[col]).sum()
-            if inf_count > 0:
-                initial_inf += inf_count
-                # Replace Inf with NaN first
-                df_clean[col] = df_clean[col].replace([np.inf, -np.inf], np.nan)
+        if initial_nan == 0 and initial_inf == 0:
+            # Data already clean — return as-is, no copy needed.
+            return df
 
-        if initial_nan > 0 or initial_inf > 0:
-            logger.debug(f"🧹 {phase}: Cleaning {initial_nan} NaN, {initial_inf} Inf values")
+        # ---- Slow-path: copy and clean ----
+        df_clean = df.copy()
+        logger.debug(f"🧹 {phase}: Cleaning {initial_nan} NaN, {initial_inf} Inf values")
 
-            # Forward fill (use last known value)
-            df_clean[numeric_cols] = df_clean[numeric_cols].ffill()
+        if initial_inf > 0:
+            for col in numeric_cols:
+                if np.isinf(df_clean[col]).any():
+                    df_clean[col] = df_clean[col].replace([np.inf, -np.inf], np.nan)
 
-            # Backward fill (for leading NaN)
-            df_clean[numeric_cols] = df_clean[numeric_cols].bfill()
+        # Forward fill (use last known value)
+        df_clean[numeric_cols] = df_clean[numeric_cols].ffill()
 
-            # Last resort: fill remaining NaN with 0 (should be rare)
-            remaining_nan = df_clean[numeric_cols].isna().sum().sum()
-            if remaining_nan > 0:
-                logger.warning(f"⚠️  {phase}: {remaining_nan} NaN values remain after fill, using 0")
-                df_clean[numeric_cols] = df_clean[numeric_cols].fillna(0)
+        # Backward fill (for leading NaN)
+        df_clean[numeric_cols] = df_clean[numeric_cols].bfill()
 
-            final_nan = df_clean.isna().sum().sum()
-            if final_nan == 0:
-                logger.debug(f"✅ {phase}: All NaN/Inf values cleaned")
-            else:
-                logger.error(f"❌ {phase}: {final_nan} NaN values remain after cleaning")
+        # Last resort: fill remaining NaN with 0 (should be rare)
+        remaining_nan = df_clean[numeric_cols].isna().sum().sum()
+        if remaining_nan > 0:
+            logger.warning(f"⚠️  {phase}: {remaining_nan} NaN values remain after fill, using 0")
+            df_clean[numeric_cols] = df_clean[numeric_cols].fillna(0)
+
+        final_nan = df_clean.isna().sum().sum()
+        if final_nan == 0:
+            logger.debug(f"✅ {phase}: All NaN/Inf values cleaned")
+        else:
+            logger.error(f"❌ {phase}: {final_nan} NaN values remain after cleaning")
 
         return df_clean
 
@@ -985,10 +995,11 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
                     # Clean NaN/Inf values
                     raw_data[symbol] = self._clean_dataframe(df, f"Phase 1 (Raw Data) - {symbol}")
 
-                    # Log quality metrics
-                    quality = self._calculate_data_quality_metrics(df, f"Phase 1 - {symbol}")
-                    if quality['quality_score'] < 0.9:
-                        logger.warning(f"⚠️  {symbol}: Raw data quality score: {quality['quality_score']:.2f}")
+                    # Log quality metrics (diagnostic only, skip when disabled)
+                    if self.enable_quality_metrics:
+                        quality = self._calculate_data_quality_metrics(df, f"Phase 1 - {symbol}")
+                        if quality['quality_score'] < 0.9:
+                            logger.warning(f"⚠️  {symbol}: Raw data quality score: {quality['quality_score']:.2f}")
 
             # Process symbols in parallel (Hotspot 4 fix)
             tasks = []
@@ -1501,9 +1512,10 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
             indicators_df = self._clean_dataframe(indicators_df, "Phase 2 (Indicators)")
 
             # Log quality metrics (warmup NaN is expected; INFO not WARNING)
-            quality = self._calculate_data_quality_metrics(indicators_df, "Phase 2 (Indicators)")
-            if quality['quality_score'] < 0.9:
-                logger.info(f"Indicator quality score: {quality['quality_score']:.2f} (warmup NaN expected)")
+            if self.enable_quality_metrics:
+                quality = self._calculate_data_quality_metrics(indicators_df, "Phase 2 (Indicators)")
+                if quality['quality_score'] < 0.9:
+                    logger.info(f"Indicator quality score: {quality['quality_score']:.2f} (warmup NaN expected)")
 
             return indicators_df
 
@@ -1563,9 +1575,10 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
             features_df = self._clean_dataframe(features_df, "Phase 3 (Features)")
 
             # Log quality metrics (warmup NaN is expected; INFO not WARNING)
-            quality = self._calculate_data_quality_metrics(features_df, "Phase 3 (Features)")
-            if quality['quality_score'] < 0.9:
-                logger.info(f"Feature quality score: {quality['quality_score']:.2f} (warmup NaN expected)")
+            if self.enable_quality_metrics:
+                quality = self._calculate_data_quality_metrics(features_df, "Phase 3 (Features)")
+                if quality['quality_score'] < 0.9:
+                    logger.info(f"Feature quality score: {quality['quality_score']:.2f} (warmup NaN expected)")
 
             return features_df
 

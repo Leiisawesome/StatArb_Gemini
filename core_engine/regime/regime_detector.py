@@ -805,22 +805,23 @@ class RegimeDetector(ISystemComponent, IRegimePolicy):
         # Initialize detectors (simplified - uses centralized config)
         self.detectors = {}
 
-        # Note: Detector initialization simplified for centralized config
-        # Individual detector classes will be updated separately if needed
+        # Default to threshold + volatility when config has no explicit methods
+        _default_methods = [DetectionMethod.THRESHOLD_BASED, DetectionMethod.VOLATILITY_BASED]
+        _methods = self._get_config_attr("methods", _default_methods) or _default_methods
 
-        if DetectionMethod.THRESHOLD_BASED in self._get_config_attr("methods", []):
+        if DetectionMethod.THRESHOLD_BASED in _methods:
             self.detectors[DetectionMethod.THRESHOLD_BASED] = ThresholdBasedDetector(self.config)
-        
-        if DetectionMethod.MARKOV_SWITCHING in self._get_config_attr("methods", []):
+
+        if DetectionMethod.MARKOV_SWITCHING in _methods:
             self.detectors[DetectionMethod.MARKOV_SWITCHING] = MarkovSwitchingDetector(self.config)
-            
-        if DetectionMethod.GAUSSIAN_MIXTURE in self._get_config_attr("methods", []):
+
+        if DetectionMethod.GAUSSIAN_MIXTURE in _methods:
             self.detectors[DetectionMethod.GAUSSIAN_MIXTURE] = GaussianMixtureDetector(self.config)
-            
-        if DetectionMethod.VOLATILITY_BASED in self._get_config_attr("methods", []):
+
+        if DetectionMethod.VOLATILITY_BASED in _methods:
             self.detectors[DetectionMethod.VOLATILITY_BASED] = VolatilityBasedDetector(self.config)
 
-        logger.info(f"Regime detector initialized with {len(self.detectors)} methods")
+        logger.info(f"Regime detector initialized with {len(self.detectors)} methods: {[m.value for m in self.detectors]}")
 
     def get_capabilities(self) -> Dict[str, Any]:
         """Returns metadata about what this policy can detect."""

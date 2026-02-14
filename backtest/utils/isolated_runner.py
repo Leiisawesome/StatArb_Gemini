@@ -22,13 +22,13 @@ class RunAggregator:
     and builds a combined summary.
 
     Usage:
-        agg = RunAggregator(initial_capital=100000)
+        agg = RunAggregator(initial_capital=1_000_000)
         agg.add_run(strategy_name, engine_results, metrics, alloc_weight, execution_history)
         ...
         result = agg.build_combined(experiment_name, include_hypothesis_tests=True)
     """
 
-    def __init__(self, initial_capital: float = 100_000.0):
+    def __init__(self, initial_capital: float = 1_000_000.0):
         self.initial_capital = initial_capital
         self.isolated_runs: List[Dict[str, Any]] = []
         self.combined_execution_history: List[Dict[str, Any]] = []

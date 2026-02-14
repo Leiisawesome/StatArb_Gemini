@@ -216,7 +216,7 @@ class TestInitialization:
         assert var_calculator.lookback_window == 252
         assert var_calculator.min_observations == 50
         assert var_calculator.mc_simulations == 10000
-        assert var_calculator.risk_free_rate == 0.02
+        assert var_calculator.risk_free_rate == 0.04
 
         # Check internal state
         assert hasattr(var_calculator, '_lock')

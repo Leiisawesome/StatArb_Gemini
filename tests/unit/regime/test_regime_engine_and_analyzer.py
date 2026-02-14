@@ -290,9 +290,8 @@ class TestEnhancedRegimeEngine:
         analysis = engine.analyze_regime(sample_market_data)
 
         assert isinstance(analysis, dict)
-        assert 'regime_analysis_performed' in analysis
+        assert 'market_data_processed' in analysis
         assert 'processing_timestamp' in analysis
-        assert 'processing_component' in analysis
 
     def test_subscriber_management(self, regime_config):
         """Test subscriber management."""
@@ -347,7 +346,7 @@ class TestEnhancedRegimeEngine:
         analysis = engine.analyze_regime(sample_market_data)
 
         assert isinstance(analysis, dict)
-        assert 'regime_analysis_performed' in analysis
+        assert 'market_data_processed' in analysis
         assert 'processing_timestamp' in analysis
 
     def test_get_regime_history(self, regime_config):
@@ -386,7 +385,7 @@ class TestEnhancedRegimeEngine:
         # With no data fed, analyze_regime should return a dict
         analysis = engine.analyze_regime({})
         assert isinstance(analysis, dict)
-        assert 'regime_analysis_performed' in analysis
+        assert 'market_data_processed' in analysis
 
     def test_invalid_symbol_handling(self, sample_market_data, regime_config):
         """Test handling of invalid symbol."""

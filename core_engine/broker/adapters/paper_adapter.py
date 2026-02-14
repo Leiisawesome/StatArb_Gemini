@@ -24,7 +24,7 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
 
     def __init__(
         self,
-        initial_cash: float = 100000.0,
+        initial_cash: float = 1_000_000.0,
         commission_per_share: float = 0.005,
         latency_ms_min: float = 50.0,
         latency_ms_max: float = 200.0,

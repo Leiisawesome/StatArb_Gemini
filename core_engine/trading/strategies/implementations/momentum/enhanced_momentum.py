@@ -149,6 +149,135 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
         """
         return normalize_composite_pct(x)
 
+    def _enqueue_pending_signal(
+        self, symbol, side, sms, ads_ctx, ads_diag,
+        raw_strength, signal_timestamp, current_data, tau, *,
+        sms_mode, sms_score, bayes_sms=None, info_inc=0.0,
+    ) -> None:
+        """Build PendingSignalContext and enqueue (shared by Bayes + Multiplicative)."""
+        try:
+            price = float(current_data.get("close", 0.0))
+        except Exception:
+            price = 0.0
+
+        meta = {
+            "sms_mode": sms_mode,
+            "ads_tau": tau,
+            "ads_regime_vector": ads_ctx["ads_regime_vector"],
+            "ads_fallbacks_used": ads_ctx["ads_fallbacks_used"],
+            "ads_diag": ads_diag,
+            "ofi_source": ads_ctx.get("txn_flow_source", "proxy_volume_ratio"),
+            "bb_missing": True,
+            "composite_z": ads_ctx["composite_z"],
+            "composite_pct": ads_ctx["composite_pct"],
+            "txn_ratio": ads_ctx.get("txn_ratio"),
+            "txn_ratio_cs_rank": ads_ctx.get("txn_ratio_cs_rank"),
+            "avg_trade_size_ratio": ads_ctx.get("avg_trade_size_ratio"),
+            "txn_volume_divergence": ads_ctx.get("txn_volume_divergence"),
+            "sms_inputs": {
+                "setup_maturity": float(ads_ctx["setup_maturity"]),
+                "setup_validity_prob": float(ads_ctx["setup_validity_prob"]),
+                "signed_flow_support": float(ads_ctx["signed_flow_support"]),
+                "vol_compression": float(ads_ctx["vol_compression"]),
+                "flow_source": str(ads_ctx.get("flow_source", "unknown")),
+            },
+        }
+
+        # Mode-specific fields
+        if sms_mode == "bayes_log_odds" and bayes_sms is not None:
+            meta["ads_sms_prob"] = sms_score
+            meta["ads_sms_log_odds"] = float(bayes_sms.log_odds)
+            meta["ads_sms_info_clock"] = float(bayes_sms.info_clock)
+            meta["ads_sms_info_inc"] = float(info_inc)
+        else:
+            meta["ads_sms"] = sms_score
+
+        ctx = PendingSignalContext(
+            symbol=symbol,
+            side=side,
+            sms=sms,
+            erar=ads_ctx["erar"],
+            raw_signal_strength=raw_strength,
+            timestamp=signal_timestamp,
+            entry_price=price if price > 0 else 0.0,
+            metadata=meta,
+            bayes_sms=bayes_sms,
+        )
+        self.pending_signals.add(ctx)
+
+    def _passes_transition_supervisor_gate(self, side: str, current_data) -> bool:
+        """Transition Supervisor Gate — returns True to proceed, False to block.
+
+        Checks VoV mirage, VPIN toxicity, BVC adverse selection, MQS quality,
+        and regime-adaptive transition threshold.  Sets ``self._current_mqs``
+        and ``self._current_mqs_penalty`` as side effects for downstream
+        confidence penalty.
+        """
+        transition_score = float(current_data.get("transition_score", 1.0))
+        vov = float(current_data.get("vol_of_vol", 0.5))
+        coherence = float(current_data.get("directional_coherence", 0.5))
+
+        # Hard block: vol-of-vol mirage
+        vov_block = float(getattr(self.config, "vov_block_threshold", 0.85))
+        if vov > vov_block:
+            return False
+
+        # Hard block: VPIN toxicity
+        if bool(getattr(self.config, "enable_vpin_gate", True)):
+            vpin_pct = float(current_data.get("vpin_percentile", 0.5))
+            vpin_block = float(getattr(self.config, "vpin_block_threshold", 0.85))
+            if vpin_pct > vpin_block:
+                return False
+
+        # Microstructure Quality Score (MQS v3.3)
+        if bool(getattr(self.config, "enable_microstructure_quality", True)):
+            _buy_vol_pct = float(current_data.get("buy_volume_pct", 0.5))
+            _vol_ratio = float(current_data.get("volume_ratio", 0.0))
+
+            # Hard block: extreme BVC contra-flow (Kyle 1985 adverse selection)
+            bvc_hard_block = float(getattr(self.config, "bvc_hard_block", 0.15))
+            if side == "BUY" and _buy_vol_pct < bvc_hard_block:
+                return False
+            elif side == "SELL" and (1.0 - _buy_vol_pct) < bvc_hard_block:
+                return False
+
+            # MQS = coherence_f * flow_alignment_f * liquidity_f
+            coh_ref = float(getattr(self.config, "mqs_coherence_ref", 0.30))
+            bvc_ref = float(getattr(self.config, "mqs_bvc_ref", 0.45))
+            vol_floor = float(getattr(self.config, "mqs_vol_floor", -0.50))
+            vol_range = float(getattr(self.config, "mqs_vol_range", 0.50))
+
+            coherence_f = min(1.0, max(0.0, coherence / max(coh_ref, 1e-6)))
+            aligned_bvc = _buy_vol_pct if side == "BUY" else (1.0 - _buy_vol_pct)
+            flow_alignment_f = min(1.0, max(0.0, aligned_bvc / max(bvc_ref, 1e-6)))
+            liquidity_f = min(1.0, max(0.0, (_vol_ratio - vol_floor) / max(vol_range, 1e-6)))
+            mqs = coherence_f * flow_alignment_f * liquidity_f
+
+            mqs_penalty_weight = float(getattr(self.config, "mqs_penalty_weight", 0.40))
+            self._current_mqs = float(mqs)
+            self._current_mqs_penalty = 1.0 - mqs_penalty_weight * (1.0 - mqs)
+
+        # Regime-adaptive transition threshold
+        base_tau = float(getattr(self.config, "transition_threshold", 0.15))
+        strict_tau = float(getattr(self.config, "transition_threshold_strict", 0.30))
+
+        use_strict = False
+        try:
+            regime_ctx = self.get_current_regime_context()
+            if regime_ctx is not None:
+                r_vol = getattr(regime_ctx, 'volatility', None) or getattr(regime_ctx, 'r_vol', 0.5)
+                r_liq = getattr(regime_ctx, 'liquidity', None) or getattr(regime_ctx, 'r_liq', 0.5)
+                if float(r_vol) > 0.7 or float(r_liq) < 0.3:
+                    use_strict = True
+        except Exception:
+            pass
+
+        tau = strict_tau if use_strict else base_tau
+        if transition_score < tau:
+            return False
+
+        return True
+
     def _passes_trend_persistence_filter(
         self,
         data: pd.DataFrame,
@@ -781,113 +910,12 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
             if should_enter and signal_type:
                 side = side_from_signal(signal_type)
 
-                # ========================================================
-                # TRANSITION SUPERVISOR GATE (Phase 1)
-                # Detects participant synchronisation phase changes.
-                # Blocks entry when market is NOT structurally ready for
-                # momentum (low coherence, no acceleration, vol mirage).
-                # Runs BEFORE SMS/ERAR to avoid wasted ADS computation.
-                # ========================================================
+                # Transition Supervisor Gate — blocks entry when market
+                # microstructure is unfavourable (VoV mirage, VPIN toxicity,
+                # low coherence, adverse BVC flow).  Sets self._current_mqs*
+                # side effects for downstream confidence penalty.
                 if bool(getattr(self.config, "enable_transition_supervisor", True)):
-                    transition_score = float(current_data.get("transition_score", 1.0))
-                    vov = float(current_data.get("vol_of_vol", 0.5))
-                    coherence = float(current_data.get("directional_coherence", 0.5))
-
-                    # Hard block: vol-of-vol mirage (pre-news, macro uncertainty)
-                    vov_block = float(getattr(self.config, "vov_block_threshold", 0.85))
-                    if vov > vov_block:
-                        return None
-
-                    # Hard block: VPIN toxicity (informed/adverse flow regime)
-                    # When VPIN percentile exceeds threshold, the probability of
-                    # informed trading is elevated — entries face systematic
-                    # adverse selection. Block until toxicity subsides.
-                    if bool(getattr(self.config, "enable_vpin_gate", True)):
-                        vpin_pct = float(current_data.get("vpin_percentile", 0.5))
-                        vpin_block = float(getattr(self.config, "vpin_block_threshold", 0.85))
-                        if vpin_pct > vpin_block:
-                            return None
-
-                    # ========================================================
-                    # MICROSTRUCTURE QUALITY SCORE (MQS) — v3.3
-                    #
-                    # Addresses three universal momentum failure modes via a
-                    # single multiplicative quality score rather than independent
-                    # hard blocks (which over-kill due to feature overlap
-                    # between winners and losers at 1-min resolution).
-                    #
-                    # MQS = coherence_f × flow_alignment_f × liquidity_f
-                    #
-                    # Each factor ∈ [0, 1]; any single factor at zero kills
-                    # the score (ADS-compliant multiplicative design).
-                    #
-                    # The MQS is applied as a confidence penalty: it scales
-                    # down signal confidence proportionally. Entries with
-                    # multiple adverse microstructure conditions see their
-                    # confidence collapse below the minimum threshold.
-                    #
-                    # Additionally, extreme BVC contra-flow (buy_vol_pct < 0.15
-                    # on BUY) is a hard block — this is the Kyle (1985)
-                    # adverse selection check for egregious cases only.
-                    # ========================================================
-                    if bool(getattr(self.config, "enable_microstructure_quality", True)):
-                        _buy_vol_pct = float(current_data.get("buy_volume_pct", 0.5))
-                        # volume_ratio in the features DataFrame is normalized/centered
-                        # (0 = average, negative = below average).
-                        _vol_ratio = float(current_data.get("volume_ratio", 0.0))
-
-                        # Hard block: extreme BVC contra-flow only
-                        # (catching only egregious cases like Trade #2: BVC=0.057)
-                        bvc_hard_block = float(getattr(self.config, "bvc_hard_block", 0.15))
-                        if side == "BUY" and _buy_vol_pct < bvc_hard_block:
-                            return None
-                        elif side == "SELL" and (1.0 - _buy_vol_pct) < bvc_hard_block:
-                            return None
-
-                        # Compute MQS components (each [0, 1])
-                        coh_ref = float(getattr(self.config, "mqs_coherence_ref", 0.30))
-                        bvc_ref = float(getattr(self.config, "mqs_bvc_ref", 0.45))
-                        # volume_ratio is centered at 0 (negative = below avg)
-                        vol_floor = float(getattr(self.config, "mqs_vol_floor", -0.50))
-                        vol_range = float(getattr(self.config, "mqs_vol_range", 0.50))
-
-                        coherence_f = min(1.0, max(0.0, coherence / max(coh_ref, 1e-6)))
-
-                        aligned_bvc = _buy_vol_pct if side == "BUY" else (1.0 - _buy_vol_pct)
-                        flow_alignment_f = min(1.0, max(0.0, aligned_bvc / max(bvc_ref, 1e-6)))
-
-                        liquidity_f = min(1.0, max(0.0, (_vol_ratio - vol_floor) / max(vol_range, 1e-6)))
-
-                        mqs = coherence_f * flow_alignment_f * liquidity_f
-
-                        # Apply MQS as confidence penalty via a stored attribute
-                        # that will be read when _calculate_signal_confidence runs.
-                        # Lower bound: MQS can reduce confidence by up to mqs_max_penalty.
-                        mqs_penalty_weight = float(getattr(self.config, "mqs_penalty_weight", 0.40))
-                        self._current_mqs = float(mqs)
-                        self._current_mqs_penalty = 1.0 - mqs_penalty_weight * (1.0 - mqs)
-
-
-
-                    # Regime-adaptive threshold: stricter in adverse conditions
-                    base_tau = float(getattr(self.config, "transition_threshold", 0.15))
-                    strict_tau = float(getattr(self.config, "transition_threshold_strict", 0.30))
-
-                    # Use strict threshold if regime indicates high vol or low liquidity
-                    use_strict = False
-                    try:
-                        regime_ctx = self.get_current_regime_context()
-                        if regime_ctx is not None:
-                            r_vol = getattr(regime_ctx, 'volatility', None) or getattr(regime_ctx, 'r_vol', 0.5)
-                            r_liq = getattr(regime_ctx, 'liquidity', None) or getattr(regime_ctx, 'r_liq', 0.5)
-                            if float(r_vol) > 0.7 or float(r_liq) < 0.3:
-                                use_strict = True
-                    except Exception:
-                        pass  # Degrade safely: use base threshold
-
-                    tau = strict_tau if use_strict else base_tau
-
-                    if transition_score < tau:
+                    if not self._passes_transition_supervisor_gate(side, current_data):
                         return None
 
                 # ADS v3.1 §1: SMS gate with pending/stale maturation
@@ -966,94 +994,23 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                     p_est = float(bayes_sms.update(sms.inputs, info_increment=info_inc))
 
                     if (not bayes_sms.can_mature()) or (p_est < float(tau)):
-                        # Enqueue pending instead of emitting
-                        try:
-                            price = float(current_data.get("close", 0.0))
-                        except Exception:
-                            price = 0.0
-
-                        ctx = PendingSignalContext(
-                            symbol=symbol,
-                            side=side,
-                            sms=sms,
-                            erar=ads_ctx["erar"],
-                            raw_signal_strength=raw_strength,
-                            timestamp=signal_timestamp,
-                            entry_price=price if price > 0 else 0.0,
-                            metadata={
-                                "sms_mode": "bayes_log_odds",
-                                "ads_tau": tau,
-                                "ads_sms_prob": p_est,
-                                "ads_sms_log_odds": float(bayes_sms.log_odds),
-                                "ads_sms_info_clock": float(bayes_sms.info_clock),
-                                "ads_sms_info_inc": float(info_inc),
-                                "ads_regime_vector": ads_ctx["ads_regime_vector"],
-                                "ads_fallbacks_used": ads_ctx["ads_fallbacks_used"],
-                                "ads_diag": ads_diag,
-                                "ofi_source": ads_ctx.get("txn_flow_source", "proxy_volume_ratio"),
-                                "bb_missing": True,
-                                "composite_z": ads_ctx["composite_z"],
-                                "composite_pct": ads_ctx["composite_pct"],
-                                "txn_ratio": ads_ctx.get("txn_ratio"),
-                                "txn_ratio_cs_rank": ads_ctx.get("txn_ratio_cs_rank"),
-                                "avg_trade_size_ratio": ads_ctx.get("avg_trade_size_ratio"),
-                                "txn_volume_divergence": ads_ctx.get("txn_volume_divergence"),
-                                "sms_inputs": {
-                                    "setup_maturity": float(ads_ctx["setup_maturity"]),
-                                    "setup_validity_prob": float(ads_ctx["setup_validity_prob"]),
-                                    "signed_flow_support": float(ads_ctx["signed_flow_support"]),
-                                    "vol_compression": float(ads_ctx["vol_compression"]),
-                                    "flow_source": str(ads_ctx.get("flow_source", "unknown")),
-                                },
-                            },
-                            bayes_sms=bayes_sms,
+                        self._enqueue_pending_signal(
+                            symbol, side, sms, ads_ctx, ads_diag,
+                            raw_strength, signal_timestamp, current_data, tau,
+                            sms_mode="bayes_log_odds", sms_score=p_est,
+                            bayes_sms=bayes_sms, info_inc=info_inc,
                         )
-                        self.pending_signals.add(ctx)
                         return None
 
                     sms_score = p_est
                 else:
                     sms_score = float(sms.compute(regime_label))
                     if sms_score < tau:
-                        # Enqueue pending instead of emitting
-                        try:
-                            price = float(current_data.get("close", 0.0))
-                        except Exception:
-                            price = 0.0
-                        
-                        ctx = PendingSignalContext(
-                            symbol=symbol,
-                            side=side,
-                            sms=sms,
-                            erar=ads_ctx["erar"],
-                            raw_signal_strength=raw_strength,
-                            timestamp=signal_timestamp,
-                            entry_price=price if price > 0 else 0.0,
-                            metadata={
-                                "sms_mode": "multiplicative",
-                                "ads_tau": tau,
-                                "ads_sms": sms_score,
-                                "ads_regime_vector": ads_ctx["ads_regime_vector"],
-                                "ads_fallbacks_used": ads_ctx["ads_fallbacks_used"],
-                                "ads_diag": ads_diag,
-                                "ofi_source": ads_ctx.get("txn_flow_source", "proxy_volume_ratio"),
-                                "bb_missing": True,
-                                "composite_z": ads_ctx["composite_z"],
-                                "composite_pct": ads_ctx["composite_pct"],
-                                "txn_ratio": ads_ctx.get("txn_ratio"),
-                                "txn_ratio_cs_rank": ads_ctx.get("txn_ratio_cs_rank"),
-                                "avg_trade_size_ratio": ads_ctx.get("avg_trade_size_ratio"),
-                                "txn_volume_divergence": ads_ctx.get("txn_volume_divergence"),
-                                "sms_inputs": {
-                                    "setup_maturity": float(ads_ctx["setup_maturity"]),
-                                    "setup_validity_prob": float(ads_ctx["setup_validity_prob"]),
-                                    "signed_flow_support": float(ads_ctx["signed_flow_support"]),
-                                    "vol_compression": float(ads_ctx["vol_compression"]),
-                                    "flow_source": str(ads_ctx.get("flow_source", "unknown")),
-                                },
-                            },
+                        self._enqueue_pending_signal(
+                            symbol, side, sms, ads_ctx, ads_diag,
+                            raw_strength, signal_timestamp, current_data, tau,
+                            sms_mode="multiplicative", sms_score=sms_score,
                         )
-                        self.pending_signals.add(ctx)
                         return None
 
                 # ADS v3.1  3: ERAR gate (strategy-side)

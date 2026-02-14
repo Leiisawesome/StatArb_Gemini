@@ -48,7 +48,7 @@ class TestPerformanceConfiguration:
         assert config.trading_days_per_year == 252
         assert config.confidence_level == 0.95
         assert config.risk_free_rate_source == RiskFreeRateSource.TREASURY_3M
-        assert config.custom_risk_free_rate == 0.02
+        assert config.custom_risk_free_rate == 0.04
 
     def test_performance_config_custom_risk_free_rate(self):
         """Test custom risk-free rate"""

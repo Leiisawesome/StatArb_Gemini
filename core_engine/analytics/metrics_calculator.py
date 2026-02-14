@@ -122,7 +122,7 @@ class BenchmarkType(Enum):
 class MetricConfig:
     """Metrics calculation configuration"""
     # Risk-free rate
-    risk_free_rate: float = 0.02  # 2% annual
+    risk_free_rate: float = 0.04  # 4% annual (aligned with BacktestConfig)
 
     # Calculation parameters
     trading_days_per_year: int = 252

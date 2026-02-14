@@ -279,7 +279,7 @@ class IBKRAdapter(BaseBrokerAdapter):
 
     # ==================== Connection Management ====================
 
-    async async def connect(self) -> bool:
+    async def connect(self) -> bool:
         """
         Connect to IB Gateway/TWS
 
@@ -354,7 +354,7 @@ class IBKRAdapter(BaseBrokerAdapter):
             self._connected = False
             return False
 
-    async async def disconnect(self) -> None:
+    async def disconnect(self) -> None:
         """Disconnect from IB"""
         if self._connected:
             try:
@@ -369,7 +369,7 @@ class IBKRAdapter(BaseBrokerAdapter):
         """Check if connected"""
         return self._connected and self.client.isConnected() and self.wrapper.connected
 
-    async async def check_connection_health(self) -> Dict[str, Any]:
+    async def check_connection_health(self) -> Dict[str, Any]:
         """Check connection health"""
         connected = self.is_connected()
         return {
@@ -386,7 +386,7 @@ class IBKRAdapter(BaseBrokerAdapter):
             'timestamp': datetime.now()
         }
 
-    async async def reconnect(self, max_attempts: int = 3, delay: float = 5.0) -> bool:
+    async def reconnect(self, max_attempts: int = 3, delay: float = 5.0) -> bool:
         """
         Attempt to reconnect to IBKR with retry logic.
 
@@ -528,7 +528,7 @@ class IBKRAdapter(BaseBrokerAdapter):
 
     # ==================== Market Data ====================
 
-    async async def get_latest_quote(self, symbol: str) -> Optional[Dict[str, Any]]:
+    async def get_latest_quote(self, symbol: str) -> Optional[Dict[str, Any]]:
         """
         Get latest quote for a symbol
 
@@ -581,7 +581,7 @@ class IBKRAdapter(BaseBrokerAdapter):
             logger.error(f"Failed to get quote for {symbol}: {e}")
             return None
 
-    async async def get_quote(self, symbol: str) -> Optional[Dict[str, Any]]:
+    async def get_quote(self, symbol: str) -> Optional[Dict[str, Any]]:
         """
         Alias for get_latest_quote() - simpler method name for common use
 
@@ -644,7 +644,7 @@ class IBKRAdapter(BaseBrokerAdapter):
         }
         return status_map.get(ib_status, OrderStatus.PENDING)
 
-    async async def submit_market_order(
+    async def submit_market_order(
         self,
         symbol: str,
         quantity: float,
@@ -704,7 +704,7 @@ class IBKRAdapter(BaseBrokerAdapter):
             logger.error(f"Failed to submit market order: {e}")
             raise
 
-    async async def submit_limit_order(
+    async def submit_limit_order(
         self,
         symbol: str,
         quantity: float,
@@ -764,7 +764,7 @@ class IBKRAdapter(BaseBrokerAdapter):
             logger.error(f"Failed to submit limit order: {e}")
             raise
 
-    async async def submit_stop_order(
+    async def submit_stop_order(
         self,
         symbol: str,
         quantity: float = None,
@@ -1136,7 +1136,7 @@ class IBKRAdapter(BaseBrokerAdapter):
             logger.error(f"Failed to submit trailing stop order: {e}")
             raise
 
-    async async def cancel_order(self, order_id: str) -> bool:
+    async def cancel_order(self, order_id: str) -> bool:
         """Cancel an order"""
         try:
             self.client.cancelOrder(int(order_id))
@@ -1146,7 +1146,7 @@ class IBKRAdapter(BaseBrokerAdapter):
             logger.error(f"Failed to cancel order {order_id}: {e}")
             return False
 
-    async async def get_order(self, order_id: str) -> Optional[Order]:
+    async def get_order(self, order_id: str) -> Optional[Order]:
         """Get order details"""
         try:
             # If order not in cache, request open orders to populate
@@ -1189,7 +1189,7 @@ class IBKRAdapter(BaseBrokerAdapter):
         }
         return type_map.get(ib_type, OrderType.MARKET)
 
-    async async async def get_orders(self, status: str = "open") -> List[Order]:
+    async def get_orders(self, status: str = "open") -> List[Order]:
         """Get orders with specified status"""
         try:
             # Request open orders
@@ -1220,7 +1220,7 @@ class IBKRAdapter(BaseBrokerAdapter):
 
     # ==================== Position Management ====================
 
-    async async async def get_positions(self) -> List[Position]:
+    async def get_positions(self) -> List[Position]:
         """Get all current positions"""
         try:
             # Request positions
@@ -1267,7 +1267,7 @@ class IBKRAdapter(BaseBrokerAdapter):
             logger.error(f"Failed to get positions: {e}")
             return []
 
-    async async def get_position(self, symbol: str) -> Optional[Position]:
+    async def get_position(self, symbol: str) -> Optional[Position]:
         """Get position for a specific symbol"""
         positions = self.get_positions()
         for pos in positions:
@@ -1303,7 +1303,7 @@ class IBKRAdapter(BaseBrokerAdapter):
 
     # ==================== Account Management ====================
 
-    async async def get_account_info(self) -> AccountInfo:
+    async def get_account_info(self) -> AccountInfo:
         """Get account information"""
         try:
             # Clear previous account values
@@ -1442,7 +1442,7 @@ class IBKRAdapter(BaseBrokerAdapter):
 
         return order.order_id
 
-    async async def get_order_status(self, order_id: str) -> dict:
+    async def get_order_status(self, order_id: str) -> dict:
         """
         Get order status as a dictionary.
         Returns dict with status, filled_qty, avg_fill_price, etc.

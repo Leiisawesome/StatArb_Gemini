@@ -109,7 +109,7 @@ class VarCalculator:
         self.mc_simulations = self.config.get('monte_carlo_simulations', 10000)
 
         # Risk-free rate for Sharpe ratio calculations
-        self.risk_free_rate = self.config.get('risk_free_rate_annual', 0.02)
+        self.risk_free_rate = self.config.get('risk_free_rate_annual', 0.04)
 
         # Note: Stress testing is handled by StressTester class - no longer duplicated here
 
