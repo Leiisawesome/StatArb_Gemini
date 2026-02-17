@@ -15,7 +15,7 @@ Components:
     - InteractiveBrokersFeedAdapter: Interactive Brokers integration
 
 Polygon.io Real-Time Integration:
-    For Stock Starter subscription (real-time aggregated data):
+    For Stock Advanced subscription (real-time aggregates, trades, and quotes):
 
     from core_engine.data.feeds import (
         PolygonRealtimeFeedAdapter,
@@ -26,13 +26,28 @@ Polygon.io Real-Time Integration:
     config = PolygonFeedConfig(
         api_key="your_polygon_api_key",
         symbols=["AAPL", "TSLA", "NVDA"],
+        subscription_tier=PolygonSubscriptionTier.ADVANCED,
+        data_types=["second_agg", "minute_agg", "trade", "quote"],
+    )
+
+    adapter = PolygonRealtimeFeedAdapter(config)
+    await adapter.connect()
+    await adapter.subscribe(["AAPL", "TSLA"], ["second_agg", "minute_agg"])
+
+Delayed Feed Integration (Unified Path):
+    For delayed stock data, use the same adapter with delayed cluster routing:
+
+    config = PolygonFeedConfig(
+        api_key="your_polygon_api_key",
+        symbols=["AAPL", "TSLA"],
+        cluster=PolygonCluster.STOCKS_DELAYED,
         subscription_tier=PolygonSubscriptionTier.STARTER,
         data_types=["second_agg", "minute_agg", "trade"],
     )
 
     adapter = PolygonRealtimeFeedAdapter(config)
     await adapter.connect()
-    await adapter.subscribe(["AAPL", "TSLA"], ["second_agg", "minute_agg"])
+    await adapter.subscribe(["AAPL", "TSLA"], ["second_agg", "minute_agg", "trade"])
 
 Architecture Compliance:
     - Rule 1 (Component Integration): All adapters implement ISystemComponent
@@ -103,7 +118,7 @@ from .polygon_integration import (
 )
 
 # ============================================================================
-# POLYGON.IO REST API (Stock Starter - Historical Data)
+# POLYGON.IO REST API (Historical Data)
 # ============================================================================
 
 from .polygon_rest import (
@@ -152,7 +167,7 @@ __all__ = [
     'PolygonDataService',
     'create_polygon_service',
 
-    # ===== POLYGON.IO REST API (Stock Starter) =====
+    # ===== POLYGON.IO REST API =====
     'PolygonRestConfig',
     'PolygonRestService',
     'AggregateBar',

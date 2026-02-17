@@ -32,6 +32,7 @@ Version: 1.0.0
 
 import logging
 import asyncio
+import inspect
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -154,6 +155,16 @@ class DataFeedAdapter(ABC):
         self._message_handlers: List[Callable[[FeedMessage], None]] = []
         self._error_handlers: List[Callable[[Exception], None]] = []
         self._status_handlers: List[Callable[[AdapterStatus], None]] = []
+        self._max_handler_concurrency = max(
+            1,
+            int(self.config.provider_config.get('max_handler_concurrency', 64)),
+        )
+        self._handler_timeout_seconds = max(
+            0.1,
+            float(self.config.provider_config.get('handler_timeout_seconds', 5.0)),
+        )
+        self._handler_semaphore = asyncio.Semaphore(self._max_handler_concurrency)
+        self._handler_tasks: Set[asyncio.Task] = set()
 
         # Statistics
         self._stats = {
@@ -251,13 +262,58 @@ class DataFeedAdapter(ABC):
         self._stats['messages_received'] += 1
         self._stats['last_message_time'] = datetime.now()
 
+        if not self._message_handlers:
+            return
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            for handler in self._message_handlers:
+                try:
+                    handler(message)
+                    self._stats['messages_processed'] += 1
+                except Exception as e:
+                    self.logger.error(f"Error in message handler: {e}")
+                    self._stats['errors'] += 1
+            return
+
         for handler in self._message_handlers:
+            if inspect.iscoroutinefunction(handler):
+                task = loop.create_task(self._dispatch_message_handler(handler, message))
+                self._handler_tasks.add(task)
+                task.add_done_callback(self._handler_tasks.discard)
+                continue
+
             try:
                 handler(message)
                 self._stats['messages_processed'] += 1
             except Exception as e:
                 self.logger.error(f"Error in message handler: {e}")
                 self._stats['errors'] += 1
+
+    async def _dispatch_message_handler(
+        self,
+        handler: Callable[[FeedMessage], None],
+        message: FeedMessage,
+    ) -> None:
+        """Dispatch a message handler with bounded concurrency and timeout."""
+        async with self._handler_semaphore:
+            try:
+                await asyncio.wait_for(
+                    handler(message),
+                    timeout=self._handler_timeout_seconds,
+                )
+                self._stats['messages_processed'] += 1
+            except asyncio.TimeoutError:
+                self._stats['errors'] += 1
+                self.logger.error(
+                    "Message handler timed out after %.2fs: %s",
+                    self._handler_timeout_seconds,
+                    getattr(handler, '__name__', str(handler)),
+                )
+            except Exception as e:
+                self._stats['errors'] += 1
+                self.logger.error(f"Error in message handler: {e}")
 
     def _handle_error(self, error: Exception) -> None:
         """Process error and notify handlers."""

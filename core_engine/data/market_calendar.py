@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from datetime import datetime, time
 from typing import Tuple
 import logging
+from zoneinfo import ZoneInfo
 
 class AssetClass(Enum):
     """Asset classes with distinct trading characteristics"""
@@ -92,13 +93,21 @@ class MarketCalendar:
         if not session:
             session = self.sessions[AssetClass.US_EQUITY]
 
+        # Normalize to the session timezone for day/holiday checks
+        local_date = date
+        if date.tzinfo is not None:
+            try:
+                local_date = date.astimezone(ZoneInfo(session.timezone))
+            except Exception:
+                local_date = date
+
         # Check weekend
-        if date.weekday() not in session.days_of_week:
+        if local_date.weekday() not in session.days_of_week:
             return False
 
         # Check holiday (US Markets)
         if asset_class in (AssetClass.US_EQUITY, AssetClass.FUTURES):
-            date_str = date.strftime("%Y-%m-%d")
+            date_str = local_date.strftime("%Y-%m-%d")
             if date_str in self.holidays:
                 return False
 
@@ -141,14 +150,27 @@ class MarketCalendar:
 
     def get_market_status(self, dt: datetime, asset_class: AssetClass = AssetClass.US_EQUITY) -> MarketStatus:
         """Get current market status for a specific datetime."""
-        open_dt, close_dt = self.get_session_times(dt, asset_class)
-        
-        if open_dt is None:
+        session = self.sessions.get(asset_class)
+        if not session:
+            session = self.sessions[AssetClass.US_EQUITY]
+
+        # Normalize to the session timezone for status checks
+        local_dt = dt
+        if dt.tzinfo is not None:
+            try:
+                local_dt = dt.astimezone(ZoneInfo(session.timezone))
+            except Exception:
+                local_dt = dt
+
+        # Holidays/weekends are closed, regardless of clock time
+        if not self.is_trading_day(local_dt, asset_class):
             return MarketStatus.CLOSED
-            
-        if dt < open_dt:
+
+        open_dt, close_dt = self.get_session_times(local_dt, asset_class)
+
+        if local_dt < open_dt:
             return MarketStatus.PRE_MARKET
-        elif dt >= close_dt:
+        elif local_dt >= close_dt:
             return MarketStatus.POST_MARKET
         else:
             return MarketStatus.OPEN

@@ -458,7 +458,10 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
 
             # Close HTTP session
             if self._http_session:
-                await self._http_session.close()
+                try:
+                    await self._http_session.close()
+                except asyncio.CancelledError:
+                    self.logger.warning("DataManager session close cancelled during shutdown; continuing cleanup")
                 self._http_session = None
 
             # Clear cache on shutdown

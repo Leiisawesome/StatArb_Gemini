@@ -7,7 +7,7 @@ Integrates Polygon.io real-time WebSocket feed with the data brick pipeline.
 Provides seamless data flow from Polygon.io to the processing pipeline.
 
 Features:
-    - Real-time data ingestion from Polygon.io Stock Starter subscription
+    - Real-time data ingestion from Polygon.io/Massive Stock Advanced subscription
     - Automatic OHLCV bar construction from aggregated streams
     - Integration with ClickHouseDataManager for persistence
     - Real-time data quality monitoring
@@ -95,10 +95,11 @@ class PolygonServiceConfig:
     """
     Configuration for Polygon Data Integration Service.
 
-    Stock Starter subscription includes:
+    Recommended for Stock Advanced subscription:
         - Per-second aggregated bars (A.*)
         - Per-minute aggregated bars (AM.*)
         - Real-time trades (T.*)
+        - Real-time NBBO quotes (Q.*)
 
     NOTE: You must sign exchange agreements in your Polygon.io dashboard
     before receiving market data: https://polygon.io/dashboard
@@ -110,11 +111,11 @@ class PolygonServiceConfig:
     symbols: List[str] = field(default_factory=list)
 
     # Data types to subscribe
-    # Options: "second_agg", "minute_agg", "trade"
-    data_types: List[str] = field(default_factory=lambda: ["second_agg", "minute_agg", "trade"])
+    # Options: "second_agg", "minute_agg", "trade", "quote"
+    data_types: List[str] = field(default_factory=lambda: ["second_agg", "minute_agg", "trade", "quote"])
 
     # Subscription tier
-    subscription_tier: PolygonSubscriptionTier = PolygonSubscriptionTier.STARTER
+    subscription_tier: PolygonSubscriptionTier = PolygonSubscriptionTier.ADVANCED
 
     # Use delayed data (15-min delay) instead of real-time
     # Set to True if you haven't signed exchange agreements yet
@@ -564,7 +565,7 @@ class PolygonDataService(ISystemComponent):
             self._stats['messages_received'] += 1
 
             # Track latency
-            if message.latency_ms:
+            if message.latency_ms is not None:
                 self._stats['latency_sum_ms'] += message.latency_ms
                 self._stats['latency_count'] += 1
 
@@ -653,7 +654,7 @@ class PolygonDataService(ISystemComponent):
                 self.logger.error(f"Trade callback error: {e}")
 
     def _handle_quote(self, message: FeedMessage) -> None:
-        """Handle quote message (Developer+ tier)"""
+        """Handle quote message (Advanced tier)"""
         # Quote handling for higher tiers
         symbol = message.symbol.upper()
         data = message.data

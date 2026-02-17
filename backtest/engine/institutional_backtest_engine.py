@@ -1182,8 +1182,16 @@ class InstitutionalBacktestEngine(InitializationMixin, SessionManagementMixin, R
             try:
                 if hasattr(self, 'data_manager') and self.data_manager is not None:
                     if hasattr(self.data_manager, 'stop'):
-                        await asyncio.wait_for(self.data_manager.stop(), timeout=5.0)
-                        logger.debug("DataManager stopped in finally block")
+                        current_task = asyncio.current_task()
+                        if current_task and current_task.cancelling():
+                            logger.debug("Skipping blocking DataManager stop during task cancellation")
+                        else:
+                            await asyncio.wait_for(asyncio.shield(self.data_manager.stop()), timeout=5.0)
+                            logger.debug("DataManager stopped in finally block")
+            except asyncio.TimeoutError:
+                logger.debug("DataManager cleanup timed out in finally block")
+            except asyncio.CancelledError:
+                logger.debug("DataManager cleanup cancelled in finally block")
             except Exception as cleanup_err:
                 logger.debug(f"DataManager cleanup in finally: {cleanup_err}")
 

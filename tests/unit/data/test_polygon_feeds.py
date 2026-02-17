@@ -110,17 +110,17 @@ class TestPolygonRestConfig:
 
         assert config.api_key == polygon_api_key
         assert config.base_url == "https://api.polygon.io"
-        assert config.rate_limit_calls == 5
-        assert config.rate_limit_period == 60.0
+        assert config.rate_limit_calls == 500
+        assert config.rate_limit_period == 1.0
         logger.info("✅ REST config creation test passed")
 
     def test_config_defaults(self, polygon_api_key):
         """Test config default values"""
         config = PolygonRestConfig(api_key=polygon_api_key)
 
-        assert config.timeout_seconds == 30.0
+        assert config.timeout_seconds == 60.0
         assert config.max_retries == 3
-        assert config.default_limit == 5000
+        assert config.default_limit == 50000
         logger.info("✅ REST config defaults test passed")
 
     def test_config_missing_api_key(self):
@@ -265,9 +265,9 @@ class TestPolygonRestRateLimiting:
         service = PolygonRestService(config=polygon_rest_config)
         service._session = AsyncMock()
 
-        # Fill up rate limit
+        # Fill up current 1-second rate limit window
         now = asyncio.get_event_loop().time()
-        service._request_times = [now - 10, now - 5, now - 2, now - 1, now]
+        service._request_times = [now - 0.999] + [now - 0.5] * (service.config.rate_limit_calls - 1)
 
         # Mock sleep to verify it's called
         with patch('asyncio.sleep', new_callable=AsyncMock) as mock_sleep:
@@ -284,19 +284,20 @@ class TestPolygonRestRateLimiting:
         service = PolygonRestService(config=polygon_rest_config)
 
         now = asyncio.get_event_loop().time()
-        # Mix of old and recent times
+        # Mix of old and recent times relative to 1-second rolling window
         service._request_times = [
-            now - 70,  # Old (outside 60s window)
-            now - 30,  # Recent
-            now - 10,  # Recent
+            now - 5,   # Old (outside 1s window)
+            now - 2,   # Old
+            now - 0.5, # Recent
             now,       # Recent
         ]
 
         await service._rate_limit()
 
-        # Old time should be removed
-        assert len(service._request_times) == 4  # All kept (old one removed, new one added)
-        assert now - 70 not in service._request_times
+        # Two old times removed; one new timestamp added
+        assert len(service._request_times) == 3
+        assert now - 5 not in service._request_times
+        assert now - 2 not in service._request_times
         logger.info("✅ Rate limit cleanup old times test passed")
 
     @pytest.mark.asyncio
@@ -593,11 +594,11 @@ class TestPolygonFeedConfig:
 
     def test_config_ws_url(self, polygon_feed_config):
         """Test WebSocket URL generation"""
-        assert polygon_feed_config.ws_url == "wss://socket.polygon.io/stocks"
+        assert polygon_feed_config.ws_url == "wss://socket.massive.com/stocks"
 
         # Test delayed endpoint
         polygon_feed_config.cluster = PolygonCluster.STOCKS_DELAYED
-        assert polygon_feed_config.ws_url == "wss://delayed.polygon.io/stocks"
+        assert polygon_feed_config.ws_url == "wss://delayed.massive.com/stocks"
         logger.info("✅ Feed config WS URL test passed")
 
     def test_config_data_type_validation(self, polygon_api_key):
@@ -2823,7 +2824,7 @@ class TestPolygonRealtimeAdapterConfigValidation:
             PolygonFeedConfig(
                 api_key="test_key",
                 subscription_tier=PolygonSubscriptionTier.STARTER,
-                data_types=["quote"]  # Quotes require Developer+ tier
+                data_types=["quote"]  # Quotes require Advanced tier
             )
 
     def test_config_ws_url_stocks(self, polygon_api_key):
@@ -2832,7 +2833,7 @@ class TestPolygonRealtimeAdapterConfigValidation:
             api_key=polygon_api_key,
             cluster=PolygonCluster.STOCKS
         )
-        assert config.ws_url == "wss://socket.polygon.io/stocks"
+        assert config.ws_url == "wss://socket.massive.com/stocks"
 
     def test_config_ws_url_delayed(self, polygon_api_key):
         """Test WebSocket URL generation for delayed stocks cluster"""
@@ -2840,7 +2841,7 @@ class TestPolygonRealtimeAdapterConfigValidation:
             api_key=polygon_api_key,
             cluster=PolygonCluster.STOCKS_DELAYED
         )
-        assert config.ws_url == "wss://delayed.polygon.io/stocks"
+        assert config.ws_url == "wss://delayed.massive.com/stocks"
     """Test configuration validation edge cases"""
 
     def test_config_validation_missing_api_key(self):
@@ -2854,7 +2855,7 @@ class TestPolygonRealtimeAdapterConfigValidation:
             PolygonFeedConfig(
                 api_key="test_key",
                 subscription_tier=PolygonSubscriptionTier.STARTER,
-                data_types=["quote"]  # Quotes require Developer+ tier
+                data_types=["quote"]  # Quotes require Advanced tier
             )
 
     def test_config_ws_url_stocks(self, polygon_api_key):
@@ -2863,7 +2864,7 @@ class TestPolygonRealtimeAdapterConfigValidation:
             api_key=polygon_api_key,
             cluster=PolygonCluster.STOCKS
         )
-        assert config.ws_url == "wss://socket.polygon.io/stocks"
+        assert config.ws_url == "wss://socket.massive.com/stocks"
 
     def test_config_ws_url_delayed(self, polygon_api_key):
         """Test WebSocket URL generation for delayed stocks cluster"""
@@ -2871,7 +2872,7 @@ class TestPolygonRealtimeAdapterConfigValidation:
             api_key=polygon_api_key,
             cluster=PolygonCluster.STOCKS_DELAYED
         )
-        assert config.ws_url == "wss://delayed.polygon.io/stocks"
+        assert config.ws_url == "wss://delayed.massive.com/stocks"
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

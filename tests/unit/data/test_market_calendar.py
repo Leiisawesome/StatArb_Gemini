@@ -7,6 +7,7 @@ and sessions for different asset classes (US_EQUITY, CRYPTO, FOREX).
 
 import pytest
 from datetime import datetime, time, timezone
+from zoneinfo import ZoneInfo
 from core_engine.data.market_calendar import MarketCalendar, AssetClass, MarketSession
 
 class TestAssetClass:
@@ -198,3 +199,32 @@ class TestMarketCalendar:
 
         assert open_dt == expected_open
         assert close_dt == expected_close
+
+    def test_get_market_status_holiday_is_closed(self):
+        """US equity should be CLOSED on configured market holidays."""
+        calendar = MarketCalendar()
+
+        # Presidents' Day 2026 is explicitly configured as a holiday
+        holiday_dt = datetime(2026, 2, 16, 10, 0, tzinfo=ZoneInfo("America/New_York"))
+        status = calendar.get_market_status(holiday_dt, AssetClass.US_EQUITY)
+
+        assert status.value == "closed"
+
+    def test_get_market_status_regular_open_timezone_aware(self):
+        """US equity should be OPEN during regular hours on a non-holiday weekday."""
+        calendar = MarketCalendar()
+
+        regular_dt = datetime(2026, 2, 17, 10, 0, tzinfo=ZoneInfo("America/New_York"))
+        status = calendar.get_market_status(regular_dt, AssetClass.US_EQUITY)
+
+        assert status.value == "open"
+
+    def test_get_market_status_converts_from_other_timezone(self):
+        """Market status should be computed correctly when timestamp timezone differs from session timezone."""
+        calendar = MarketCalendar()
+
+        # 2026-02-17 23:00 CST == 2026-02-17 10:00 ET
+        cst_dt = datetime(2026, 2, 17, 23, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
+        status = calendar.get_market_status(cst_dt, AssetClass.US_EQUITY)
+
+        assert status.value == "open"

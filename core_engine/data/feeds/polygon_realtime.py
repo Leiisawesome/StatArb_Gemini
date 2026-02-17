@@ -3,11 +3,11 @@
 Polygon.io Real-Time WebSocket Feed Adapter
 ============================================
 
-Production-ready implementation for Polygon.io Stock Starter subscription.
-Supports real-time aggregated bars (second/minute) and trades via WebSocket.
+Production-ready implementation for Polygon.io/Massive stock WebSocket feeds.
+Supports aggregates, trades, and (Advanced tier) NBBO quotes.
 
 Features:
-    - WebSocket connection to wss://socket.polygon.io/stocks
+    - WebSocket connection to wss://socket.massive.com/stocks
     - Automatic authentication and reconnection
     - Support for aggregated bars (A.* for second, AM.* for minute)
     - Trade stream support (T.*)
@@ -16,9 +16,9 @@ Features:
     - Circuit breaker pattern for fault tolerance
 
 Subscription Tiers:
-    Stock Starter: Second/Minute aggregates, Trades, Previous day bars
-    Stock Developer: + Real-time quotes (NBBO)
-    Stock Advanced: + Full Level 2 order book
+    Stock Starter: Delayed second/minute aggregates
+    Stock Developer: Delayed second/minute aggregates + delayed trades
+    Stock Advanced: Real-time second/minute aggregates + trades + NBBO quotes
 
 Usage:
     from core_engine.data.feeds.polygon_realtime import (
@@ -43,6 +43,7 @@ Version: 1.0.0
 import asyncio
 import json
 import logging
+from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -83,9 +84,9 @@ logger = logging.getLogger(__name__)
 
 class PolygonSubscriptionTier(Enum):
     """Polygon.io subscription tiers"""
-    STARTER = "starter"      # Second/Minute aggregates, Trades
-    DEVELOPER = "developer"  # + Real-time NBBO quotes
-    ADVANCED = "advanced"    # + Level 2 order book
+    STARTER = "starter"      # Delayed aggregates (trade availability may vary)
+    DEVELOPER = "developer"  # Delayed aggregates + delayed trades
+    ADVANCED = "advanced"    # Real-time aggregates + trades + NBBO quotes
 
 class PolygonMessageType(Enum):
     """Polygon.io WebSocket message types"""
@@ -98,11 +99,8 @@ class PolygonMessageType(Enum):
     SECOND_AGG = "A"         # Per-second aggregates
     MINUTE_AGG = "AM"        # Per-minute aggregates
 
-    # Market Data - Developer+ tier
-    QUOTE = "Q"              # Real-time NBBO quotes
-
     # Market Data - Advanced tier
-    LEVEL2 = "L2"            # Level 2 order book
+    QUOTE = "Q"              # Real-time NBBO quotes
 
     # Control
     SUBSCRIPTION = "subscription"
@@ -110,7 +108,7 @@ class PolygonMessageType(Enum):
 class PolygonCluster(Enum):
     """Polygon.io WebSocket clusters"""
     STOCKS = "stocks"
-    STOCKS_DELAYED = "delayed.polygon.io/stocks"  # 15-min delayed data
+    STOCKS_DELAYED = "stocks_delayed"  # 15-min delayed data endpoint uses delayed host
     OPTIONS = "options"
     FOREX = "forex"
     CRYPTO = "crypto"
@@ -120,11 +118,10 @@ class PolygonFeedConfig:
     """
     Polygon.io feed configuration
 
-    Stock Starter subscription includes:
-        - Second aggregates (A.*)
-        - Minute aggregates (AM.*)
-        - Trades (T.*)
-        - Previous day aggregates
+    Stock plans (current personal tiers):
+        - Starter: delayed second/minute aggregates
+        - Developer: delayed second/minute aggregates + delayed trades
+        - Advanced: real-time second/minute aggregates + trades + NBBO quotes
     """
     # Required
     api_key: str
@@ -139,10 +136,13 @@ class PolygonFeedConfig:
     cluster: PolygonCluster = PolygonCluster.STOCKS
 
     # Data types to subscribe (depends on tier)
-    # Stock Starter: ["second_agg", "minute_agg", "trade"]
-    # Developer+: adds "quote"
-    # Advanced: adds "level2"
+    # Starter: ["second_agg", "minute_agg", "trade"]
+    # Developer: ["second_agg", "minute_agg", "trade"]
+    # Advanced: ["second_agg", "minute_agg", "trade", "quote"]
     data_types: List[str] = field(default_factory=lambda: ["second_agg", "minute_agg", "trade"])
+
+    # Security settings
+    allow_insecure_ssl_fallback: bool = False
 
     # Connection settings
     connect_timeout_seconds: float = 30.0
@@ -168,8 +168,8 @@ class PolygonFeedConfig:
         # Validate data types for subscription tier
         tier_data_types = {
             PolygonSubscriptionTier.STARTER: {"second_agg", "minute_agg", "trade"},
-            PolygonSubscriptionTier.DEVELOPER: {"second_agg", "minute_agg", "trade", "quote"},
-            PolygonSubscriptionTier.ADVANCED: {"second_agg", "minute_agg", "trade", "quote", "level2"},
+            PolygonSubscriptionTier.DEVELOPER: {"second_agg", "minute_agg", "trade"},
+            PolygonSubscriptionTier.ADVANCED: {"second_agg", "minute_agg", "trade", "quote"},
         }
 
         allowed = tier_data_types.get(self.subscription_tier, set())
@@ -185,8 +185,8 @@ class PolygonFeedConfig:
     def ws_url(self) -> str:
         """Get WebSocket URL for the cluster"""
         if self.cluster == PolygonCluster.STOCKS_DELAYED:
-            return "wss://delayed.polygon.io/stocks"
-        return f"wss://socket.polygon.io/{self.cluster.value}"
+            return "wss://delayed.massive.com/stocks"
+        return f"wss://socket.massive.com/{self.cluster.value}"
 
 @dataclass
 class PolygonAggregateBar:
@@ -221,7 +221,7 @@ class PolygonTrade:
 
 @dataclass
 class PolygonQuote:
-    """Polygon.io quote data (Developer+ tier)"""
+    """Polygon.io quote data (Advanced tier)"""
     symbol: str
     bid_price: float
     bid_size: int
@@ -240,10 +240,11 @@ class PolygonRealtimeFeedAdapter(DataFeedAdapter):
     """
     Production-ready Polygon.io WebSocket feed adapter.
 
-    Implements real-time streaming for Stock Starter subscription:
+    Implements real-time streaming for stock WebSocket plans:
         - Per-second aggregates (A.SYMBOL)
         - Per-minute aggregates (AM.SYMBOL)
         - Real-time trades (T.SYMBOL)
+        - Real-time quotes (Q.SYMBOL, Advanced tier)
 
     Features:
         - Automatic authentication
@@ -409,18 +410,28 @@ class PolygonRealtimeFeedAdapter(DataFeedAdapter):
     async def _connect_with_aiohttp(self) -> bool:
         """Connect using aiohttp (better proxy bypass)"""
         import ssl
-        import certifi
 
         # Create SSL context with proper certificate handling
         # Use certifi's certificate bundle if available
         try:
+            import certifi
             ssl_context = ssl.create_default_context(cafile=certifi.where())
-        except Exception:
-            # Fall back to default context without certificate verification for dev
+        except ImportError:
+            ssl_context = ssl.create_default_context()
+            self.logger.debug("certifi not installed; using system trust store for SSL verification")
+        except Exception as ssl_error:
+            if not self.polygon_config.allow_insecure_ssl_fallback:
+                raise RuntimeError(
+                    "Failed to build verified SSL context. "
+                    "Set allow_insecure_ssl_fallback=True only for development troubleshooting."
+                ) from ssl_error
             ssl_context = ssl.create_default_context()
             ssl_context.check_hostname = False
             ssl_context.verify_mode = ssl.CERT_NONE
-            self.logger.warning("SSL certificate verification disabled - not recommended for production")
+            self.logger.warning(
+                "SSL certificate verification disabled via allow_insecure_ssl_fallback. "
+                "This is not recommended for production"
+            )
 
         # Create connector that explicitly ignores system proxy
         connector = aiohttp.TCPConnector(ssl=ssl_context)
@@ -638,7 +649,7 @@ class PolygonRealtimeFeedAdapter(DataFeedAdapter):
                 - "trade" (T.SYMBOL) - Real-time trades
                 - "second_agg" (A.SYMBOL) - Per-second aggregates
                 - "minute_agg" (AM.SYMBOL) - Per-minute aggregates
-                - "quote" (Q.SYMBOL) - NBBO quotes (Developer+ tier)
+                - "quote" (Q.SYMBOL) - NBBO quotes (Advanced tier)
 
         Returns:
             bool: True if subscription successful
@@ -652,6 +663,7 @@ class PolygonRealtimeFeedAdapter(DataFeedAdapter):
 
             # Build subscription channels
             channels = []
+            pending_subscriptions: Dict[str, Set[str]] = defaultdict(set)
             for data_type in data_types:
                 prefix = self.MESSAGE_PREFIXES.get(data_type)
                 if not prefix:
@@ -659,17 +671,17 @@ class PolygonRealtimeFeedAdapter(DataFeedAdapter):
                     continue
 
                 # Check tier compatibility
-                if data_type == 'quote' and self.polygon_config.subscription_tier == PolygonSubscriptionTier.STARTER:
+                if data_type == 'quote' and self.polygon_config.subscription_tier != PolygonSubscriptionTier.ADVANCED:
                     self.logger.warning(
-                        "Quotes (Q.*) require Developer+ tier. Skipping."
+                        "Quotes (Q.*) require Advanced tier. Skipping."
                     )
                     continue
 
                 for symbol in symbols:
-                    channel = f"{prefix}.{symbol.upper()}"
+                    symbol_upper = symbol.upper()
+                    channel = f"{prefix}.{symbol_upper}"
                     channels.append(channel)
-                    self._active_subscriptions[data_type].add(symbol.upper())
-                    self._subscriptions.add(symbol.upper())
+                    pending_subscriptions[data_type].add(symbol_upper)
 
             if not channels:
                 self.logger.warning("No valid channels to subscribe")
@@ -681,6 +693,10 @@ class PolygonRealtimeFeedAdapter(DataFeedAdapter):
                 "params": ",".join(channels)
             }
             await self._send_message(json.dumps(sub_message))
+
+            for data_type, symbols_for_type in pending_subscriptions.items():
+                self._active_subscriptions[data_type].update(symbols_for_type)
+                self._subscriptions.update(symbols_for_type)
 
             self._set_status(AdapterStatus.ACTIVE)
             self.logger.info(f"Subscribed to {len(channels)} channels: {channels[:5]}...")
@@ -700,14 +716,14 @@ class PolygonRealtimeFeedAdapter(DataFeedAdapter):
         try:
             # Build unsubscription channels
             channels = []
+            pending_unsubscriptions: Dict[str, Set[str]] = defaultdict(set)
             for data_type, prefix in self.MESSAGE_PREFIXES.items():
                 for symbol in symbols:
                     symbol_upper = symbol.upper()
                     if symbol_upper in self._active_subscriptions[data_type]:
                         channel = f"{prefix}.{symbol_upper}"
                         channels.append(channel)
-                        self._active_subscriptions[data_type].discard(symbol_upper)
-                        self._subscriptions.discard(symbol_upper)
+                        pending_unsubscriptions[data_type].add(symbol_upper)
 
             if channels:
                 unsub_message = {
@@ -715,6 +731,15 @@ class PolygonRealtimeFeedAdapter(DataFeedAdapter):
                     "params": ",".join(channels)
                 }
                 await self._send_message(json.dumps(unsub_message))
+
+                for data_type, symbols_for_type in pending_unsubscriptions.items():
+                    for symbol_upper in symbols_for_type:
+                        self._active_subscriptions[data_type].discard(symbol_upper)
+                        if not any(
+                            symbol_upper in subscriptions
+                            for subscriptions in self._active_subscriptions.values()
+                        ):
+                            self._subscriptions.discard(symbol_upper)
 
                 self.logger.info(f"Unsubscribed from {len(channels)} channels")
 
@@ -832,18 +857,16 @@ class PolygonRealtimeFeedAdapter(DataFeedAdapter):
     async def _handle_trade(self, msg: Dict[str, Any]) -> None:
         """Handle real-time trade message"""
         try:
+            event_timestamp = self._parse_event_timestamp(msg.get('t', 0))
             trade = PolygonTrade(
                 symbol=msg.get('sym', msg.get('T', '')),
                 price=float(msg.get('p', 0)),
                 size=int(msg.get('s', 0)),
-                timestamp=datetime.fromtimestamp(
-                    msg.get('t', 0) / 1e9,  # Polygon uses nanoseconds
-                    tz=timezone.utc
-                ),
+                timestamp=event_timestamp,
                 conditions=msg.get('c', []),
                 exchange=msg.get('x', 0),
                 tape=msg.get('z', 0),
-                sequence_number=msg.get('i'),
+                sequence_number=msg.get('q'),
             )
 
             # Create standardized feed message
@@ -932,18 +955,16 @@ class PolygonRealtimeFeedAdapter(DataFeedAdapter):
             self._handle_error(e)
 
     async def _handle_quote(self, msg: Dict[str, Any]) -> None:
-        """Handle real-time quote message (Developer+ tier)"""
+        """Handle real-time quote message (Advanced tier)"""
         try:
+            event_timestamp = self._parse_event_timestamp(msg.get('t', 0))
             quote = PolygonQuote(
                 symbol=msg.get('sym', msg.get('T', '')),
                 bid_price=float(msg.get('bp', msg.get('p', 0))),
                 bid_size=int(msg.get('bs', msg.get('s', 0))),
                 ask_price=float(msg.get('ap', msg.get('P', 0))),
                 ask_size=int(msg.get('as', msg.get('S', 0))),
-                timestamp=datetime.fromtimestamp(
-                    msg.get('t', 0) / 1e9,  # Nanoseconds
-                    tz=timezone.utc
-                ),
+                timestamp=event_timestamp,
                 bid_exchange=msg.get('bx', 0),
                 ask_exchange=msg.get('ax', 0),
                 conditions=msg.get('c', []),
@@ -973,6 +994,26 @@ class PolygonRealtimeFeedAdapter(DataFeedAdapter):
         except Exception as e:
             self.logger.error(f"Quote parsing error: {e}")
             self._handle_error(e)
+
+    @staticmethod
+    def _parse_event_timestamp(raw_timestamp: Any) -> datetime:
+        """Parse Polygon/Massive websocket timestamps in seconds/ms/us/ns."""
+        try:
+            timestamp_value = float(raw_timestamp)
+        except (TypeError, ValueError):
+            return datetime.fromtimestamp(0, tz=timezone.utc)
+
+        abs_value = abs(timestamp_value)
+        if abs_value >= 1e17:  # nanoseconds
+            seconds = timestamp_value / 1e9
+        elif abs_value >= 1e14:  # microseconds
+            seconds = timestamp_value / 1e6
+        elif abs_value >= 1e11:  # milliseconds
+            seconds = timestamp_value / 1e3
+        else:  # seconds
+            seconds = timestamp_value
+
+        return datetime.fromtimestamp(seconds, tz=timezone.utc)
 
     def _calculate_latency(self, data_timestamp: datetime) -> float:
         """Calculate message latency in milliseconds"""

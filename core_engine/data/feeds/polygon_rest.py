@@ -3,16 +3,14 @@
 Polygon.io REST API Data Service
 =================================
 
-REST API-based data service for Polygon.io Stock Starter subscription.
+REST API-based data service for Polygon.io/Massive stocks data.
 Provides historical and delayed market data via REST endpoints.
 
-Stock Starter Plan Features:
+Stocks Plan Features (REST):
     ✅ Historical aggregate bars (minute, hour, day, week, month, quarter, year)
     ✅ Previous day aggregates
     ✅ End-of-day data
-    ❌ Real-time quotes (requires Stock Developer+)
-    ❌ Real-time trades (requires Stock Developer+)
-    ❌ WebSocket streaming (requires Stock Developer+)
+    ❌ Real-time quote/trade streaming (requires WebSocket plan access)
 
 Usage:
     from core_engine.data.feeds.polygon_rest import PolygonRestService
@@ -71,6 +69,10 @@ class PolygonRestConfig:
 
     # Data settings
     default_limit: int = 50000  # Max results per request
+    max_concurrent_symbol_requests: int = 20
+
+    # Security settings
+    allow_insecure_ssl_fallback: bool = False
 
     def __post_init__(self):
         if not self.api_key:
@@ -151,8 +153,22 @@ class PolygonRestService:
                 import certifi
                 ssl_context = ssl.create_default_context(cafile=certifi.where())
             except ImportError:
+                self.logger.debug("certifi not installed; using system trust store for SSL verification")
+            except Exception as ssl_error:
+                if not self.config.allow_insecure_ssl_fallback:
+                    self.logger.error(
+                        "Failed to build verified SSL context: %s. "
+                        "Set allow_insecure_ssl_fallback=True only for development troubleshooting.",
+                        ssl_error,
+                    )
+                    return False
+                ssl_context = ssl.create_default_context()
                 ssl_context.check_hostname = False
                 ssl_context.verify_mode = ssl.CERT_NONE
+                self.logger.warning(
+                    "SSL certificate verification disabled via allow_insecure_ssl_fallback. "
+                    "This is not recommended for production."
+                )
 
             connector = aiohttp.TCPConnector(ssl=ssl_context)
 
@@ -256,6 +272,82 @@ class PolygonRestService:
                     self.logger.error(f"Request failed (final attempt {attempt+1}): {e}")
 
         return {'status': 'ERROR', 'message': 'Max retries exceeded'}
+
+    async def _gather_symbol_tasks(
+        self,
+        symbols: List[str],
+        operation,
+    ) -> List[Any]:
+        """Run per-symbol async operations with bounded concurrency."""
+        if not symbols:
+            return []
+
+        max_concurrency = max(1, int(self.config.max_concurrent_symbol_requests))
+        semaphore = asyncio.Semaphore(max_concurrency)
+
+        async def run_one(symbol: str) -> Any:
+            async with semaphore:
+                return await operation(symbol)
+
+        return await asyncio.gather(
+            *(run_one(symbol) for symbol in symbols),
+            return_exceptions=True,
+        )
+
+    @staticmethod
+    def _parse_event_timestamp(raw_timestamp: Any) -> Optional[datetime]:
+        """Parse event timestamps in seconds/ms/us/ns into UTC datetime."""
+        try:
+            timestamp_value = float(raw_timestamp)
+        except (TypeError, ValueError):
+            return None
+
+        abs_value = abs(timestamp_value)
+        if abs_value >= 1e17:  # nanoseconds
+            seconds = timestamp_value / 1e9
+        elif abs_value >= 1e14:  # microseconds
+            seconds = timestamp_value / 1e6
+        elif abs_value >= 1e11:  # milliseconds
+            seconds = timestamp_value / 1e3
+        else:  # seconds
+            seconds = timestamp_value
+
+        return datetime.fromtimestamp(seconds, tz=timezone.utc)
+
+    @staticmethod
+    def _event_timestamp_to_ns(dt_value: datetime) -> int:
+        """Convert datetime to nanoseconds since epoch for Polygon v3 timestamp filters."""
+        if dt_value.tzinfo is None:
+            dt_value = dt_value.replace(tzinfo=timezone.utc)
+        else:
+            dt_value = dt_value.astimezone(timezone.utc)
+        return int(dt_value.timestamp() * 1_000_000_000)
+
+    async def _fetch_paginated_v3(self, endpoint: str, params: Dict[str, Any], max_pages: int = 50) -> List[Dict[str, Any]]:
+        """Fetch paginated v3 resources using Polygon next_url pagination."""
+        all_rows: List[Dict[str, Any]] = []
+        page_count = 0
+        next_url: Optional[str] = endpoint
+        next_params: Optional[Dict[str, Any]] = dict(params)
+
+        while next_url and page_count < max_pages:
+            data = await self._request(next_url, next_params)
+            page_count += 1
+
+            status = data.get('status')
+            if status not in ['OK', 'DELAYED']:
+                break
+
+            rows = data.get('results', []) or []
+            all_rows.extend(rows)
+
+            next_url = data.get('next_url')
+            next_params = None
+
+            if not rows or not next_url:
+                break
+
+        return all_rows
 
     # ========================================================================
     # DATA RETRIEVAL METHODS
@@ -431,8 +523,16 @@ class PolygonRestService:
         Returns:
             Dict mapping symbol to DataFrame
         """
-        tasks = [self.get_bars(symbol, timeframe=timeframe, start=start, end=end, days=days) for symbol in symbols]
-        batch_results = await asyncio.gather(*tasks, return_exceptions=True)
+        async def fetch_bars(symbol: str) -> pd.DataFrame:
+            return await self.get_bars(
+                symbol,
+                timeframe=timeframe,
+                start=start,
+                end=end,
+                days=days,
+            )
+
+        batch_results = await self._gather_symbol_tasks(symbols, fetch_bars)
         
         results = {}
         for symbol, result in zip(symbols, batch_results):
@@ -465,10 +565,12 @@ class PolygonRestService:
         """
         Get latest prices for symbols (from previous day close).
 
-        Note: Real-time prices require Stock Developer+ plan.
+        Note: Real-time streaming prices require Stock Advanced websocket access.
         """
-        tasks = [self.get_previous_day(symbol) for symbol in symbols]
-        bars = await asyncio.gather(*tasks, return_exceptions=True)
+        async def fetch_previous_day(symbol: str) -> Optional[AggregateBar]:
+            return await self.get_previous_day(symbol)
+
+        bars = await self._gather_symbol_tasks(symbols, fetch_previous_day)
         
         prices = {}
         for symbol, bar in zip(symbols, bars):
@@ -501,8 +603,10 @@ class PolygonRestService:
         """
         Get ticker details for multiple symbols concurrently.
         """
-        tasks = [self.get_ticker_details(symbol) for symbol in symbols]
-        batch_results = await asyncio.gather(*tasks, return_exceptions=True)
+        async def fetch_details(symbol: str) -> Dict[str, Any]:
+            return await self.get_ticker_details(symbol)
+
+        batch_results = await self._gather_symbol_tasks(symbols, fetch_details)
         
         results = {}
         for symbol, result in zip(symbols, batch_results):
@@ -518,8 +622,10 @@ class PolygonRestService:
         """
         Calculate Average Daily Volume (ADV) for multiple symbols.
         """
-        tasks = [self.get_bars(symbol, timeframe='1day', days=days, end=end_date) for symbol in symbols]
-        batch_results = await asyncio.gather(*tasks, return_exceptions=True)
+        async def fetch_daily_bars(symbol: str) -> pd.DataFrame:
+            return await self.get_bars(symbol, timeframe='1day', days=days, end=end_date)
+
+        batch_results = await self._gather_symbol_tasks(symbols, fetch_daily_bars)
         
         adv_map = {}
         for symbol, df in zip(symbols, batch_results):
@@ -546,12 +652,11 @@ class PolygonRestService:
                 if data.get('status') == 'OK' and data.get('results'):
                     events = data['results']
                     return symbol, events[0].get('date')
-            except:
-                pass
+            except Exception as exc:
+                self.logger.debug("Failed to fetch earnings for %s: %s", symbol, exc)
             return symbol, None
 
-        tasks = [fetch_earnings(s) for s in symbols]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        results = await self._gather_symbol_tasks(symbols, fetch_earnings)
         
         for res in results:
             if isinstance(res, tuple) and res[1]:
@@ -575,18 +680,217 @@ class PolygonRestService:
                         'bid_size': q.get('bid_size', 0),
                         'ask_size': q.get('ask_size', 0)
                     }
-            except:
-                pass
+            except Exception as exc:
+                self.logger.debug("Failed to fetch last quote for %s: %s", symbol, exc)
             return symbol, {}
 
-        tasks = [fetch_quote(s) for s in symbols]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        results = await self._gather_symbol_tasks(symbols, fetch_quote)
         
         quote_map = {}
         for res in results:
             if isinstance(res, tuple) and res[1]:
                 quote_map[res[0]] = res[1]
         return quote_map
+
+    async def get_historical_trades(
+        self,
+        symbol: str,
+        start: datetime,
+        end: datetime,
+        limit: int = 50000,
+        max_pages: int = 25,
+    ) -> pd.DataFrame:
+        """
+        Get historical trades for a symbol from Polygon v3 trades endpoint.
+
+        Returns:
+            DataFrame indexed by event timestamp (UTC) with trade fields.
+        """
+        symbol_upper = symbol.upper()
+        endpoint = f"{self.config.base_url}/v3/trades/{symbol_upper}"
+
+        params = {
+            'timestamp.gte': self._event_timestamp_to_ns(start),
+            'timestamp.lte': self._event_timestamp_to_ns(end),
+            'order': 'asc',
+            'sort': 'timestamp',
+            'limit': min(max(limit, 1), 50000),
+        }
+
+        rows = await self._fetch_paginated_v3(endpoint=endpoint, params=params, max_pages=max_pages)
+        if not rows:
+            return pd.DataFrame(columns=['price', 'size', 'exchange', 'conditions', 'tape'])
+
+        parsed_rows = []
+        timestamps = []
+        for row in rows:
+            timestamp_value = (
+                row.get('sip_timestamp')
+                or row.get('participant_timestamp')
+                or row.get('trf_timestamp')
+                or row.get('timestamp')
+            )
+            event_ts = self._parse_event_timestamp(timestamp_value)
+            if event_ts is None:
+                continue
+
+            timestamps.append(event_ts)
+            parsed_rows.append({
+                'price': row.get('price', row.get('p')),
+                'size': row.get('size', row.get('s')),
+                'exchange': row.get('exchange', row.get('x')),
+                'conditions': row.get('conditions', row.get('c', [])),
+                'tape': row.get('tape', row.get('z')),
+            })
+
+        if not parsed_rows:
+            return pd.DataFrame(columns=['price', 'size', 'exchange', 'conditions', 'tape'])
+
+        df = pd.DataFrame(parsed_rows, index=pd.DatetimeIndex(timestamps, tz=timezone.utc))
+        df.index.name = 'timestamp'
+        return df.sort_index()
+
+    async def get_historical_quotes(
+        self,
+        symbol: str,
+        start: datetime,
+        end: datetime,
+        limit: int = 50000,
+        max_pages: int = 25,
+    ) -> pd.DataFrame:
+        """
+        Get historical NBBO quotes for a symbol from Polygon v3 quotes endpoint.
+
+        Returns:
+            DataFrame indexed by event timestamp (UTC) with quote fields.
+        """
+        symbol_upper = symbol.upper()
+        endpoint = f"{self.config.base_url}/v3/quotes/{symbol_upper}"
+
+        params = {
+            'timestamp.gte': self._event_timestamp_to_ns(start),
+            'timestamp.lte': self._event_timestamp_to_ns(end),
+            'order': 'asc',
+            'sort': 'timestamp',
+            'limit': min(max(limit, 1), 50000),
+        }
+
+        rows = await self._fetch_paginated_v3(endpoint=endpoint, params=params, max_pages=max_pages)
+        if not rows:
+            return pd.DataFrame(columns=['bid', 'ask', 'bid_size', 'ask_size', 'bid_exchange', 'ask_exchange'])
+
+        parsed_rows = []
+        timestamps = []
+        for row in rows:
+            timestamp_value = (
+                row.get('sip_timestamp')
+                or row.get('participant_timestamp')
+                or row.get('trf_timestamp')
+                or row.get('timestamp')
+            )
+            event_ts = self._parse_event_timestamp(timestamp_value)
+            if event_ts is None:
+                continue
+
+            timestamps.append(event_ts)
+            parsed_rows.append({
+                'bid': row.get('bid_price', row.get('bp', row.get('p'))),
+                'ask': row.get('ask_price', row.get('ap', row.get('P'))),
+                'bid_size': row.get('bid_size', row.get('bs', row.get('s'))),
+                'ask_size': row.get('ask_size', row.get('as', row.get('S'))),
+                'bid_exchange': row.get('bid_exchange', row.get('bx')),
+                'ask_exchange': row.get('ask_exchange', row.get('ax')),
+            })
+
+        if not parsed_rows:
+            return pd.DataFrame(columns=['bid', 'ask', 'bid_size', 'ask_size', 'bid_exchange', 'ask_exchange'])
+
+        df = pd.DataFrame(parsed_rows, index=pd.DatetimeIndex(timestamps, tz=timezone.utc))
+        df.index.name = 'timestamp'
+        return df.sort_index()
+
+    async def get_trade_quote_snapshots_1s(
+        self,
+        symbol: str,
+        start: datetime,
+        end: datetime,
+        forward_fill_quotes: bool = True,
+        forward_fill_trades: bool = False,
+        limit: int = 50000,
+        max_pages: int = 25,
+    ) -> pd.DataFrame:
+        """
+        Build per-second historical snapshots by combining trades and quotes.
+
+        Output columns:
+            trade_price, trade_size, trade_exchange,
+            quote_bid, quote_ask, quote_bid_size, quote_ask_size,
+            spread, trade_count, quote_count
+        """
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=timezone.utc)
+        if end.tzinfo is None:
+            end = end.replace(tzinfo=timezone.utc)
+
+        start = start.astimezone(timezone.utc)
+        end = end.astimezone(timezone.utc)
+
+        if end < start:
+            raise ValueError("end must be greater than or equal to start")
+
+        trades_df, quotes_df = await asyncio.gather(
+            self.get_historical_trades(symbol, start, end, limit=limit, max_pages=max_pages),
+            self.get_historical_quotes(symbol, start, end, limit=limit, max_pages=max_pages),
+        )
+
+        second_index = pd.date_range(
+            start=start.replace(microsecond=0),
+            end=end.replace(microsecond=0),
+            freq='1s',
+            tz=timezone.utc,
+        )
+
+        if trades_df.empty:
+            trade_snap = pd.DataFrame(index=second_index, columns=['trade_price', 'trade_size', 'trade_exchange', 'trade_count'])
+        else:
+            trade_last = trades_df[['price', 'size', 'exchange']].resample('1s').last()
+            trade_count = trades_df[['price']].resample('1s').size().rename('trade_count').to_frame()
+            trade_snap = trade_last.join(trade_count, how='outer').rename(columns={
+                'price': 'trade_price',
+                'size': 'trade_size',
+                'exchange': 'trade_exchange',
+            })
+            trade_snap = trade_snap.reindex(second_index)
+            if forward_fill_trades:
+                trade_snap[['trade_price', 'trade_size', 'trade_exchange']] = trade_snap[
+                    ['trade_price', 'trade_size', 'trade_exchange']
+                ].ffill()
+            trade_snap['trade_count'] = trade_snap['trade_count'].fillna(0).astype(int)
+
+        if quotes_df.empty:
+            quote_snap = pd.DataFrame(index=second_index, columns=[
+                'quote_bid', 'quote_ask', 'quote_bid_size', 'quote_ask_size', 'quote_count'
+            ])
+        else:
+            quote_last = quotes_df[['bid', 'ask', 'bid_size', 'ask_size']].resample('1s').last()
+            quote_count = quotes_df[['bid']].resample('1s').size().rename('quote_count').to_frame()
+            quote_snap = quote_last.join(quote_count, how='outer').rename(columns={
+                'bid': 'quote_bid',
+                'ask': 'quote_ask',
+                'bid_size': 'quote_bid_size',
+                'ask_size': 'quote_ask_size',
+            })
+            quote_snap = quote_snap.reindex(second_index)
+            if forward_fill_quotes:
+                quote_snap[['quote_bid', 'quote_ask', 'quote_bid_size', 'quote_ask_size']] = quote_snap[
+                    ['quote_bid', 'quote_ask', 'quote_bid_size', 'quote_ask_size']
+                ].ffill()
+            quote_snap['quote_count'] = quote_snap['quote_count'].fillna(0).astype(int)
+
+        snapshot_df = trade_snap.join(quote_snap, how='outer')
+        snapshot_df['spread'] = snapshot_df['quote_ask'] - snapshot_df['quote_bid']
+        snapshot_df.index.name = 'timestamp'
+        return snapshot_df
 
     async def get_borrow_info_multi(self, symbols: List[str]) -> Dict[str, Dict[str, Any]]:
         """

@@ -8,7 +8,7 @@ import threading
 import asyncio
 from datetime import datetime
 from typing import Dict, List, Optional, Any, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 import time
 from collections import defaultdict, deque
@@ -367,7 +367,7 @@ class DataFeed(ABC):
     def get_statistics(self) -> FeedStatistics:
         """Get feed statistics"""
         with self._lock:
-            return self.statistics
+            return replace(self.statistics)
 
 class WebSocketFeed(DataFeed):
     """WebSocket data feed implementation"""
@@ -738,7 +738,7 @@ class FeedManager(ISystemComponent):
         try:
             # Disconnect if connected
             if feed_id in self._feeds:
-                asyncio.create_task(self.disconnect_feed(feed_id))
+                self._schedule_disconnect(feed_id)
 
             with self._lock:
                 self._feed_configs.pop(feed_id, None)
@@ -751,6 +751,27 @@ class FeedManager(ISystemComponent):
         except Exception as e:
             logger.error(f"Failed to unregister feed {feed_id}: {e}")
             return False
+
+    def _schedule_disconnect(self, feed_id: str) -> None:
+        """Schedule disconnect in a loop-safe way from sync contexts."""
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(self.disconnect_feed(feed_id))
+            return
+        except RuntimeError:
+            pass
+
+        def run_disconnect() -> None:
+            try:
+                asyncio.run(self.disconnect_feed(feed_id))
+            except Exception as exc:
+                logger.error(f"Background disconnect failed for {feed_id}: {exc}")
+
+        threading.Thread(
+            target=run_disconnect,
+            name=f"disconnect-{feed_id}",
+            daemon=True,
+        ).start()
 
     async def connect_feed(self, feed_id: str) -> bool:
         """Connect to a data feed"""
