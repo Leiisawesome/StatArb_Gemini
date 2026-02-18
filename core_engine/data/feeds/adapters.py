@@ -38,6 +38,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Dict, List, Optional, Any, Callable, Set
+from collections.abc import Awaitable
 import warnings
 
 logger = logging.getLogger(__name__)
@@ -116,7 +117,7 @@ class FeedAdapterConfig:
 class FeedMessage:
     """Standardized feed message"""
     provider: FeedProvider
-    symbol: str
+    symbol: Optional[str]
     message_type: str  # 'quote', 'trade', 'bar', 'status', etc.
     timestamp: datetime
     data: Dict[str, Any]
@@ -125,6 +126,12 @@ class FeedMessage:
     sequence_number: Optional[int] = None
     latency_ms: Optional[float] = None
     raw_data: Optional[bytes] = None
+    feed_id: Optional[str] = None
+    message_id: Optional[str] = None
+    processing_time_ms: Optional[float] = None
+    validation_status: str = "pending"
+    source_timestamp: Optional[datetime] = None
+    received_timestamp: datetime = field(default_factory=datetime.now)
 
 # ============================================================================
 # BASE ADAPTER INTERFACE
@@ -152,7 +159,7 @@ class DataFeedAdapter(ABC):
         self.config = config
         self.status = AdapterStatus.DISCONNECTED
         self._subscriptions: Set[str] = set()
-        self._message_handlers: List[Callable[[FeedMessage], None]] = []
+        self._message_handlers: List[Callable[[FeedMessage], Optional[Awaitable[Any]]]] = []
         self._error_handlers: List[Callable[[Exception], None]] = []
         self._status_handlers: List[Callable[[AdapterStatus], None]] = []
         self._max_handler_concurrency = max(
@@ -224,7 +231,10 @@ class DataFeedAdapter(ABC):
     # Common Methods (can be overridden if needed)
     # ========================================================================
 
-    def add_message_handler(self, handler: Callable[[FeedMessage], None]) -> None:
+    def add_message_handler(
+        self,
+        handler: Callable[[FeedMessage], Optional[Awaitable[Any]]],
+    ) -> None:
         """Add a handler for incoming messages."""
         self._message_handlers.append(handler)
 
@@ -270,7 +280,14 @@ class DataFeedAdapter(ABC):
         except RuntimeError:
             for handler in self._message_handlers:
                 try:
-                    handler(message)
+                    result = handler(message)
+                    if inspect.isawaitable(result):
+                        self._stats['errors'] += 1
+                        self.logger.error(
+                            "Async message handler invoked without event loop: %s",
+                            getattr(handler, '__name__', str(handler)),
+                        )
+                        continue
                     self._stats['messages_processed'] += 1
                 except Exception as e:
                     self.logger.error(f"Error in message handler: {e}")
@@ -278,31 +295,24 @@ class DataFeedAdapter(ABC):
             return
 
         for handler in self._message_handlers:
-            if inspect.iscoroutinefunction(handler):
-                task = loop.create_task(self._dispatch_message_handler(handler, message))
-                self._handler_tasks.add(task)
-                task.add_done_callback(self._handler_tasks.discard)
-                continue
-
-            try:
-                handler(message)
-                self._stats['messages_processed'] += 1
-            except Exception as e:
-                self.logger.error(f"Error in message handler: {e}")
-                self._stats['errors'] += 1
+            task = loop.create_task(self._dispatch_message_handler(handler, message))
+            self._handler_tasks.add(task)
+            task.add_done_callback(self._handler_tasks.discard)
 
     async def _dispatch_message_handler(
         self,
-        handler: Callable[[FeedMessage], None],
+        handler: Callable[[FeedMessage], Optional[Awaitable[Any]]],
         message: FeedMessage,
     ) -> None:
         """Dispatch a message handler with bounded concurrency and timeout."""
         async with self._handler_semaphore:
             try:
-                await asyncio.wait_for(
-                    handler(message),
-                    timeout=self._handler_timeout_seconds,
-                )
+                result = handler(message)
+                if inspect.isawaitable(result):
+                    await asyncio.wait_for(
+                        result,
+                        timeout=self._handler_timeout_seconds,
+                    )
                 self._stats['messages_processed'] += 1
             except asyncio.TimeoutError:
                 self._stats['errors'] += 1

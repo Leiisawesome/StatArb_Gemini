@@ -55,7 +55,6 @@ import pandas as pd
 
 from .polygon_realtime import (
     PolygonAggregateBar,
-    PolygonAggregatedDataManager,
     PolygonCluster,
     PolygonFeedConfig,
     PolygonRealtimeFeedAdapter,
@@ -186,9 +185,8 @@ class PolygonDataService(ISystemComponent):
         self.component_id: Optional[str] = None
         self.logger = logging.getLogger(f"{self.__class__.__name__}[{self.config.name}]")
 
-        # Polygon adapter and manager
+        # Polygon adapter
         self._adapter: Optional[PolygonRealtimeFeedAdapter] = None
-        self._aggregation_manager: Optional[PolygonAggregatedDataManager] = None
 
         # Bar storage: symbol -> timeframe -> deque of bars
         self._bars: Dict[str, Dict[str, deque]] = defaultdict(
@@ -241,9 +239,6 @@ class PolygonDataService(ISystemComponent):
 
             # Create adapter
             self._adapter = PolygonRealtimeFeedAdapter(polygon_config)
-
-            # Create aggregation manager
-            self._aggregation_manager = PolygonAggregatedDataManager(self._adapter)
 
             # Register message handler
             self._adapter.add_message_handler(self._handle_message)

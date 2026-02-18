@@ -35,6 +35,7 @@ import asyncio
 import logging
 import os
 import ssl
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
@@ -139,7 +140,7 @@ class PolygonRestService:
         self._session: Optional[aiohttp.ClientSession] = None
 
         # Rate limiting
-        self._request_times: List[float] = []
+        self._request_times = deque()
 
         # State
         self.is_initialized = False
@@ -214,7 +215,8 @@ class PolygonRestService:
 
         # Remove old request times
         cutoff = now - self.config.rate_limit_period
-        self._request_times = [t for t in self._request_times if t > cutoff]
+        while self._request_times and self._request_times[0] <= cutoff:
+            self._request_times.popleft()
 
         # Wait if at limit
         if len(self._request_times) >= self.config.rate_limit_calls:

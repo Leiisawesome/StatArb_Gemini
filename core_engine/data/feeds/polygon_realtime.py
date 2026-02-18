@@ -804,6 +804,7 @@ class PolygonRealtimeFeedAdapter(DataFeedAdapter):
     async def _process_message(self, raw_message: str) -> None:
         """Process incoming WebSocket message"""
         try:
+            raw_payload = raw_message if isinstance(raw_message, bytes) else raw_message.encode('utf-8')
             data = json.loads(raw_message)
 
             # Handle array of messages
@@ -820,13 +821,13 @@ class PolygonRealtimeFeedAdapter(DataFeedAdapter):
 
                 # Market data messages
                 if event_type == 'T':  # Trade
-                    await self._handle_trade(msg)
+                    await self._handle_trade(msg, raw_payload)
                 elif event_type == 'A':  # Second aggregate
-                    await self._handle_aggregate(msg, 'second')
+                    await self._handle_aggregate(msg, 'second', raw_payload)
                 elif event_type == 'AM':  # Minute aggregate
-                    await self._handle_aggregate(msg, 'minute')
+                    await self._handle_aggregate(msg, 'minute', raw_payload)
                 elif event_type == 'Q':  # Quote
-                    await self._handle_quote(msg)
+                    await self._handle_quote(msg, raw_payload)
                 else:
                     self.logger.debug(f"Unknown message type: {event_type}")
 
@@ -854,7 +855,7 @@ class PolygonRealtimeFeedAdapter(DataFeedAdapter):
         else:
             self.logger.debug(f"Status message: {msg}")
 
-    async def _handle_trade(self, msg: Dict[str, Any]) -> None:
+    async def _handle_trade(self, msg: Dict[str, Any], raw_payload: Optional[bytes] = None) -> None:
         """Handle real-time trade message"""
         try:
             event_timestamp = self._parse_event_timestamp(msg.get('t', 0))
@@ -884,7 +885,7 @@ class PolygonRealtimeFeedAdapter(DataFeedAdapter):
                 },
                 sequence_number=trade.sequence_number,
                 latency_ms=self._calculate_latency(trade.timestamp),
-                raw_data=json.dumps(msg).encode('utf-8'),
+                raw_data=raw_payload,
             )
 
             self._handle_message(feed_message)
@@ -893,7 +894,12 @@ class PolygonRealtimeFeedAdapter(DataFeedAdapter):
             self.logger.error(f"Trade parsing error: {e}")
             self._handle_error(e)
 
-    async def _handle_aggregate(self, msg: Dict[str, Any], bar_type: str) -> None:
+    async def _handle_aggregate(
+        self,
+        msg: Dict[str, Any],
+        bar_type: str,
+        raw_payload: Optional[bytes] = None,
+    ) -> None:
         """Handle aggregate bar message (second or minute)"""
         try:
             # Parse Polygon aggregate format
@@ -945,7 +951,7 @@ class PolygonRealtimeFeedAdapter(DataFeedAdapter):
                     'otc': bar.otc,
                 },
                 latency_ms=self._calculate_latency(bar.timestamp_end),
-                raw_data=json.dumps(msg).encode('utf-8'),
+                raw_data=raw_payload,
             )
 
             self._handle_message(feed_message)
@@ -954,7 +960,7 @@ class PolygonRealtimeFeedAdapter(DataFeedAdapter):
             self.logger.error(f"Aggregate parsing error: {e}")
             self._handle_error(e)
 
-    async def _handle_quote(self, msg: Dict[str, Any]) -> None:
+    async def _handle_quote(self, msg: Dict[str, Any], raw_payload: Optional[bytes] = None) -> None:
         """Handle real-time quote message (Advanced tier)"""
         try:
             event_timestamp = self._parse_event_timestamp(msg.get('t', 0))
@@ -986,7 +992,7 @@ class PolygonRealtimeFeedAdapter(DataFeedAdapter):
                     'conditions': quote.conditions,
                 },
                 latency_ms=self._calculate_latency(quote.timestamp),
-                raw_data=json.dumps(msg).encode('utf-8'),
+                raw_data=raw_payload,
             )
 
             self._handle_message(feed_message)
@@ -1232,14 +1238,17 @@ class PolygonAggregatedDataManager:
         if not minute_bars:
             return None
 
+        total_volume = sum(b.volume for b in minute_bars)
+        weighted_volume_sum = sum(b.vwap * b.volume for b in minute_bars)
+
         return PolygonAggregateBar(
             symbol=minute_bars[0].symbol,
             open=minute_bars[0].open,
             high=max(b.high for b in minute_bars),
             low=min(b.low for b in minute_bars),
             close=minute_bars[-1].close,
-            volume=sum(b.volume for b in minute_bars),
-            vwap=sum(b.vwap * b.volume for b in minute_bars) / sum(b.volume for b in minute_bars) if sum(b.volume for b in minute_bars) > 0 else 0,
+            volume=total_volume,
+            vwap=weighted_volume_sum / total_volume if total_volume > 0 else 0,
             timestamp_start=minute_bars[0].timestamp_start,
             timestamp_end=minute_bars[-1].timestamp_end,
             num_trades=sum(b.num_trades for b in minute_bars),

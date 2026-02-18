@@ -51,6 +51,7 @@ except ImportError:
 import requests
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
+from .adapters import FeedMessage, FeedProvider
 
 logger = logging.getLogger(__name__)
 
@@ -158,29 +159,6 @@ class FeedConfiguration:
 
     # Custom parameters
     custom_params: Dict[str, Any] = field(default_factory=dict)
-
-@dataclass
-class FeedMessage:
-    """Feed message container"""
-    feed_id: str
-    message_id: str
-    timestamp: datetime
-    sequence_number: Optional[int]
-
-    # Message content
-    message_type: str
-    symbol: Optional[str]
-    data: Dict[str, Any]
-    raw_data: Optional[bytes] = None
-
-    # Quality metadata
-    latency_ms: Optional[float] = None
-    processing_time_ms: Optional[float] = None
-    validation_status: str = "pending"
-
-    # Source metadata
-    source_timestamp: Optional[datetime] = None
-    received_timestamp: datetime = field(default_factory=datetime.now)
 
 @dataclass
 class FeedStatistics:
@@ -501,6 +479,7 @@ class WebSocketFeed(DataFeed):
 
             # Create feed message
             feed_message = FeedMessage(
+                provider=FeedProvider.CUSTOM,
                 feed_id=self.config.feed_id,
                 message_id=data.get('id', str(time.time())),
                 timestamp=datetime.now(),
@@ -641,6 +620,7 @@ class HTTPFeed(DataFeed):
 
                     # Create feed message
                     feed_message = FeedMessage(
+                        provider=FeedProvider.CUSTOM,
                         feed_id=self.config.feed_id,
                         message_id=str(time.time()),
                         timestamp=datetime.now(),
