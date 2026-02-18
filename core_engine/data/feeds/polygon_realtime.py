@@ -47,7 +47,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Set
 
 try:
     import websockets
@@ -385,10 +385,10 @@ class PolygonRealtimeFeedAdapter(DataFeedAdapter):
             self._set_status(AdapterStatus.AUTHENTICATED)
 
             # Start receive loop
-            self._receive_task = asyncio.create_task(self._receive_loop())
+            self._start_task_once('_receive_task', self._receive_loop, 'receive loop')
 
             # Start heartbeat monitoring
-            self._heartbeat_task = asyncio.create_task(self._heartbeat_monitor())
+            self._start_task_once('_heartbeat_task', self._heartbeat_monitor, 'heartbeat monitor')
 
             self._reconnect_count = 0
             self.logger.info("Successfully connected and authenticated to Polygon.io")
@@ -469,12 +469,22 @@ class PolygonRealtimeFeedAdapter(DataFeedAdapter):
         self._set_status(AdapterStatus.AUTHENTICATED)
 
         # Start receive loop
-        self._receive_task = asyncio.create_task(self._receive_loop_aiohttp())
+        self._start_task_once('_receive_task', self._receive_loop_aiohttp, 'aiohttp receive loop')
 
         self._reconnect_count = 0
         self.logger.info("Successfully connected via aiohttp to Polygon.io")
 
         return True
+
+    def _start_task_once(self, attr_name: str, task_factory: Callable[[], Awaitable[Any]], label: str) -> None:
+        """Start a background task only when no active task exists for the slot."""
+        existing_task = getattr(self, attr_name, None)
+        if existing_task and not existing_task.done():
+            self.logger.debug("%s already running; reusing existing task", label)
+            return
+
+        task = asyncio.create_task(task_factory())
+        setattr(self, attr_name, task)
 
     async def _authenticate_aiohttp(self) -> bool:
         """Authenticate using aiohttp WebSocket"""

@@ -12,6 +12,7 @@ from dataclasses import dataclass, field, replace
 from enum import Enum
 import time
 from collections import defaultdict, deque
+from itertools import islice
 import json
 
 # Import constants
@@ -48,9 +49,8 @@ try:
     import websocket
 except ImportError:
     websocket = None
-import requests
+import aiohttp
 from abc import ABC, abstractmethod
-from concurrent.futures import ThreadPoolExecutor
 from .adapters import FeedMessage, FeedProvider
 
 logger = logging.getLogger(__name__)
@@ -340,7 +340,7 @@ class DataFeed(ABC):
     def get_recent_messages(self, count: int = 100) -> List[FeedMessage]:
         """Get recent messages from buffer"""
         with self._lock:
-            return list(self._message_buffer)[-count:]
+            return list(reversed(list(islice(reversed(self._message_buffer), count))))
 
     def get_statistics(self) -> FeedStatistics:
         """Get feed statistics"""
@@ -518,7 +518,6 @@ class HTTPFeed(DataFeed):
         super().__init__(config)
         self._session = None
         self._polling_task = None
-        self._executor = ThreadPoolExecutor(max_workers=1)
 
     async def connect(self) -> bool:
         """Connect to HTTP feed"""
@@ -526,21 +525,26 @@ class HTTPFeed(DataFeed):
             self._set_status(FeedStatus.CONNECTING)
 
             # Create HTTP session
-            self._session = requests.Session()
-
-            # Set authentication
+            headers = {}
             if self.config.api_key:
-                self._session.headers.update({'Authorization': f'Bearer {self.config.api_key}'})
+                headers['Authorization'] = f'Bearer {self.config.api_key}'
+
+            self._session = aiohttp.ClientSession(
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=self.config.connect_timeout),
+            )
 
             # Test connection
-            response = self._session.get(self.config.url, timeout=self.config.connect_timeout)
+            async with self._session.get(self.config.url) as response:
+                if response.status == 200:
+                    self._set_status(FeedStatus.CONNECTED)
+                    return True
 
-            if response.status_code == 200:
-                self._set_status(FeedStatus.CONNECTED)
-                return True
-            else:
-                self._handle_error(f"HTTP connection failed: {response.status_code}",
-                                 Exception(response.text))
+                response_text = await response.text()
+                self._handle_error(
+                    f"HTTP connection failed: {response.status}",
+                    Exception(response_text),
+                )
                 return False
 
         except Exception as e:
@@ -553,9 +557,14 @@ class HTTPFeed(DataFeed):
         try:
             if self._polling_task:
                 self._polling_task.cancel()
+                try:
+                    await self._polling_task
+                except asyncio.CancelledError:
+                    pass
 
             if self._session:
-                self._session.close()
+                await self._session.close()
+                self._session = None
 
             self._set_status(FeedStatus.DISCONNECTED)
             return True
@@ -606,35 +615,33 @@ class HTTPFeed(DataFeed):
                     'fields': ','.join(fields or self.config.fields)
                 }
 
-                # Make request
-                loop = asyncio.get_event_loop()
-                response = await loop.run_in_executor(
-                    self._executor,
-                    lambda: self._session.get(self.config.url, params=params,
-                                            timeout=self.config.read_timeout)
-                )
+                timeout = aiohttp.ClientTimeout(total=self.config.read_timeout)
+                async with self._session.get(self.config.url, params=params, timeout=timeout) as response:
+                    if response.status == 200:
+                        # Process response
+                        data = await response.json()
+                        raw_content = await response.read()
 
-                if response.status_code == 200:
-                    # Process response
-                    data = response.json()
+                        # Create feed message
+                        feed_message = FeedMessage(
+                            provider=FeedProvider.CUSTOM,
+                            feed_id=self.config.feed_id,
+                            message_id=str(time.time()),
+                            timestamp=datetime.now(),
+                            sequence_number=None,
+                            message_type='data',
+                            symbol=None,
+                            data=data,
+                            raw_data=raw_content
+                        )
 
-                    # Create feed message
-                    feed_message = FeedMessage(
-                        provider=FeedProvider.CUSTOM,
-                        feed_id=self.config.feed_id,
-                        message_id=str(time.time()),
-                        timestamp=datetime.now(),
-                        sequence_number=None,
-                        message_type='data',
-                        symbol=None,
-                        data=data,
-                        raw_data=response.content
-                    )
-
-                    self._handle_message(feed_message)
-                else:
-                    self._handle_error(f"HTTP polling error: {response.status_code}",
-                                     Exception(response.text))
+                        self._handle_message(feed_message)
+                    else:
+                        response_text = await response.text()
+                        self._handle_error(
+                            f"HTTP polling error: {response.status}",
+                            Exception(response_text),
+                        )
 
                 # Wait before next poll
                 await asyncio.sleep(DataIntervals.HTTP_POLLING_SECONDS)
