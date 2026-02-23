@@ -131,7 +131,7 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
         if "decision_price" in self._next_order_context:
             fill_price = self._next_order_context["decision_price"]
         elif symbol in self.positions:
-            fill_price = self.positions[symbol].average_price
+            fill_price = self.positions[symbol].current_price
         else:
             logger.warning(f"No price context for {symbol}, using default mock price $100.0")
         
@@ -179,6 +179,26 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
             return self._time_source.market_now()
         return datetime.now()
 
+    def _build_position(self, symbol: str, quantity: float, avg_entry_price: float) -> Position:
+        current_price = self.current_prices.get(symbol, avg_entry_price)
+        market_value = quantity * current_price
+        cost_basis = quantity * avg_entry_price
+        unrealized_pl = market_value - cost_basis
+        unrealized_plpc = (unrealized_pl / abs(cost_basis)) * 100 if cost_basis != 0 else 0.0
+        return Position(
+            symbol=symbol,
+            quantity=quantity,
+            avg_entry_price=avg_entry_price,
+            market_value=market_value,
+            unrealized_pl=unrealized_pl,
+            unrealized_plpc=unrealized_plpc,
+            current_price=current_price,
+            side="long" if quantity >= 0 else "short",
+            cost_basis=cost_basis,
+            timestamp=self._get_now(),
+            metadata={"broker": "PaperBroker"},
+        )
+
     def _update_account(self, symbol, quantity, side, price, commission):
         q_change = quantity if side == OrderSide.BUY else -quantity
         cost = quantity * price
@@ -190,7 +210,7 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
 
         if symbol in self.positions:
             old_q = self.positions[symbol].quantity
-            old_px = self.positions[symbol].average_price
+            old_px = self.positions[symbol].avg_entry_price
             new_q = old_q + q_change
             
             if new_q == 0:
@@ -201,9 +221,9 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
                     new_px = (old_q * old_px + cost) / new_q
                 else:
                     new_px = old_px # Simplified
-                self.positions[symbol] = Position(symbol=symbol, quantity=new_q, average_price=new_px)
+                self.positions[symbol] = self._build_position(symbol, new_q, new_px)
         else:
-            self.positions[symbol] = Position(symbol=symbol, quantity=q_change, average_price=price)
+            self.positions[symbol] = self._build_position(symbol, q_change, price)
         
         # Update equity using best available prices
         self._recalculate_equity()
@@ -211,14 +231,13 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
     def update_market_prices(self, prices: Dict[str, float]) -> None:
         """Update current market prices for accurate equity calculation."""
         self.current_prices.update(prices)
+        for symbol, position in list(self.positions.items()):
+            self.positions[symbol] = self._build_position(symbol, position.quantity, position.avg_entry_price)
         self._recalculate_equity()
 
     def _recalculate_equity(self) -> None:
         """Recalculate equity using best available prices."""
-        position_value = 0.0
-        for symbol, pos in self.positions.items():
-            price = self.current_prices.get(symbol, pos.average_price)
-            position_value += pos.quantity * price
+        position_value = sum(position.market_value for position in self.positions.values())
         self.equity = self.cash + position_value
 
     async def submit_limit_order(self, symbol: str, quantity: float, side: OrderSide, limit_price: float) -> Order:
@@ -228,7 +247,7 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
             side=side,
             quantity=quantity,
             order_type=OrderType.LIMIT,
-            limit_price=limit_price,
+            price=limit_price,
             order_id=order_id,
             status=OrderStatus.SUBMITTED,
             timestamp=datetime.now()
@@ -244,7 +263,7 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
 
     async def cancel_all_orders(self) -> bool:
         for order in self.orders.values():
-            if order.status in [OrderStatus.SUBMITTED, OrderStatus.OPEN]:
+            if order.status in [OrderStatus.PENDING, OrderStatus.SUBMITTED, OrderStatus.PARTIAL_FILLED]:
                 order.status = OrderStatus.CANCELLED
         return True
 
@@ -252,7 +271,22 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
         return self.orders.get(order_id)
 
     async def get_orders(self, status: str = "open") -> List[Order]:
-        return list(self.orders.values())
+        if status == "all":
+            return list(self.orders.values())
+
+        if status == "open":
+            return [
+                order for order in self.orders.values()
+                if order.status in [OrderStatus.PENDING, OrderStatus.SUBMITTED, OrderStatus.PARTIAL_FILLED]
+            ]
+
+        if status == "closed":
+            return [
+                order for order in self.orders.values()
+                if order.status in [OrderStatus.FILLED, OrderStatus.CANCELLED, OrderStatus.REJECTED]
+            ]
+
+        return []
 
     async def get_positions(self) -> List[Position]:
         return list(self.positions.values())
@@ -262,9 +296,11 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
 
     async def get_account_info(self) -> AccountInfo:
         return AccountInfo(
+            account_id="PAPER",
             equity=self.equity,
             cash=self.cash,
             buying_power=self.cash * 2,
+            portfolio_value=self.equity,
             timestamp=datetime.now()
         )
 

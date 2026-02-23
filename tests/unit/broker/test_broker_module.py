@@ -1,265 +1,180 @@
-"""
-Unit tests for broker module components.
-Tests broker adapter, connection manager, and related components.
-"""
-
 import pytest
-from unittest.mock import patch, AsyncMock
+from datetime import datetime
 
-from core_engine.broker.broker_adapter import (
-    BrokerAdapter,
-    BrokerCredentials,
-    BrokerType,
-    ConnectionStatus,
-    StandardOrder,
-    StandardPosition,
-    StandardAccount,
-    OrderAction,
+from core_engine.broker.broker_adapter import BrokerAdapter
+from core_engine.broker.broker_manager import BrokerManager
+from core_engine.system.interfaces import RegimeContext
+from core_engine.type_definitions.broker_types import (
+    AccountInfo,
+    Order,
+    OrderSide,
     OrderType,
-    TimeInForce
+    Position,
 )
 
-from core_engine.broker.broker_manager import (
-    BrokerManager,
-    BrokerConfig
-)
 
-class TestBrokerAdapter:
-    """Test suite for BrokerAdapter class."""
+class DummyAdapter:
+    def __init__(self, name: str, equity: float = 1000.0):
+        self.name = name
+        self.equity = equity
+        self.connected = False
+        self.regime = None
 
-    @pytest.fixture
-    def broker_credentials(self):
-        """Create test broker credentials."""
-        return BrokerCredentials(
-            broker_type=BrokerType.INTERACTIVE_BROKERS,
-            api_key="test_api_key",
-            secret_key="test_secret_key",
-            host="api.testbroker.com",
-            account_id="test_account"
+    async def connect(self):
+        self.connected = True
+        return True
+
+    async def disconnect(self):
+        self.connected = False
+
+    def is_connected(self):
+        return self.connected
+
+    async def check_connection_health(self):
+        return {"connected": self.connected}
+
+    async def get_latest_quote(self, symbol):
+        return {"bid_price": 99.0, "ask_price": 101.0, "timestamp": datetime.now()}
+
+    def is_market_open(self):
+        return True
+
+    async def submit_market_order(self, symbol, quantity, side):
+        return Order(symbol=symbol, side=side, quantity=quantity, order_type=OrderType.MARKET)
+
+    async def submit_limit_order(self, symbol, quantity, side, limit_price):
+        return Order(
+            symbol=symbol,
+            side=side,
+            quantity=quantity,
+            order_type=OrderType.LIMIT,
+            price=limit_price,
         )
 
-    @pytest.fixture
-    def broker_adapter(self, broker_credentials):
-        """Create test broker adapter."""
-        return BrokerAdapter(
-            credentials=broker_credentials
-        )
+    async def cancel_order(self, order_id):
+        return True
 
-    def test_initialization(self, broker_adapter, broker_credentials):
-        """Test broker adapter initialization."""
-        assert broker_adapter.broker_type == BrokerType.INTERACTIVE_BROKERS
-        assert broker_adapter.credentials == broker_credentials
-        assert broker_adapter.connection_status == ConnectionStatus.DISCONNECTED
+    async def cancel_all_orders(self):
+        return True
 
-    @pytest.mark.asyncio
-    async def test_connect_success(self, broker_adapter):
-        """Test successful connection."""
-        with patch.object(broker_adapter._adapter, 'connect', new_callable=AsyncMock) as mock_connect:
-            mock_connect.return_value = True
-            with patch.object(broker_adapter._adapter, 'authenticate', new_callable=AsyncMock) as mock_auth:
-                mock_auth.return_value = True
-                broker_adapter._adapter.connection_status = ConnectionStatus.CONNECTED
+    async def get_order(self, order_id):
+        return None
 
-                result = await broker_adapter.connect()
+    async def get_orders(self, status="open"):
+        return []
 
-                assert result is True
-                mock_connect.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_connect_failure(self, broker_adapter):
-        """Test connection failure."""
-        with patch.object(broker_adapter._adapter, 'connect', new_callable=AsyncMock) as mock_connect:
-            mock_connect.return_value = False
-
-            result = await broker_adapter.connect()
-
-            assert result is False
-            mock_connect.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_disconnect(self, broker_adapter):
-        """Test disconnection."""
-        broker_adapter.connection_status = ConnectionStatus.CONNECTED
-
-        with patch.object(broker_adapter._adapter, 'disconnect', new_callable=AsyncMock) as mock_disconnect:
-            mock_disconnect.return_value = True
-
-            result = await broker_adapter.disconnect()
-
-            assert result is True
-            mock_disconnect.assert_called_once()
-
-    def test_create_standard_order(self, broker_adapter):
-        """Test creating a standard order."""
-        order = StandardOrder(
-            order_id="test_order_123",
-            symbol="AAPL",
-            quantity=100,
-            action=OrderAction.BUY,
-            order_type=OrderType.MARKET,
-            time_in_force=TimeInForce.DAY
-        )
-
-        assert isinstance(order, StandardOrder)
-        assert order.symbol == "AAPL"
-        assert order.quantity == 100
-        assert order.action == OrderAction.BUY
-        assert order.order_type == OrderType.MARKET
-        assert order.time_in_force == TimeInForce.DAY
-
-    @pytest.mark.asyncio
-    async def test_submit_order_connected(self, broker_adapter):
-        """Test order submission when connected."""
-        broker_adapter.connection_status = ConnectionStatus.READY
-
-        order = StandardOrder(
-            order_id="test_order_123",
-            symbol="AAPL",
-            quantity=100,
-            action=OrderAction.BUY,
-            order_type=OrderType.MARKET,
-            time_in_force=TimeInForce.DAY
-        )
-
-        with patch.object(broker_adapter._adapter, 'submit_order', new_callable=AsyncMock) as mock_submit:
-            mock_submit.return_value = "broker_order_123"
-
-            result = await broker_adapter.submit_order(order)
-
-            assert result == "broker_order_123"
-            mock_submit.assert_called_once_with(order)
-
-    @pytest.mark.asyncio
-    async def test_submit_order_disconnected(self, broker_adapter):
-        """Test order submission when disconnected."""
-        broker_adapter.connection_status = ConnectionStatus.DISCONNECTED
-
-        order = StandardOrder(
-            order_id="test_order_124",
-            symbol="AAPL",
-            quantity=100,
-            action=OrderAction.BUY,
-            order_type=OrderType.MARKET,
-            time_in_force=TimeInForce.DAY
-        )
-
-        with pytest.raises(RuntimeError):
-            await broker_adapter.submit_order(order)
-
-    @pytest.mark.asyncio
-    async def test_get_positions(self, broker_adapter):
-        """Test getting positions."""
-        broker_adapter.connection_status = ConnectionStatus.READY
-
-        expected_positions = [
-            StandardPosition(
+    async def get_positions(self):
+        if self.name == "A":
+            return [
+                Position(
+                    symbol="AAPL",
+                    quantity=10,
+                    avg_entry_price=100.0,
+                    market_value=1000.0,
+                    unrealized_pl=0.0,
+                    unrealized_plpc=0.0,
+                    current_price=100.0,
+                    side="long",
+                    cost_basis=1000.0,
+                )
+            ]
+        return [
+            Position(
                 symbol="AAPL",
-                quantity=100,
-                side="long",
-                avg_cost=150.0,
-                market_value=15500.0,
-                unrealized_pnl=500.0,
-                last_price=155.0
+                quantity=-3,
+                avg_entry_price=100.0,
+                market_value=-300.0,
+                unrealized_pl=0.0,
+                unrealized_plpc=0.0,
+                current_price=100.0,
+                side="short",
+                cost_basis=-300.0,
             )
         ]
 
-        with patch.object(broker_adapter._adapter, 'get_positions', new_callable=AsyncMock) as mock_get:
-            mock_get.return_value = expected_positions
+    async def get_position(self, symbol):
+        return None
 
-            positions = await broker_adapter.get_positions()
-
-            assert positions == expected_positions
-            mock_get.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_get_account_info(self, broker_adapter):
-        """Test getting account information."""
-        broker_adapter.connection_status = ConnectionStatus.READY
-
-        expected_account = StandardAccount(
-            account_id="test_account",
-            account_type="margin",
-            total_equity=150000.0,
-            buying_power=200000.0,
-            cash_balance=100000.0
+    async def get_account_info(self):
+        return AccountInfo(
+            account_id=f"ACC-{self.name}",
+            cash=self.equity,
+            buying_power=self.equity * 2,
+            portfolio_value=self.equity,
+            equity=self.equity,
         )
 
-        with patch.object(broker_adapter._adapter, 'get_account_info', new_callable=AsyncMock) as mock_get:
-            mock_get.return_value = expected_account
+    def broker_name(self):
+        return f"Dummy-{self.name}"
 
-            account = await broker_adapter.get_account_info()
 
-            assert account == expected_account
-            mock_get.assert_called_once()
+def test_manager_initialization():
+    manager = BrokerManager([])
+    assert manager.adapters == []
 
-class TestBrokerManager:
-    """Test suite for BrokerManager class."""
 
-    @pytest.fixture
-    def broker_manager(self):
-        """Create test broker manager."""
-        return BrokerManager(BrokerConfig())
+@pytest.mark.asyncio
+async def test_submit_order_to_all_returns_orders():
+    manager = BrokerManager([
+        BrokerAdapter(DummyAdapter("A")),
+        BrokerAdapter(DummyAdapter("B")),
+    ])
 
-    def test_initialization(self, broker_manager):
-        """Test broker manager initialization."""
-        assert len(broker_manager._broker_adapters) == 0
-        assert broker_manager.is_initialized is False
-        assert broker_manager.is_operational is False
+    orders = await manager.submit_order_to_all("MSFT", 5, OrderSide.BUY, OrderType.MARKET)
 
-    @pytest.mark.asyncio
-    async def test_add_broker(self, broker_manager):
-        """Test adding a broker."""
-        credentials = BrokerCredentials(
-            broker_type=BrokerType.INTERACTIVE_BROKERS,
-            api_key="test_key",
-            secret_key="test_secret",
-            host="test.host.com",
-            account_id="test_account"
-        )
+    assert len(orders) == 2
+    assert all(order.symbol == "MSFT" for order in orders)
 
-        broker_id = await broker_manager.add_broker(
-            broker_type=BrokerType.INTERACTIVE_BROKERS,
-            credentials=credentials
-        )
 
-        assert broker_id in broker_manager._broker_adapters
-        assert isinstance(broker_manager._broker_adapters[broker_id], BrokerAdapter)
+@pytest.mark.asyncio
+async def test_get_total_equity_aggregates_adapters():
+    manager = BrokerManager([
+        BrokerAdapter(DummyAdapter("A", equity=1500.0)),
+        BrokerAdapter(DummyAdapter("B", equity=2500.0)),
+    ])
 
-    @pytest.mark.asyncio
-    async def test_remove_broker(self, broker_manager):
-        """Test removing a broker."""
-        credentials = BrokerCredentials(
-            broker_type=BrokerType.INTERACTIVE_BROKERS,
-            api_key="test_key",
-            secret_key="test_secret",
-            host="test.host.com",
-            account_id="test_account"
-        )
+    total_equity = await manager.get_total_equity()
 
-        broker_id = await broker_manager.add_broker(
-            broker_type=BrokerType.INTERACTIVE_BROKERS,
-            credentials=credentials
-        )
+    assert total_equity == 4000.0
 
-        assert broker_id in broker_manager._broker_adapters
 
-        result = await broker_manager.remove_broker(broker_id)
-        assert result is True
-        assert broker_id not in broker_manager._broker_adapters
+@pytest.mark.asyncio
+async def test_cancel_all_global_success():
+    manager = BrokerManager([
+        BrokerAdapter(DummyAdapter("A")),
+        BrokerAdapter(DummyAdapter("B")),
+    ])
 
-    def test_get_broker(self, broker_manager):
-        """Test getting a broker."""
-        # Test with non-existent broker
-        adapter = broker_manager.get_broker("non_existent")
-        assert adapter is None
+    assert await manager.cancel_all_global() is True
 
-    def test_list_brokers(self, broker_manager):
-        """Test listing brokers."""
-        brokers = broker_manager.list_brokers()
-        assert isinstance(brokers, list)
-        assert len(brokers) == 0
 
-    def test_get_broker_count(self, broker_manager):
-        """Test getting broker count."""
-        count = broker_manager.get_broker_count()
-        assert count == 0
+@pytest.mark.asyncio
+async def test_aggregated_positions_sum_quantities():
+    manager = BrokerManager([
+        BrokerAdapter(DummyAdapter("A")),
+        BrokerAdapter(DummyAdapter("B")),
+    ])
+
+    aggregated = await manager.get_aggregated_positions()
+
+    assert aggregated["AAPL"] == 7
+
+
+@pytest.mark.asyncio
+async def test_update_regime_propagates_to_all_adapters():
+    adapter_a = BrokerAdapter(DummyAdapter("A"))
+    adapter_b = BrokerAdapter(DummyAdapter("B"))
+    manager = BrokerManager([adapter_a, adapter_b])
+
+    context = RegimeContext(
+        primary_regime="trend",
+        volatility_regime="normal",
+        regime_confidence=0.9,
+        regime_start_time=datetime.now(),
+        regime_duration_minutes=10.0,
+    )
+
+    await manager.update_regime(context)
+
+    assert adapter_a._regime_context is context
+    assert adapter_b._regime_context is context

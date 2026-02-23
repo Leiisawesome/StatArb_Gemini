@@ -4,9 +4,7 @@ Provides a consistent async interface for multiple broker types.
 """
 
 import logging
-import asyncio
 from typing import List, Optional, Dict, Any
-from datetime import datetime
 
 from core_engine.type_definitions.broker_types import (
     Order, OrderSide, OrderType, Position, AccountInfo
@@ -60,18 +58,26 @@ class BrokerAdapter:
         Unified order submission with regime-awareness logic
         """
         # Regime-aware logic: Override order types or add protections
-        if self._regime_context and self._regime_context.volatility > 2.0:
+        high_volatility_regimes = {"high_volatility", "extreme_vol"}
+        in_high_volatility = (
+            self._regime_context is not None
+            and self._regime_context.volatility_regime in high_volatility_regimes
+        )
+
+        if in_high_volatility:
             if order_type == OrderType.MARKET:
-                logger.warning(f"⚠️ High volatility detected ({self._regime_context.volatility}). Forcing limit order for {symbol}")
+                logger.warning(
+                    f"⚠️ High volatility detected ({self._regime_context.volatility_regime}). "
+                    f"Forcing limit order for {symbol}"
+                )
                 order_type = OrderType.LIMIT
-                # If no limit price provided, use a wide buffer from last quote
                 if limit_price is None:
                     quote = await self.adapter.get_latest_quote(symbol)
-                    if quote:
+                    if quote and quote.get("ask_price") and quote.get("bid_price"):
                         if side == OrderSide.BUY:
-                            limit_price = quote['ask_price'] * 1.01 # 1% buffer
+                            limit_price = quote['ask_price'] * 1.01
                         else:
-                            limit_price = quote['bid_price'] * 0.99 # 1% buffer
+                            limit_price = quote['bid_price'] * 0.99
 
         if order_type == OrderType.MARKET:
             return await self.adapter.submit_market_order(symbol, quantity, side)
@@ -100,4 +106,5 @@ class BrokerAdapter:
         return await self.adapter.get_order(order_id)
 
     def broker_name(self) -> str:
-        return self.adapter.broker_name()
+        broker_name = self.adapter.broker_name
+        return broker_name() if callable(broker_name) else str(broker_name)

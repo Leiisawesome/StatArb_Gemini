@@ -156,11 +156,11 @@ class TestDeterministicFills:
         random.seed(42)
 
         broker1 = PaperBrokerAdapter(initial_cash=100_000)
-        broker1.connect()
-        broker1.set_price('AAPL', 150.0)
+        await broker1.connect()
+        broker1.update_market_prices({'AAPL': 150.0})
 
         # Submit order
-        order1 = broker1.submit_market_order('AAPL', 100, OrderSide.BUY)
+        order1 = await broker1.submit_market_order('AAPL', 100, OrderSide.BUY)
 
         # Give async execution time to process
         await asyncio.sleep(0.3)
@@ -169,10 +169,10 @@ class TestDeterministicFills:
         random.seed(42)
 
         broker2 = PaperBrokerAdapter(initial_cash=100_000)
-        broker2.connect()
-        broker2.set_price('AAPL', 150.0)
+        await broker2.connect()
+        broker2.update_market_prices({'AAPL': 150.0})
 
-        order2 = broker2.submit_market_order('AAPL', 100, OrderSide.BUY)
+        order2 = await broker2.submit_market_order('AAPL', 100, OrderSide.BUY)
 
         # Give async execution time to process
         await asyncio.sleep(0.3)

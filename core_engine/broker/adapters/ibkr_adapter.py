@@ -52,6 +52,9 @@ class IBKRWrapper(EWrapper):
 
         # Event for waiting on connection
         self.connection_ready = threading.Event()
+        self.positions_ready = threading.Event()
+        self.open_orders_ready = threading.Event()
+        self.account_summary_events: Dict[int, threading.Event] = {}
 
     def error(self, reqId: TickerId, errorCode: int, errorString: str, advancedOrderRejectJson=""):
         """Handle error messages"""
@@ -92,6 +95,7 @@ class IBKRWrapper(EWrapper):
     def positionEnd(self):
         """Callback when all positions have been received"""
         logger.debug("Position updates complete")
+        self.positions_ready.set()
 
     def accountSummary(self, reqId: int, account: str, tag: str, value: str, currency: str):
         """Callback for account summary data"""
@@ -105,6 +109,9 @@ class IBKRWrapper(EWrapper):
     def accountSummaryEnd(self, reqId: int):
         """Callback when account summary is complete"""
         logger.debug("Account summary complete")
+        event = self.account_summary_events.get(reqId)
+        if event:
+            event.set()
 
     def managedAccounts(self, accountsList: str):
         """Callback for managed accounts list"""
@@ -196,6 +203,10 @@ class IBKRWrapper(EWrapper):
             'state': orderState
         })
 
+    def openOrderEnd(self):
+        """Callback when open orders snapshot is complete"""
+        self.open_orders_ready.set()
+
     def contractDetails(self, reqId: int, contractDetails):
         """Callback for contract details"""
         logger.debug(f"Contract details received for reqId {reqId}")
@@ -255,6 +266,25 @@ class IBKRAdapter(BaseBrokerAdapter):
         self._thread = None
         self._next_req_id = 1
         self._req_id_lock = threading.Lock()
+        self._quote_cache: Dict[str, Dict[str, Any]] = {}
+        self._quote_cache_ttl_seconds = 1.0
+        self._quote_inflight: Dict[str, asyncio.Task] = {}
+        self._account_info_cache: Optional[AccountInfo] = None
+        self._account_info_cache_ts: Optional[datetime] = None
+        self._account_info_cache_ttl_seconds = 2.0
+        self._orders_cache: List[Order] = []
+        self._orders_cache_ts: Optional[datetime] = None
+        self._orders_cache_ttl_seconds = 0.5
+        self._positions_cache: List[Position] = []
+        self._positions_cache_ts: Optional[datetime] = None
+        self._positions_cache_ttl_seconds = 0.75
+
+        if not hasattr(self.wrapper, "positions_ready"):
+            self.wrapper.positions_ready = threading.Event()
+        if not hasattr(self.wrapper, "open_orders_ready"):
+            self.wrapper.open_orders_ready = threading.Event()
+        if not hasattr(self.wrapper, "account_summary_events"):
+            self.wrapper.account_summary_events = {}
 
         logger.info(
             f"Initialized IBKR adapter "
@@ -277,6 +307,13 @@ class IBKRAdapter(BaseBrokerAdapter):
             logger.error(f"IB client loop error: {e}")
             self._connected = False
 
+    async def _await_thread_event(self, event: threading.Event, timeout_seconds: float) -> bool:
+        """Await a threading.Event without blocking the asyncio loop."""
+        start_time = time.time()
+        while not event.is_set() and (time.time() - start_time) < timeout_seconds:
+            await asyncio.sleep(0.02)
+        return event.is_set()
+
     # ==================== Connection Management ====================
 
     async def connect(self) -> bool:
@@ -291,6 +328,8 @@ class IBKRAdapter(BaseBrokerAdapter):
                 f"Connecting to IBKR at {self.config.host}:{self.config.port} "
                 f"(client_id={self.config.client_id})..."
             )
+
+            self.wrapper.connection_ready.clear()
 
             # Connect to IB
             self.client.connect(
@@ -336,11 +375,11 @@ class IBKRAdapter(BaseBrokerAdapter):
                     logger.warning("⚠️  For real-time quotes, subscribe to market data and set IB_HAS_MARKET_DATA_SUBSCRIPTION=true")
 
             # Request initial data
+            self.wrapper.positions_ready.clear()
+            self.wrapper.open_orders_ready.clear()
             self.client.reqAccountSummary(9001, "All", "$LEDGER")
             self.client.reqPositions()
-
-            # Give time for initial data
-            await asyncio.sleep(1)
+            await self._await_thread_event(self.wrapper.positions_ready, timeout_seconds=1.0)
 
             logger.info(
                 f"✅ Connected to IBKR "
@@ -358,6 +397,10 @@ class IBKRAdapter(BaseBrokerAdapter):
         """Disconnect from IB"""
         if self._connected:
             try:
+                for task in list(self._quote_inflight.values()):
+                    if not task.done():
+                        task.cancel()
+                self._quote_inflight.clear()
                 self.client.disconnect()
                 self._connected = False
                 self.wrapper.connected = False
@@ -403,7 +446,7 @@ class IBKRAdapter(BaseBrokerAdapter):
             try:
                 # Disconnect first if still connected
                 if self.is_connected():
-                    self.disconnect()
+                    await self.disconnect()
                     await asyncio.sleep(1)
 
                 # Clear any error state
@@ -412,7 +455,7 @@ class IBKRAdapter(BaseBrokerAdapter):
 
                 # Attempt reconnection
                 logger.info(f"Reconnection attempt {attempt + 1}/{max_attempts}")
-                if self.connect():
+                if await self.connect():
                     logger.info("✅ Reconnection successful")
                     return True
 
@@ -441,7 +484,7 @@ class IBKRAdapter(BaseBrokerAdapter):
         # Categorize error types
         if any(keyword in error_msg for keyword in ['timeout', 'connection refused', 'connection reset']):
             logger.warning(f"🔌 Connection error detected: {error}")
-            return self.reconnect(max_attempts=3, delay=3.0)
+            return await self.reconnect(max_attempts=3, delay=3.0)
 
         elif any(keyword in error_msg for keyword in ['market data farm', 'subscription']):
             logger.warning(f"📊 Market data error: {error}")
@@ -482,18 +525,18 @@ class IBKRAdapter(BaseBrokerAdapter):
 
         while self._connected:
             try:
-                health = self.check_connection_health()
+                health = await self.check_connection_health()
 
                 if not health['connected']:
                     logger.warning("🔌 Connection lost, attempting recovery...")
-                    if not self.reconnect(max_attempts=3, delay=5.0):
+                    if not await self.reconnect(max_attempts=3, delay=5.0):
                         logger.error("❌ Connection recovery failed")
                         break
 
                 # Check for recent errors
                 if health['errors'] > 0:
                     last_error = health['last_error']
-                    if last_error and self.handle_connection_error(Exception(last_error)):
+                    if last_error and await self.handle_connection_error(Exception(last_error)):
                         logger.info("✅ Error handled successfully")
                         # Clear handled errors
                         self.wrapper.errors.clear()
@@ -528,6 +571,68 @@ class IBKRAdapter(BaseBrokerAdapter):
 
     # ==================== Market Data ====================
 
+    def _get_cached_quote_if_fresh(self, symbol: str) -> Optional[Dict[str, Any]]:
+        cached_quote = self._quote_cache.get(symbol)
+        if not cached_quote:
+            return None
+        quote_ts = cached_quote.get('timestamp')
+        if isinstance(quote_ts, datetime):
+            age_seconds = (datetime.now() - quote_ts).total_seconds()
+            if age_seconds <= self._quote_cache_ttl_seconds:
+                return cached_quote
+        return None
+
+    async def _fetch_quote_from_ib(self, symbol: str) -> Optional[Dict[str, Any]]:
+        contract = self._create_stock_contract(symbol)
+        req_id = self._get_next_req_id()
+
+        self.client.reqMktData(req_id, contract, "", False, False, [])
+
+        timeout_seconds = 5.0
+        start_time = time.time()
+        while req_id not in self.wrapper.quotes:
+            if time.time() - start_time > timeout_seconds:
+                logger.warning(f"Quote timeout for {symbol}")
+                self.client.cancelMktData(req_id)
+                return None
+            await asyncio.sleep(0.02)
+
+        # Short grace window: allow bid/ask/last to populate without fixed sleep tax.
+        grace_start = time.time()
+        while time.time() - grace_start < 0.12:
+            quote_data = self.wrapper.quotes.get(req_id, {})
+            if (
+                quote_data.get('last_price', 0) > 0
+                or (
+                    quote_data.get('bid_price', 0) > 0
+                    and quote_data.get('ask_price', 0) > 0
+                )
+            ):
+                break
+            await asyncio.sleep(0.01)
+
+        self.client.cancelMktData(req_id)
+
+        quote_data = self.wrapper.quotes.get(req_id, {})
+        self.wrapper.quotes.pop(req_id, None)
+
+        normalized_quote = {
+            'symbol': symbol,
+            'bid_price': quote_data.get('bid_price', 0),
+            'ask_price': quote_data.get('ask_price', 0),
+            'last_price': quote_data.get('last_price', 0),
+            'bid_size': quote_data.get('bid_size', 0),
+            'ask_size': quote_data.get('ask_size', 0),
+            'high': quote_data.get('high'),
+            'low': quote_data.get('low'),
+            'close': quote_data.get('close'),
+            'volume': quote_data.get('volume'),
+            'timestamp': quote_data.get('timestamp', datetime.now())
+        }
+
+        self._quote_cache[symbol] = normalized_quote
+        return normalized_quote
+
     async def get_latest_quote(self, symbol: str) -> Optional[Dict[str, Any]]:
         """
         Get latest quote for a symbol
@@ -539,43 +644,21 @@ class IBKRAdapter(BaseBrokerAdapter):
             dict: Quote data or None if not available
         """
         try:
-            contract = self._create_stock_contract(symbol)
-            req_id = self._get_next_req_id()
+            cached_quote = self._get_cached_quote_if_fresh(symbol)
+            if cached_quote:
+                return cached_quote
 
-            # Request market data
-            self.client.reqMktData(req_id, contract, "", False, False, [])
+            inflight_task = self._quote_inflight.get(symbol)
+            if inflight_task and not inflight_task.done():
+                return await asyncio.shield(inflight_task)
 
-            # Wait for quote data
-            timeout = 5
-            start_time = time.time()
-            while req_id not in self.wrapper.quotes:
-                if time.time() - start_time > timeout:
-                    logger.warning(f"Quote timeout for {symbol}")
-                    self.client.cancelMktData(req_id)
-                    return None
-                await asyncio.sleep(0.05)
-
-            # Wait a bit more for complete quote
-            await asyncio.sleep(0.2)
-
-            # Cancel market data
-            self.client.cancelMktData(req_id)
-
-            quote_data = self.wrapper.quotes.get(req_id, {})
-
-            return {
-                'symbol': symbol,
-                'bid_price': quote_data.get('bid_price', 0),
-                'ask_price': quote_data.get('ask_price', 0),
-                'last_price': quote_data.get('last_price', 0),
-                'bid_size': quote_data.get('bid_size', 0),
-                'ask_size': quote_data.get('ask_size', 0),
-                'high': quote_data.get('high'),
-                'low': quote_data.get('low'),
-                'close': quote_data.get('close'),
-                'volume': quote_data.get('volume'),
-                'timestamp': quote_data.get('timestamp', datetime.now())
-            }
+            task = asyncio.create_task(self._fetch_quote_from_ib(symbol))
+            self._quote_inflight[symbol] = task
+            try:
+                return await asyncio.shield(task)
+            finally:
+                if self._quote_inflight.get(symbol) is task:
+                    self._quote_inflight.pop(symbol, None)
 
         except Exception as e:
             logger.error(f"Failed to get quote for {symbol}: {e}")
@@ -597,7 +680,7 @@ class IBKRAdapter(BaseBrokerAdapter):
             >>> if quote and quote['last_price'] > 0:
             >>>     print(f"SPY last price: ${quote['last_price']:.2f}")
         """
-        return self.get_latest_quote(symbol)
+        return await self.get_latest_quote(symbol)
 
     def is_market_open(self) -> bool:
         """
@@ -644,6 +727,91 @@ class IBKRAdapter(BaseBrokerAdapter):
         }
         return status_map.get(ib_status, OrderStatus.PENDING)
 
+    def _get_next_order_id(self) -> int:
+        """Return next IBKR order id and increment local counter."""
+        if self.wrapper.next_order_id is None:
+            raise RuntimeError("Not connected to IBKR - cannot get next order ID")
+        order_id = self.wrapper.next_order_id
+        self.wrapper.next_order_id += 1
+        return order_id
+
+    def _place_ib_order(self, symbol: str, ib_order: IBOrder) -> int:
+        """Create contract, allocate order ID, submit order, and return order id."""
+        contract = self._create_stock_contract(symbol)
+        order_id = self._get_next_order_id()
+        self.client.placeOrder(order_id, contract, ib_order)
+        self._invalidate_trading_caches()
+        return order_id
+
+    def _invalidate_trading_caches(self) -> None:
+        """Invalidate short-lived caches affected by order/position/account changes."""
+        self._orders_cache = []
+        self._orders_cache_ts = None
+        self._positions_cache = []
+        self._positions_cache_ts = None
+        self._account_info_cache = None
+        self._account_info_cache_ts = None
+
+    def _build_submitted_order(
+        self,
+        symbol: str,
+        side: OrderSide,
+        quantity: float,
+        order_type: OrderType,
+        order_id: int,
+        price: Optional[float] = None,
+        stop_price: Optional[float] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Order:
+        """Build standardized submitted order object."""
+        order_metadata = {'broker': 'IBKR'}
+        if metadata:
+            order_metadata.update(metadata)
+        return Order(
+            symbol=symbol,
+            side=side,
+            quantity=quantity,
+            order_type=order_type,
+            price=price,
+            stop_price=stop_price,
+            order_id=str(order_id),
+            status=OrderStatus.SUBMITTED,
+            timestamp=datetime.now(),
+            metadata=order_metadata,
+        )
+
+    def _normalize_compat_quantity_side(
+        self,
+        quantity: Optional[float],
+        qty: Optional[float],
+        side: Any,
+    ) -> tuple[float, OrderSide]:
+        """Normalize compatibility args for stop/stop-limit methods."""
+        normalized_quantity = quantity if quantity is not None else qty
+        if normalized_quantity is None:
+            raise ValueError("Either 'quantity' or 'qty' parameter must be provided")
+
+        normalized_side = side
+        if isinstance(normalized_side, str):
+            normalized_side = OrderSide.BUY if normalized_side.lower() == "buy" else OrderSide.SELL
+
+        if not isinstance(normalized_side, OrderSide):
+            raise ValueError(f"Invalid side: {side}")
+
+        return normalized_quantity, normalized_side
+
+    def _opposite_side(self, side: OrderSide) -> OrderSide:
+        """Return opposite side for hedging/exit legs."""
+        return OrderSide.SELL if side == OrderSide.BUY else OrderSide.BUY
+
+    def _apply_oca_group(self, order_id: int, group_name: str) -> None:
+        """Apply OCA grouping for IBKR orders."""
+        self.client.reqOneCancelsAll(
+            reqId=order_id,
+            ocaType="OCA",
+            ocaGroup=group_name,
+        )
+
     async def submit_market_order(
         self,
         symbol: str,
@@ -659,10 +827,6 @@ class IBKRAdapter(BaseBrokerAdapter):
             if not is_valid:
                 raise ValueError(f"Invalid order parameters: {error_msg}")
 
-            # Create contract
-            contract = self._create_stock_contract(symbol)
-
-            # Create order
             ib_order = IBOrder()
             ib_order.action = "BUY" if side == OrderSide.BUY else "SELL"
             ib_order.orderType = "MKT"
@@ -672,25 +836,13 @@ class IBKRAdapter(BaseBrokerAdapter):
             ib_order.firmQuoteOnly = False  # Explicitly disable firm quote only
             ib_order.outsideRth = False  # Orders only during regular trading hours
 
-            # Get order ID (must be connected to have valid next_order_id)
-            if self.wrapper.next_order_id is None:
-                raise RuntimeError("Not connected to IBKR - cannot get next order ID")
-            order_id = self.wrapper.next_order_id
-            self.wrapper.next_order_id += 1
-
-            # Submit order
-            self.client.placeOrder(order_id, contract, ib_order)
-
-            # Create our Order object
-            order = Order(
+            order_id = self._place_ib_order(symbol, ib_order)
+            order = self._build_submitted_order(
                 symbol=symbol,
                 side=side,
                 quantity=quantity,
                 order_type=OrderType.MARKET,
-                order_id=str(order_id),
-                status=OrderStatus.SUBMITTED,
-                timestamp=datetime.now(),
-                metadata={'broker': 'IBKR'}
+                order_id=order_id,
             )
 
             logger.info(
@@ -720,10 +872,6 @@ class IBKRAdapter(BaseBrokerAdapter):
             if not is_valid:
                 raise ValueError(f"Invalid order parameters: {error_msg}")
 
-            # Create contract
-            contract = self._create_stock_contract(symbol)
-
-            # Create order
             ib_order = IBOrder()
             ib_order.action = "BUY" if side == OrderSide.BUY else "SELL"
             ib_order.orderType = "LMT"
@@ -731,26 +879,14 @@ class IBKRAdapter(BaseBrokerAdapter):
             ib_order.lmtPrice = round(limit_price, 2)
             ib_order.transmit = True
 
-            # Get order ID (must be connected to have valid next_order_id)
-            if self.wrapper.next_order_id is None:
-                raise RuntimeError("Not connected to IBKR - cannot get next order ID")
-            order_id = self.wrapper.next_order_id
-            self.wrapper.next_order_id += 1
-
-            # Submit order
-            self.client.placeOrder(order_id, contract, ib_order)
-
-            # Create our Order object
-            order = Order(
+            order_id = self._place_ib_order(symbol, ib_order)
+            order = self._build_submitted_order(
                 symbol=symbol,
                 side=side,
                 quantity=quantity,
                 order_type=OrderType.LIMIT,
+                order_id=order_id,
                 price=limit_price,
-                order_id=str(order_id),
-                status=OrderStatus.SUBMITTED,
-                timestamp=datetime.now(),
-                metadata={'broker': 'IBKR'}
             )
 
             logger.info(
@@ -787,16 +923,7 @@ class IBKRAdapter(BaseBrokerAdapter):
         Returns:
             Order: Order object with order details and ID
         """
-        # Handle qty parameter for compatibility
-        if qty is not None and quantity is None:
-            quantity = qty
-
-        if quantity is None:
-            raise ValueError("Either 'quantity' or 'qty' parameter must be provided")
-
-        # Handle string side parameter
-        if isinstance(side, str):
-            side = OrderSide.BUY if side.lower() == "buy" else OrderSide.SELL
+        quantity, side = self._normalize_compat_quantity_side(quantity, qty, side)
 
         # Call the original implementation
         return self._submit_stop_order_impl(symbol, quantity, side, stop_price)
@@ -817,10 +944,6 @@ class IBKRAdapter(BaseBrokerAdapter):
             if not is_valid:
                 raise ValueError(f"Invalid order parameters: {error_msg}")
 
-            # Create contract
-            contract = self._create_stock_contract(symbol)
-
-            # Create order
             ib_order = IBOrder()
             ib_order.action = "BUY" if side == OrderSide.BUY else "SELL"
             ib_order.orderType = "STP"
@@ -828,26 +951,14 @@ class IBKRAdapter(BaseBrokerAdapter):
             ib_order.auxPrice = round(stop_price, 2)
             ib_order.transmit = True
 
-            # Get order ID (must be connected to have valid next_order_id)
-            if self.wrapper.next_order_id is None:
-                raise RuntimeError("Not connected to IBKR - cannot get next order ID")
-            order_id = self.wrapper.next_order_id
-            self.wrapper.next_order_id += 1
-
-            # Submit order
-            self.client.placeOrder(order_id, contract, ib_order)
-
-            # Create our Order object
-            order = Order(
+            order_id = self._place_ib_order(symbol, ib_order)
+            order = self._build_submitted_order(
                 symbol=symbol,
                 side=side,
                 quantity=quantity,
                 order_type=OrderType.STOP,
+                order_id=order_id,
                 stop_price=stop_price,
-                order_id=str(order_id),
-                status=OrderStatus.SUBMITTED,
-                timestamp=datetime.now(),
-                metadata={'broker': 'IBKR'}
             )
 
             logger.info(
@@ -886,16 +997,7 @@ class IBKRAdapter(BaseBrokerAdapter):
         Returns:
             Order: Order object with order details and ID
         """
-        # Handle qty parameter for compatibility
-        if qty is not None and quantity is None:
-            quantity = qty
-
-        if quantity is None:
-            raise ValueError("Either 'quantity' or 'qty' parameter must be provided")
-
-        # Handle string side parameter
-        if isinstance(side, str):
-            side = OrderSide.BUY if side.lower() == "buy" else OrderSide.SELL
+        quantity, side = self._normalize_compat_quantity_side(quantity, qty, side)
 
         # Call the original implementation
         return self._submit_stop_limit_order_impl(symbol, quantity, side, stop_price, limit_price)
@@ -918,10 +1020,6 @@ class IBKRAdapter(BaseBrokerAdapter):
             if not is_valid:
                 raise ValueError(f"Invalid order parameters: {error_msg}")
 
-            # Create contract
-            contract = self._create_stock_contract(symbol)
-
-            # Create order
             ib_order = IBOrder()
             ib_order.action = "BUY" if side == OrderSide.BUY else "SELL"
             ib_order.orderType = "STP LMT"
@@ -930,27 +1028,15 @@ class IBKRAdapter(BaseBrokerAdapter):
             ib_order.auxPrice = round(stop_price, 2)
             ib_order.transmit = True
 
-            # Get order ID (must be connected to have valid next_order_id)
-            if self.wrapper.next_order_id is None:
-                raise RuntimeError("Not connected to IBKR - cannot get next order ID")
-            order_id = self.wrapper.next_order_id
-            self.wrapper.next_order_id += 1
-
-            # Submit order
-            self.client.placeOrder(order_id, contract, ib_order)
-
-            # Create our Order object
-            order = Order(
+            order_id = self._place_ib_order(symbol, ib_order)
+            order = self._build_submitted_order(
                 symbol=symbol,
                 side=side,
                 quantity=quantity,
                 order_type=OrderType.STOP_LIMIT,
+                order_id=order_id,
                 price=limit_price,
                 stop_price=stop_price,
-                order_id=str(order_id),
-                status=OrderStatus.SUBMITTED,
-                timestamp=datetime.now(),
-                metadata={'broker': 'IBKR'}
             )
 
             logger.info(
@@ -1010,46 +1096,33 @@ class IBKRAdapter(BaseBrokerAdapter):
                 parent_order = await self.submit_market_order(symbol, quantity, side)
 
             parent_order_id = int(parent_order.order_id)
+            oca_group = f"bracket_{parent_order_id}"
+            profit_taker_id = None
+            stop_loss_id = None
 
             # Create profit taker order (opposite side)
             profit_taker_order = None
             if profit_target:
-                profit_side = OrderSide.SELL if side == OrderSide.BUY else OrderSide.BUY
+                profit_side = self._opposite_side(side)
                 profit_taker_order = await self.submit_limit_order(
                     symbol, quantity, profit_side, profit_target
                 )
                 profit_taker_id = int(profit_taker_order.order_id)
-
-                # Set OCA group for profit taker
-                self.client.reqOneCancelsAll(
-                    reqId=profit_taker_id,
-                    ocaType="OCA",
-                    ocaGroup=f"bracket_{parent_order_id}"
-                )
+                self._apply_oca_group(profit_taker_id, oca_group)
 
             # Create stop loss order
             stop_loss_order = None
             if stop_loss:
-                stop_side = OrderSide.SELL if side == OrderSide.BUY else OrderSide.BUY
+                stop_side = self._opposite_side(side)
                 stop_loss_order = await self.submit_stop_order(
                     symbol, quantity, stop_side, stop_loss
                 )
                 stop_loss_id = int(stop_loss_order.order_id)
-
-                # Set OCA group for stop loss
-                self.client.reqOneCancelsAll(
-                    reqId=stop_loss_id,
-                    ocaType="OCA",
-                    ocaGroup=f"bracket_{parent_order_id}"
-                )
+                self._apply_oca_group(stop_loss_id, oca_group)
 
             # Set parent-child relationships
             if profit_taker_order:
-                self.client.reqOneCancelsAll(
-                    reqId=parent_order_id,
-                    ocaType="OCA",
-                    ocaGroup=f"bracket_{parent_order_id}"
-                )
+                self._apply_oca_group(parent_order_id, oca_group)
 
             logger.info(
                 f"✅ Bracket order submitted: {side.value} {quantity} {symbol} "
@@ -1095,34 +1168,27 @@ class IBKRAdapter(BaseBrokerAdapter):
             if not valid:
                 raise ValueError(error_msg)
 
-            # Create IB contract
-            contract = self._create_contract(symbol)
-
             # Create trailing stop order
-            order = self._create_base_order(quantity, side)
+            order = IBOrder()
+            order.action = "BUY" if side == OrderSide.BUY else "SELL"
             order.orderType = "TRAIL"
-            order.auxPrice = trail_amount  # Trail amount
+            order.totalQuantity = quantity
+            order.transmit = True
 
             if trail_type == "PERCENT":
-                order.trailStopPrice = trail_amount  # Percentage trail
+                order.trailingPercent = trail_amount
             else:
-                order.auxPrice = trail_amount  # Amount trail
+                order.auxPrice = trail_amount
 
-            # Submit order
-            order_id = self._get_next_order_id()
-            self.client.placeOrder(order_id, contract, order)
-
-            # Create order object
-            trailing_order = Order(
+            order_id = self._place_ib_order(symbol, order)
+            trailing_order = self._build_submitted_order(
                 symbol=symbol,
                 side=side,
                 quantity=quantity,
                 order_type=OrderType.STOP,
+                order_id=order_id,
                 stop_price=trail_amount,
-                order_id=str(order_id),
-                status=OrderStatus.SUBMITTED,
-                timestamp=datetime.now(),
-                metadata={'broker': 'IBKR', 'trail_type': trail_type}
+                metadata={'trail_type': trail_type},
             )
 
             logger.info(
@@ -1140,44 +1206,91 @@ class IBKRAdapter(BaseBrokerAdapter):
         """Cancel an order"""
         try:
             self.client.cancelOrder(int(order_id))
+            self._invalidate_trading_caches()
             logger.info(f"✅ Order cancellation requested: {order_id}")
             return True
         except Exception as e:
             logger.error(f"Failed to cancel order {order_id}: {e}")
             return False
 
+    async def cancel_all_orders(self) -> bool:
+        """Cancel all open orders globally for this client session."""
+        try:
+            if hasattr(self.client, "reqGlobalCancel"):
+                self.client.reqGlobalCancel()
+            else:
+                self.client.reqOpenOrders()
+                await asyncio.sleep(0.2)
+                for order_id in list(self.wrapper.orders.keys()):
+                    try:
+                        self.client.cancelOrder(int(order_id))
+                    except Exception as cancel_error:
+                        logger.error(f"Failed to cancel order {order_id}: {cancel_error}")
+                        return False
+
+            self._invalidate_trading_caches()
+            logger.info("✅ Global cancel requested for all open IBKR orders")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to cancel all orders: {e}")
+            return False
+
     async def get_order(self, order_id: str) -> Optional[Order]:
         """Get order details"""
         try:
+            if self._orders_cache_ts:
+                cache_age_seconds = (datetime.now() - self._orders_cache_ts).total_seconds()
+                if cache_age_seconds <= self._orders_cache_ttl_seconds:
+                    for cached_order in self._orders_cache:
+                        if cached_order.order_id == str(order_id):
+                            return cached_order
+
             # If order not in cache, request open orders to populate
             if int(order_id) not in self.wrapper.orders:
+                self.wrapper.open_orders_ready.clear()
                 self.client.reqOpenOrders()
-                await asyncio.sleep(1)  # Wait for callbacks
+                await self._await_thread_event(self.wrapper.open_orders_ready, timeout_seconds=0.75)
 
             order_data = self.wrapper.orders.get(int(order_id))
             if not order_data:
                 return None
 
-            # Convert to our Order type
-            order = Order(
-                symbol=order_data.get('symbol', ''),
-                side=OrderSide.BUY if order_data.get('action') == 'BUY' else OrderSide.SELL,
-                quantity=order_data.get('quantity', 0),
-                order_type=self._convert_order_type(order_data.get('order_type', 'MKT')),
-                price=order_data.get('limit_price'),
-                stop_price=order_data.get('stop_price'),
-                order_id=order_id,
-                status=self._convert_order_status(order_data.get('status', 'Unknown')),
-                timestamp=order_data.get('timestamp', datetime.now()),
-                average_price=order_data.get('avg_fill_price'),
-                metadata={'broker': 'IBKR'}
-            )
-
-            return order
+            return self._build_order_from_wrapper_data(str(order_id), order_data)
 
         except Exception as e:
             logger.error(f"Failed to get order {order_id}: {e}")
             return None
+
+    def _build_order_from_wrapper_data(self, order_id: str, order_data: Dict[str, Any]) -> Order:
+        return Order(
+            symbol=order_data.get('symbol', ''),
+            side=OrderSide.BUY if order_data.get('action') == 'BUY' else OrderSide.SELL,
+            quantity=order_data.get('quantity', 0),
+            order_type=self._convert_order_type(order_data.get('order_type', 'MKT')),
+            price=order_data.get('limit_price'),
+            stop_price=order_data.get('stop_price'),
+            order_id=order_id,
+            status=self._convert_order_status(order_data.get('status', 'Unknown')),
+            timestamp=order_data.get('timestamp', datetime.now()),
+            average_price=order_data.get('avg_fill_price'),
+            metadata={'broker': 'IBKR'}
+        )
+
+    @staticmethod
+    def _filter_orders_by_status(orders: List[Order], status: str) -> List[Order]:
+        if status == "all":
+            return orders
+        if status == "open":
+            return [
+                order for order in orders
+                if order.status in [OrderStatus.PENDING, OrderStatus.SUBMITTED, OrderStatus.PARTIAL_FILLED]
+            ]
+        if status == "closed":
+            return [
+                order for order in orders
+                if order.status in [OrderStatus.FILLED, OrderStatus.CANCELLED, OrderStatus.REJECTED]
+            ]
+        return []
 
     def _convert_order_type(self, ib_type: str) -> OrderType:
         """Convert IB order type to our OrderType enum"""
@@ -1192,27 +1305,23 @@ class IBKRAdapter(BaseBrokerAdapter):
     async def get_orders(self, status: str = "open") -> List[Order]:
         """Get orders with specified status"""
         try:
+            if self._orders_cache_ts:
+                cache_age_seconds = (datetime.now() - self._orders_cache_ts).total_seconds()
+                if cache_age_seconds <= self._orders_cache_ttl_seconds:
+                    return self._filter_orders_by_status(list(self._orders_cache), status)
+
             # Request open orders
+            self.wrapper.open_orders_ready.clear()
             self.client.reqOpenOrders()
-            await asyncio.sleep(0.5)  # Wait for response
+            await self._await_thread_event(self.wrapper.open_orders_ready, timeout_seconds=0.75)
 
-            orders = []
+            orders: List[Order] = []
             for order_id, order_data in self.wrapper.orders.items():
-                order = self.get_order(str(order_id))
-                if order:
-                    # Filter by status if specified
-                    if status == "open" and order.status in [
-                        OrderStatus.PENDING, OrderStatus.SUBMITTED, OrderStatus.ACCEPTED
-                    ]:
-                        orders.append(order)
-                    elif status == "closed" and order.status in [
-                        OrderStatus.FILLED, OrderStatus.CANCELLED, OrderStatus.REJECTED
-                    ]:
-                        orders.append(order)
-                    elif status == "all":
-                        orders.append(order)
+                orders.append(self._build_order_from_wrapper_data(str(order_id), order_data))
 
-            return orders
+            self._orders_cache = list(orders)
+            self._orders_cache_ts = datetime.now()
+            return self._filter_orders_by_status(orders, status)
 
         except Exception as e:
             logger.error(f"Failed to get orders: {e}")
@@ -1223,20 +1332,35 @@ class IBKRAdapter(BaseBrokerAdapter):
     async def get_positions(self) -> List[Position]:
         """Get all current positions"""
         try:
+            if self._positions_cache_ts:
+                cache_age_seconds = (datetime.now() - self._positions_cache_ts).total_seconds()
+                if cache_age_seconds <= self._positions_cache_ttl_seconds:
+                    return list(self._positions_cache)
+
             # Request positions
+            self.wrapper.positions_ready.clear()
             self.client.reqPositions()
-            await asyncio.sleep(1)  # Wait for response
+            await self._await_thread_event(self.wrapper.positions_ready, timeout_seconds=1.0)
+
+            non_zero_symbols = [
+                symbol for symbol, pos_data in self.wrapper.positions.items()
+                if pos_data['position'] != 0
+            ]
+            quote_results = await asyncio.gather(
+                *(self.get_latest_quote(symbol) for symbol in non_zero_symbols),
+                return_exceptions=True
+            )
+            quotes_by_symbol: Dict[str, Optional[Dict[str, Any]]] = {}
+            for symbol, quote_result in zip(non_zero_symbols, quote_results):
+                quotes_by_symbol[symbol] = None if isinstance(quote_result, Exception) else quote_result
 
             positions = []
-            for symbol, pos_data in self.wrapper.positions.items():
+            for symbol in non_zero_symbols:
+                pos_data = self.wrapper.positions[symbol]
                 qty = pos_data['position']
-                if qty == 0:
-                    continue
-
                 avg_cost = pos_data['avg_cost']
 
-                # Get current price
-                quote = self.get_latest_quote(symbol)
+                quote = quotes_by_symbol.get(symbol)
                 current_price = quote['last_price'] if quote and quote['last_price'] > 0 else avg_cost
                 if current_price == 0:
                     current_price = quote['bid_price'] if quote else avg_cost
@@ -1261,6 +1385,8 @@ class IBKRAdapter(BaseBrokerAdapter):
 
                 positions.append(position)
 
+            self._positions_cache = list(positions)
+            self._positions_cache_ts = datetime.now()
             return positions
 
         except Exception as e:
@@ -1269,7 +1395,7 @@ class IBKRAdapter(BaseBrokerAdapter):
 
     async def get_position(self, symbol: str) -> Optional[Position]:
         """Get position for a specific symbol"""
-        positions = self.get_positions()
+        positions = await self.get_positions()
         for pos in positions:
             if pos.symbol == symbol:
                 return pos
@@ -1277,7 +1403,7 @@ class IBKRAdapter(BaseBrokerAdapter):
 
     async def close_position(self, symbol: str) -> Order:
         """Close a position"""
-        position = self.get_position(symbol)
+        position = await self.get_position(symbol)
         if not position:
             raise ValueError(f"No position found for {symbol}")
 
@@ -1289,12 +1415,12 @@ class IBKRAdapter(BaseBrokerAdapter):
 
     async def close_all_positions(self) -> List[Order]:
         """Close all positions"""
-        positions = self.get_positions()
+        positions = await self.get_positions()
         orders = []
 
         for position in positions:
             try:
-                order = self.close_position(position.symbol)
+                order = await self.close_position(position.symbol)
                 orders.append(order)
             except Exception as e:
                 logger.error(f"Failed to close position {position.symbol}: {e}")
@@ -1306,14 +1432,30 @@ class IBKRAdapter(BaseBrokerAdapter):
     async def get_account_info(self) -> AccountInfo:
         """Get account information"""
         try:
+            if self._account_info_cache and self._account_info_cache_ts:
+                age_seconds = (datetime.now() - self._account_info_cache_ts).total_seconds()
+                if age_seconds <= self._account_info_cache_ttl_seconds:
+                    return self._account_info_cache
+
+            account_id = getattr(self.config, "account_id", "") or ""
+
             # Clear previous account values
             self.wrapper.account_values = {}
 
-            # Request account updates (real-time account data)
-            self.client.reqAccountUpdates(True, self.config.account_id or "")
+            req_id = self._get_next_req_id()
+            summary_event = threading.Event()
+            self.wrapper.account_summary_events[req_id] = summary_event
 
-            # Wait for response
-            await asyncio.sleep(3.0)
+            # Request snapshot account summary and wait for completion event.
+            self.client.reqAccountSummary(
+                req_id,
+                "All",
+                "TotalCashValue,BuyingPower,NetLiquidation,EquityWithLoanValue,AccountCode",
+            )
+            await self._await_thread_event(summary_event, timeout_seconds=1.25)
+            if hasattr(self.client, "cancelAccountSummary"):
+                self.client.cancelAccountSummary(req_id)
+            self.wrapper.account_summary_events.pop(req_id, None)
 
             # Extract values
             values = self.wrapper.account_values
@@ -1325,7 +1467,7 @@ class IBKRAdapter(BaseBrokerAdapter):
             equity = float(values.get('EquityWithLoanValue', {}).get('value', net_liquidation))
 
             account = AccountInfo(
-                account_id=self.config.account_id or values.get('AccountCode', {}).get('account', 'UNKNOWN'),
+                account_id=account_id or values.get('AccountCode', {}).get('account', 'UNKNOWN'),
                 cash=cash,
                 buying_power=buying_power,
                 portfolio_value=net_liquidation,
@@ -1335,6 +1477,9 @@ class IBKRAdapter(BaseBrokerAdapter):
                 timestamp=datetime.now(),
                 metadata={'broker': 'IBKR'}
             )
+
+            self._account_info_cache = account
+            self._account_info_cache_ts = datetime.now()
 
             return account
 
@@ -1388,7 +1533,6 @@ class IBKRAdapter(BaseBrokerAdapter):
 
     # ==================== Broker Properties ====================
 
-    @property
     def broker_name(self) -> str:
         return "Interactive Brokers"
 
@@ -1436,7 +1580,13 @@ class IBKRAdapter(BaseBrokerAdapter):
         elif order_type.upper() == "STOP_LIMIT":
             if limit_price is None or stop_price is None:
                 raise ValueError("limit_price and stop_price required for STOP_LIMIT orders")
-            order = self.submit_stop_limit_order(symbol, quantity, order_side, limit_price, stop_price)
+            order = await self.submit_stop_limit_order(
+                symbol,
+                quantity=quantity,
+                side=order_side,
+                stop_price=stop_price,
+                limit_price=limit_price,
+            )
         else:
             raise ValueError(f"Unsupported order type: {order_type}")
 
@@ -1447,7 +1597,7 @@ class IBKRAdapter(BaseBrokerAdapter):
         Get order status as a dictionary.
         Returns dict with status, filled_qty, avg_fill_price, etc.
         """
-        order = self.get_order(order_id)
+        order = await self.get_order(order_id)
         if not order:
             return {
                 'order_id': order_id,
@@ -1476,7 +1626,7 @@ class IBKRAdapter(BaseBrokerAdapter):
         """
         Get all open orders as a list of dictionaries.
         """
-        orders = self.get_orders(status="open")
+        orders = await self.get_orders(status="open")
         return [
             {
                 'order_id': order.order_id,
@@ -1609,7 +1759,7 @@ class IBKRAdapter(BaseBrokerAdapter):
             bool: True if account has enough buying power, False otherwise
         """
         try:
-            account_info = self.get_account_info()
+            account_info = await self.get_account_info()
             if account_info and hasattr(account_info, 'buying_power'):
                 return float(account_info.buying_power) >= amount
             else:
