@@ -25,6 +25,7 @@ numba>=0.57.0             # JIT compilation for numerical bottlenecks
 # Real-Time Data Feeds
 websockets>=12.0          # WebSocket client for Polygon.io and other feeds
 aiohttp>=3.9.0            # Async HTTP client for REST APIs
+massive>=2.2.0            # Official Massive/Polygon REST & WebSocket Python client
 
 # Database
 clickhouse-connect>=0.7.0  # ClickHouse database client

@@ -34,14 +34,13 @@ Version: 1.0.0
 import asyncio
 import logging
 import os
-import ssl
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
-import aiohttp
 import pandas as pd
+from massive import RESTClient
 
 logger = logging.getLogger(__name__)
 
@@ -71,9 +70,6 @@ class PolygonRestConfig:
     # Data settings
     default_limit: int = 50000  # Max results per request
     max_concurrent_symbol_requests: int = 20
-
-    # Security settings
-    allow_insecure_ssl_fallback: bool = False
 
     def __post_init__(self):
         if not self.api_key:
@@ -136,8 +132,7 @@ class PolygonRestService:
 
         self.logger = logging.getLogger(self.__class__.__name__)
 
-        # HTTP session
-        self._session: Optional[aiohttp.ClientSession] = None
+        self._rest_client: Optional[RESTClient] = None
 
         # Rate limiting
         self._request_times = deque()
@@ -148,35 +143,13 @@ class PolygonRestService:
     async def initialize(self) -> bool:
         """Initialize the service"""
         try:
-            # Create SSL context (handle macOS certificate issues)
-            ssl_context = ssl.create_default_context()
-            try:
-                import certifi
-                ssl_context = ssl.create_default_context(cafile=certifi.where())
-            except ImportError:
-                self.logger.debug("certifi not installed; using system trust store for SSL verification")
-            except Exception as ssl_error:
-                if not self.config.allow_insecure_ssl_fallback:
-                    self.logger.error(
-                        "Failed to build verified SSL context: %s. "
-                        "Set allow_insecure_ssl_fallback=True only for development troubleshooting.",
-                        ssl_error,
-                    )
-                    return False
-                ssl_context = ssl.create_default_context()
-                ssl_context.check_hostname = False
-                ssl_context.verify_mode = ssl.CERT_NONE
-                self.logger.warning(
-                    "SSL certificate verification disabled via allow_insecure_ssl_fallback. "
-                    "This is not recommended for production."
-                )
-
-            connector = aiohttp.TCPConnector(ssl=ssl_context)
-
-            self._session = aiohttp.ClientSession(
-                connector=connector,
-                trust_env=False,
-                timeout=aiohttp.ClientTimeout(total=self.config.timeout_seconds),
+            self._rest_client = RESTClient(
+                api_key=self.config.api_key,
+                connect_timeout=self.config.timeout_seconds,
+                read_timeout=self.config.timeout_seconds,
+                retries=self.config.max_retries,
+                base=self.config.base_url,
+                pagination=True,
             )
 
             # Verify API key
@@ -186,6 +159,7 @@ class PolygonRestService:
                 return True
             else:
                 self.logger.error("API key verification failed")
+                self._rest_client = None
                 return False
 
         except Exception as e:
@@ -194,17 +168,20 @@ class PolygonRestService:
 
     async def close(self) -> None:
         """Close the service"""
-        if self._session:
-            await self._session.close()
-            self._session = None
+        self._rest_client = None
         self.is_initialized = False
 
     async def _verify_api_key(self) -> bool:
         """Verify API key is valid"""
         try:
-            url = f"{self.config.base_url}/v2/aggs/ticker/AAPL/prev"
-            data = await self._request(url)
-            return data.get('status') == 'OK'
+            if self._rest_client is None:
+                return False
+            await asyncio.to_thread(
+                self._rest_client.get_previous_close_agg,
+                ticker="AAPL",
+                adjusted=True,
+            )
+            return True
         except Exception as e:
             self.logger.error(f"API key verification failed: {e}")
             return False
@@ -227,54 +204,6 @@ class PolygonRestService:
 
         self._request_times.append(now)
 
-    async def _request(self, url: str, params: Optional[Dict] = None) -> Dict[str, Any]:
-        """Make rate-limited API request"""
-        if not self._session:
-            raise RuntimeError("Service not initialized")
-
-        await self._rate_limit()
-
-        # Add API key
-        if params is None:
-            params = {}
-        params['apiKey'] = self.config.api_key
-
-        self.logger.debug(f"Requesting URL: {url} with params: { {k:v for k,v in params.items() if k != 'apiKey'} }")
-
-        for attempt in range(self.config.max_retries):
-            try:
-                async with self._session.get(url, params=params) as resp:
-                    # Handle non-JSON responses for 404/403
-                    if resp.status == 404:
-                        self.logger.debug(f"Resource not found (404): {url}")
-                        return {"status": "NOT_FOUND", "results": []}
-                    
-                    if resp.status == 403:
-                        self.logger.debug(f"Not authorized (403): {url}")
-                        return {"status": "NOT_AUTHORIZED", "results": []}
-
-                    data = await resp.json()
-
-                    if resp.status == 200:
-                        self.logger.debug(f"Request successful. Status: {data.get('status')}, Results count: {len(data.get('results', []))}")
-                        return data
-                    elif resp.status == 429:  # Rate limited
-                        wait = float(resp.headers.get('Retry-After', 60))
-                        self.logger.warning(f"Rate limited, waiting {wait}s")
-                        await asyncio.sleep(wait)
-                    else:
-                        self.logger.error(f"API error {resp.status} for {url}: {data}")
-                        return data
-
-            except Exception as e:
-                if attempt < self.config.max_retries - 1:
-                    self.logger.warning(f"Request failed (attempt {attempt+1}), retrying in {self.config.retry_delay_seconds}s: {e}")
-                    await asyncio.sleep(self.config.retry_delay_seconds)
-                else:
-                    self.logger.error(f"Request failed (final attempt {attempt+1}): {e}")
-
-        return {'status': 'ERROR', 'message': 'Max retries exceeded'}
-
     async def _gather_symbol_tasks(
         self,
         symbols: List[str],
@@ -296,6 +225,70 @@ class PolygonRestService:
             return_exceptions=True,
         )
 
+    async def _sdk_call(self, operation, *args, **kwargs) -> Any:
+        """Execute a synchronous SDK operation under async flow with retries."""
+        if self._rest_client is None:
+            raise RuntimeError("Service not initialized")
+
+        for attempt in range(self.config.max_retries):
+            await self._rate_limit()
+            try:
+                return await asyncio.to_thread(operation, *args, **kwargs)
+            except Exception as exc:
+                if attempt < self.config.max_retries - 1:
+                    self.logger.warning(
+                        "SDK call failed (attempt %s), retrying in %ss: %s",
+                        attempt + 1,
+                        self.config.retry_delay_seconds,
+                        exc,
+                    )
+                    await asyncio.sleep(self.config.retry_delay_seconds)
+                else:
+                    raise
+
+        raise RuntimeError("SDK call retries exhausted")
+
+    @staticmethod
+    def _model_to_dict(obj: Any) -> Dict[str, Any]:
+        """Normalize SDK models and dict-like values to plain dict."""
+        if obj is None:
+            return {}
+        if isinstance(obj, dict):
+            return obj
+        if hasattr(obj, "model_dump"):
+            dumped = obj.model_dump()
+            if isinstance(dumped, dict):
+                return dumped
+        if hasattr(obj, "to_dict"):
+            dumped = obj.to_dict()
+            if isinstance(dumped, dict):
+                return dumped
+        if hasattr(obj, "dict"):
+            dumped = obj.dict()
+            if isinstance(dumped, dict):
+                return dumped
+        if hasattr(obj, "__dict__"):
+            return {k: v for k, v in vars(obj).items() if not k.startswith("_")}
+        return {}
+
+    @staticmethod
+    def _pick_value(data: Dict[str, Any], *keys: str) -> Any:
+        for key in keys:
+            if key in data and data[key] is not None:
+                return data[key]
+        return None
+
+    @staticmethod
+    def _collect_with_cap(iterator, cap: Optional[int]) -> List[Any]:
+        if cap is None or cap <= 0:
+            return list(iterator)
+        rows: List[Any] = []
+        for item in iterator:
+            rows.append(item)
+            if len(rows) >= cap:
+                break
+        return rows
+
     @staticmethod
     def _parse_event_timestamp(raw_timestamp: Any) -> Optional[datetime]:
         """Parse event timestamps in seconds/ms/us/ns into UTC datetime."""
@@ -316,41 +309,6 @@ class PolygonRestService:
 
         return datetime.fromtimestamp(seconds, tz=timezone.utc)
 
-    @staticmethod
-    def _event_timestamp_to_ns(dt_value: datetime) -> int:
-        """Convert datetime to nanoseconds since epoch for Polygon v3 timestamp filters."""
-        if dt_value.tzinfo is None:
-            dt_value = dt_value.replace(tzinfo=timezone.utc)
-        else:
-            dt_value = dt_value.astimezone(timezone.utc)
-        return int(dt_value.timestamp() * 1_000_000_000)
-
-    async def _fetch_paginated_v3(self, endpoint: str, params: Dict[str, Any], max_pages: int = 50) -> List[Dict[str, Any]]:
-        """Fetch paginated v3 resources using Polygon next_url pagination."""
-        all_rows: List[Dict[str, Any]] = []
-        page_count = 0
-        next_url: Optional[str] = endpoint
-        next_params: Optional[Dict[str, Any]] = dict(params)
-
-        while next_url and page_count < max_pages:
-            data = await self._request(next_url, next_params)
-            page_count += 1
-
-            status = data.get('status')
-            if status not in ['OK', 'DELAYED']:
-                break
-
-            rows = data.get('results', []) or []
-            all_rows.extend(rows)
-
-            next_url = data.get('next_url')
-            next_params = None
-
-            if not rows or not next_url:
-                break
-
-        return all_rows
-
     # ========================================================================
     # DATA RETRIEVAL METHODS
     # ========================================================================
@@ -365,21 +323,38 @@ class PolygonRestService:
         Returns:
             AggregateBar with previous day's OHLCV data
         """
-        url = f"{self.config.base_url}/v2/aggs/ticker/{symbol.upper()}/prev"
-        data = await self._request(url)
+        response = await self._sdk_call(
+            self._rest_client.get_previous_close_agg,
+            ticker=symbol.upper(),
+            adjusted=True,
+        )
+        data = self._model_to_dict(response)
 
-        if data.get('status') in ['OK', 'DELAYED'] and data.get('results'):
-            r = data['results'][0]
+        results = data.get('results')
+        row = None
+        if isinstance(results, list) and results:
+            row = self._model_to_dict(results[0])
+        elif isinstance(results, dict):
+            row = results
+        elif data:
+            row = data
+
+        if row:
+            ts_raw = self._pick_value(row, 'timestamp', 't')
+            event_ts = self._parse_event_timestamp(ts_raw)
+            if event_ts is None:
+                event_ts = datetime.now(timezone.utc)
+
             return AggregateBar(
                 symbol=symbol.upper(),
-                timestamp=datetime.fromtimestamp(r['t'] / 1000, tz=timezone.utc),
-                open=r['o'],
-                high=r['h'],
-                low=r['l'],
-                close=r['c'],
-                volume=r['v'],
-                vwap=r.get('vw'),
-                num_trades=r.get('n'),
+                timestamp=event_ts,
+                open=float(self._pick_value(row, 'open', 'o') or 0.0),
+                high=float(self._pick_value(row, 'high', 'h') or 0.0),
+                low=float(self._pick_value(row, 'low', 'l') or 0.0),
+                close=float(self._pick_value(row, 'close', 'c') or 0.0),
+                volume=float(self._pick_value(row, 'volume', 'v') or 0.0),
+                vwap=self._pick_value(row, 'vwap', 'vw'),
+                num_trades=self._pick_value(row, 'transactions', 'n'),
             )
         return None
 
@@ -394,24 +369,37 @@ class PolygonRestService:
             DataFrame with symbol as index and OHLCV data columns
         """
         date_str = date.strftime('%Y-%m-%d')
-        url = f"{self.config.base_url}/v2/aggs/grouped/locale/us/market/stocks/{date_str}"
+        response = await self._sdk_call(
+            self._rest_client.get_grouped_daily_aggs,
+            date=date_str,
+            adjusted=True,
+        )
 
-        data = await self._request(url)
-
-        if data.get('status') in ['OK', 'DELAYED'] and data.get('results'):
+        rows = response if isinstance(response, list) else []
+        if rows:
             bars = []
             symbols = []
-            for r in data['results']:
-                symbols.append(r['T'])
+            for item in rows:
+                r = self._model_to_dict(item)
+                symbol_value = self._pick_value(r, 'ticker', 'T')
+                if not symbol_value:
+                    continue
+
+                ts_raw = self._pick_value(r, 'timestamp', 't')
+                event_ts = self._parse_event_timestamp(ts_raw)
+                if event_ts is None:
+                    continue
+
+                symbols.append(symbol_value)
                 bars.append({
-                    'open': r['o'],
-                    'high': r['h'],
-                    'low': r['l'],
-                    'close': r['c'],
-                    'volume': r['v'],
-                    'vwap': r.get('vw'),
-                    'num_trades': r.get('n'),
-                    'timestamp': datetime.fromtimestamp(r['t'] / 1000, tz=timezone.utc)
+                    'open': self._pick_value(r, 'open', 'o'),
+                    'high': self._pick_value(r, 'high', 'h'),
+                    'low': self._pick_value(r, 'low', 'l'),
+                    'close': self._pick_value(r, 'close', 'c'),
+                    'volume': self._pick_value(r, 'volume', 'v'),
+                    'vwap': self._pick_value(r, 'vwap', 'vw'),
+                    'num_trades': self._pick_value(r, 'transactions', 'n'),
+                    'timestamp': event_ts,
                 })
 
             df = pd.DataFrame(bars, index=symbols)
@@ -463,39 +451,43 @@ class PolygonRestService:
         elif start.tzinfo is None:
             start = start.replace(tzinfo=timezone.utc)
 
-        # Format dates (Support millisecond timestamps for high-res data)
-        if timeframe in ['1s', '1sec']:
-            start_str = str(int(start.timestamp() * 1000))
-            end_str = str(int(end.timestamp() * 1000))
-        else:
-            start_str = start.strftime('%Y-%m-%d')
-            end_str = end.strftime('%Y-%m-%d')
+        row_cap = min(max(limit or self.config.default_limit, 1), 50000)
+        bars_iter = await self._sdk_call(
+            self._rest_client.list_aggs,
+            ticker=symbol.upper(),
+            multiplier=multiplier,
+            timespan=multiplier_type,
+            from_=start,
+            to=end,
+            adjusted=True,
+            sort='asc',
+            limit=row_cap,
+        )
+        rows = self._collect_with_cap(bars_iter, row_cap)
 
-        # Build URL
-        url = f"{self.config.base_url}/v2/aggs/ticker/{symbol.upper()}/range/{multiplier}/{multiplier_type}/{start_str}/{end_str}"
-
-        params = {
-            'adjusted': 'true',
-            'sort': 'asc',
-            'limit': limit or self.config.default_limit,
-        }
-
-        data = await self._request(url, params)
-
-        if data.get('status') in ['OK', 'DELAYED'] and data.get('results'):
+        if rows:
             bars = []
             timestamps = []
-            for r in data['results']:
-                timestamps.append(datetime.fromtimestamp(r['t'] / 1000, tz=timezone.utc))
+            for item in rows:
+                r = self._model_to_dict(item)
+                ts_raw = self._pick_value(r, 'timestamp', 't')
+                event_ts = self._parse_event_timestamp(ts_raw)
+                if event_ts is None:
+                    continue
+
+                timestamps.append(event_ts)
                 bars.append({
-                    'open': r['o'],
-                    'high': r['h'],
-                    'low': r['l'],
-                    'close': r['c'],
-                    'volume': r['v'],
-                    'vwap': r.get('vw'),
-                    'num_trades': r.get('n'),
+                    'open': self._pick_value(r, 'open', 'o'),
+                    'high': self._pick_value(r, 'high', 'h'),
+                    'low': self._pick_value(r, 'low', 'l'),
+                    'close': self._pick_value(r, 'close', 'c'),
+                    'volume': self._pick_value(r, 'volume', 'v'),
+                    'vwap': self._pick_value(r, 'vwap', 'vw'),
+                    'num_trades': self._pick_value(r, 'transactions', 'n'),
                 })
+
+            if not bars:
+                return pd.DataFrame(columns=['open', 'high', 'low', 'close', 'volume', 'vwap', 'num_trades'])
 
             df = pd.DataFrame(bars, index=timestamps)
             df.index.name = 'timestamp'
@@ -593,13 +585,11 @@ class PolygonRestService:
         Returns:
             Dict containing ticker metadata
         """
-        url = f"{self.config.base_url}/v3/reference/tickers/{symbol.upper()}"
-        data = await self._request(url)
-        
-        if data.get('status') == 'OK' and data.get('results'):
-            return data['results']
-        
-        return {}
+        response = await self._sdk_call(
+            self._rest_client.get_ticker_details,
+            ticker=symbol.upper(),
+        )
+        return self._model_to_dict(response)
 
     async def get_ticker_details_multi(self, symbols: List[str]) -> Dict[str, Dict[str, Any]]:
         """
@@ -647,13 +637,26 @@ class PolygonRestService:
         earnings_map = {}
         
         async def fetch_earnings(symbol):
-            # Try vX or v3. If 404/403, return None.
-            url = f"{self.config.base_url}/vX/reference/events?ticker={symbol.upper()}&event_type=earnings"
             try:
-                data = await self._request(url)
-                if data.get('status') == 'OK' and data.get('results'):
-                    events = data['results']
-                    return symbol, events[0].get('date')
+                response = await self._sdk_call(
+                    self._rest_client.get_ticker_events,
+                    ticker=symbol.upper(),
+                    types='earnings',
+                )
+                data = self._model_to_dict(response)
+
+                events = data.get('results') or data.get('events') or []
+                if isinstance(events, dict):
+                    events = [events]
+
+                if isinstance(events, list) and events:
+                    first_event = self._model_to_dict(events[0])
+                    event_date = (
+                        first_event.get('date')
+                        or first_event.get('event_date')
+                        or first_event.get('earnings_date')
+                    )
+                    return symbol, event_date
             except Exception as exc:
                 self.logger.debug("Failed to fetch earnings for %s: %s", symbol, exc)
             return symbol, None
@@ -671,16 +674,18 @@ class PolygonRestService:
         Get latest NBBO quotes for symbols.
         """
         async def fetch_quote(symbol):
-            url = f"{self.config.base_url}/v3/quotes/{symbol.upper()}?limit=1"
             try:
-                data = await self._request(url)
-                if data.get('status') == 'OK' and data.get('results'):
-                    q = data['results'][0]
+                quote = await self._sdk_call(
+                    self._rest_client.get_last_quote,
+                    ticker=symbol.upper(),
+                )
+                q = self._model_to_dict(quote)
+                if q:
                     return symbol, {
-                        'bid': q.get('bid_price', 0),
-                        'ask': q.get('ask_price', 0),
-                        'bid_size': q.get('bid_size', 0),
-                        'ask_size': q.get('ask_size', 0)
+                        'bid': self._pick_value(q, 'bid_price', 'bp') or 0,
+                        'ask': self._pick_value(q, 'ask_price', 'ap') or 0,
+                        'bid_size': self._pick_value(q, 'bid_size', 'bs') or 0,
+                        'ask_size': self._pick_value(q, 'ask_size', 'as') or 0,
                     }
             except Exception as exc:
                 self.logger.debug("Failed to fetch last quote for %s: %s", symbol, exc)
@@ -709,23 +714,26 @@ class PolygonRestService:
             DataFrame indexed by event timestamp (UTC) with trade fields.
         """
         symbol_upper = symbol.upper()
-        endpoint = f"{self.config.base_url}/v3/trades/{symbol_upper}"
+        page_limit = min(max(limit, 1), 50000)
+        total_cap = page_limit * max(max_pages, 1)
 
-        params = {
-            'timestamp.gte': self._event_timestamp_to_ns(start),
-            'timestamp.lte': self._event_timestamp_to_ns(end),
-            'order': 'asc',
-            'sort': 'timestamp',
-            'limit': min(max(limit, 1), 50000),
-        }
-
-        rows = await self._fetch_paginated_v3(endpoint=endpoint, params=params, max_pages=max_pages)
+        trade_iter = await self._sdk_call(
+            self._rest_client.list_trades,
+            ticker=symbol_upper,
+            timestamp_gte=start,
+            timestamp_lte=end,
+            order='asc',
+            sort='timestamp',
+            limit=page_limit,
+        )
+        rows = self._collect_with_cap(trade_iter, total_cap)
         if not rows:
             return pd.DataFrame(columns=['price', 'size', 'exchange', 'conditions', 'tape'])
 
         parsed_rows = []
         timestamps = []
-        for row in rows:
+        for item in rows:
+            row = self._model_to_dict(item)
             timestamp_value = (
                 row.get('sip_timestamp')
                 or row.get('participant_timestamp')
@@ -767,23 +775,26 @@ class PolygonRestService:
             DataFrame indexed by event timestamp (UTC) with quote fields.
         """
         symbol_upper = symbol.upper()
-        endpoint = f"{self.config.base_url}/v3/quotes/{symbol_upper}"
+        page_limit = min(max(limit, 1), 50000)
+        total_cap = page_limit * max(max_pages, 1)
 
-        params = {
-            'timestamp.gte': self._event_timestamp_to_ns(start),
-            'timestamp.lte': self._event_timestamp_to_ns(end),
-            'order': 'asc',
-            'sort': 'timestamp',
-            'limit': min(max(limit, 1), 50000),
-        }
-
-        rows = await self._fetch_paginated_v3(endpoint=endpoint, params=params, max_pages=max_pages)
+        quote_iter = await self._sdk_call(
+            self._rest_client.list_quotes,
+            ticker=symbol_upper,
+            timestamp_gte=start,
+            timestamp_lte=end,
+            order='asc',
+            sort='timestamp',
+            limit=page_limit,
+        )
+        rows = self._collect_with_cap(quote_iter, total_cap)
         if not rows:
             return pd.DataFrame(columns=['bid', 'ask', 'bid_size', 'ask_size', 'bid_exchange', 'ask_exchange'])
 
         parsed_rows = []
         timestamps = []
-        for row in rows:
+        for item in rows:
+            row = self._model_to_dict(item)
             timestamp_value = (
                 row.get('sip_timestamp')
                 or row.get('participant_timestamp')

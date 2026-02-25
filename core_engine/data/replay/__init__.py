@@ -47,6 +47,18 @@ from .adapter import (
     create_replay_adapter
 )
 
+from .polygon_tick_streamer import (
+    PolygonTickStreamerConfig,
+    PolygonHistoricalTickStreamer,
+    create_polygon_tick_streamer,
+)
+
+from .parity_audit import (
+    LIVE_CANONICAL_DATA_KEYS,
+    ParityDiff,
+    run_parity_audit,
+)
+
 __all__ = [
     # Configuration
     'ReplayConfig',
@@ -62,4 +74,14 @@ __all__ = [
     # Adapter components
     'HistoricalReplayFeedAdapter',
     'create_replay_adapter',
+
+    # Polygon historical tick streamer
+    'PolygonTickStreamerConfig',
+    'PolygonHistoricalTickStreamer',
+    'create_polygon_tick_streamer',
+
+    # Parity audit
+    'LIVE_CANONICAL_DATA_KEYS',
+    'ParityDiff',
+    'run_parity_audit',
 ]

@@ -7,6 +7,7 @@ import pytest
 import asyncio
 import json
 import logging
+from collections import deque
 from datetime import datetime, timedelta, timezone
 from unittest.mock import Mock, AsyncMock, patch
 import pandas as pd
@@ -143,7 +144,7 @@ class TestPolygonRestServiceInitialization:
 
         assert service.config.api_key == polygon_api_key
         assert service.is_initialized is False
-        assert service._session is None
+        assert service._rest_client is None
         logger.info("✅ REST service creation test passed")
 
     @pytest.mark.asyncio
@@ -151,43 +152,17 @@ class TestPolygonRestServiceInitialization:
         """Test successful initialization"""
         service = PolygonRestService(config=polygon_rest_config)
 
-        # Create proper async context manager mock
-        class MockResponse:
-            def __init__(self):
-                self.status = 200
-                self.headers = {}
+        mock_client = Mock()
+        mock_client.get_previous_close_agg.return_value = {
+            'results': [{'t': 1701878400000, 'o': 150.0, 'h': 151.0, 'l': 149.0, 'c': 150.5, 'v': 1000000.0}]
+        }
 
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, *args):
-                return None
-
-            async def json(self):
-                return {'status': 'OK', 'results': [{'t': 1701878400000, 'o': 150.0, 'h': 151.0, 'l': 149.0, 'c': 150.5, 'v': 1000000.0}]}
-
-        class MockSession:
-            def __init__(self):
-                pass
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, *args):
-                return None
-
-            def get(self, url, params=None):
-                return MockResponse()
-
-            async def close(self):
-                return None
-
-        with patch('aiohttp.ClientSession', return_value=MockSession()):
+        with patch('core_engine.data.feeds.polygon_rest.RESTClient', return_value=mock_client):
             result = await service.initialize()
 
             assert result is True
             assert service.is_initialized is True
-            assert service._session is not None
+            assert service._rest_client is not None
 
         await service.close()
         logger.info("✅ REST service initialize success test passed")
@@ -197,42 +172,15 @@ class TestPolygonRestServiceInitialization:
         """Test initialization fails with invalid API key"""
         service = PolygonRestService(config=polygon_rest_config)
 
-        # Create proper async context manager mock for failed response
-        class MockResponse:
-            def __init__(self):
-                self.status = 401
-                self.headers = {}
+        mock_client = Mock()
+        mock_client.get_previous_close_agg.side_effect = Exception("Unauthorized")
 
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, *args):
-                return None
-
-            async def json(self):
-                return {'status': 'ERROR'}
-
-        class MockSession:
-            def __init__(self):
-                pass
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, *args):
-                return None
-
-            def get(self, url, params=None):
-                return MockResponse()
-
-            async def close(self):
-                return None
-
-        with patch('aiohttp.ClientSession', return_value=MockSession()):
+        with patch('core_engine.data.feeds.polygon_rest.RESTClient', return_value=mock_client):
             result = await service.initialize()
 
             assert result is False
             assert service.is_initialized is False
+            assert service._rest_client is None
 
         await service.close()
         logger.info("✅ REST service initialize API key fails test passed")
@@ -242,13 +190,11 @@ class TestPolygonRestServiceInitialization:
         """Test closing service"""
         service = PolygonRestService(config=polygon_rest_config)
 
-        mock_session = AsyncMock()
-        service._session = mock_session
+        service._rest_client = Mock()
 
         await service.close()
 
-        mock_session.close.assert_called_once()
-        assert service._session is None
+        assert service._rest_client is None
         assert service.is_initialized is False
         logger.info("✅ REST service close test passed")
 
@@ -263,7 +209,6 @@ class TestPolygonRestRateLimiting:
     async def test_rate_limit_enforcement(self, polygon_rest_config):
         """Test rate limiting waits when at limit"""
         service = PolygonRestService(config=polygon_rest_config)
-        service._session = AsyncMock()
 
         # Fill up current 1-second rate limit window
         now = asyncio.get_event_loop().time()
@@ -285,12 +230,12 @@ class TestPolygonRestRateLimiting:
 
         now = asyncio.get_event_loop().time()
         # Mix of old and recent times relative to 1-second rolling window
-        service._request_times = [
+        service._request_times = deque([
             now - 5,   # Old (outside 1s window)
             now - 2,   # Old
             now - 0.5, # Recent
             now,       # Recent
-        ]
+        ])
 
         await service._rate_limit()
 
@@ -306,7 +251,7 @@ class TestPolygonRestRateLimiting:
         service = PolygonRestService(config=polygon_rest_config)
 
         now = asyncio.get_event_loop().time()
-        service._request_times = [now - 10, now - 5]  # Only 2 requests
+        service._request_times = deque([now - 10, now - 5])  # Only 2 requests
 
         with patch('asyncio.sleep', new_callable=AsyncMock) as mock_sleep:
             await service._rate_limit()
@@ -327,40 +272,19 @@ class TestPolygonRestDataRetrieval:
     async def test_get_previous_day(self, polygon_rest_config):
         """Test getting previous day data"""
         service = PolygonRestService(config=polygon_rest_config)
-
-        # Create proper async context manager mock
-        class MockResponse:
-            def __init__(self):
-                self.status = 200
-                self.headers = {}
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, *args):
-                return None
-
-            async def json(self):
-                return {
-                    'status': 'OK',
-                    'results': [{
-                        't': 1701878400000,  # Dec 6, 2024
-                        'o': 150.0,
-                        'h': 151.0,
-                        'l': 149.0,
-                        'c': 150.5,
-                        'v': 1000000.0,
-                        'vw': 150.25,
-                        'n': 5000,
-                    }]
-                }
-
-        class MockSession:
-            def get(self, url, params=None):
-                return MockResponse()
-
-        service._session = MockSession()
-        service._request_times = []
+        service._rest_client = Mock(get_previous_close_agg=Mock())
+        service._sdk_call = AsyncMock(return_value={
+            'results': [{
+                't': 1701878400000,
+                'o': 150.0,
+                'h': 151.0,
+                'l': 149.0,
+                'c': 150.5,
+                'v': 1000000.0,
+                'vw': 150.25,
+                'n': 5000,
+            }]
+        })
 
         bar = await service.get_previous_day("AAPL")
 
@@ -375,27 +299,8 @@ class TestPolygonRestDataRetrieval:
     async def test_get_previous_day_no_data(self, polygon_rest_config):
         """Test getting previous day when no data"""
         service = PolygonRestService(config=polygon_rest_config)
-
-        class MockResponse:
-            def __init__(self):
-                self.status = 200
-                self.headers = {}
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, *args):
-                return None
-
-            async def json(self):
-                return {'status': 'OK', 'results': []}
-
-        class MockSession:
-            def get(self, url, params=None):
-                return MockResponse()
-
-        service._session = MockSession()
-        service._request_times = []
+        service._rest_client = Mock(get_previous_close_agg=Mock())
+        service._sdk_call = AsyncMock(return_value=None)
 
         bar = await service.get_previous_day("AAPL")
 
@@ -406,52 +311,29 @@ class TestPolygonRestDataRetrieval:
     async def test_get_bars_minute(self, polygon_rest_config):
         """Test getting minute bars"""
         service = PolygonRestService(config=polygon_rest_config)
-
-        # Create proper async context manager mock
-        class MockResponse:
-            def __init__(self):
-                self.status = 200
-                self.headers = {}
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, *args):
-                return None
-
-            async def json(self):
-                return {
-                    'status': 'OK',
-                    'results': [
-                        {
-                            't': 1701878400000,  # 9:30 AM
-                            'o': 150.0,
-                            'h': 150.5,
-                            'l': 149.5,
-                            'c': 150.2,
-                            'v': 100000.0,
-                            'vw': 150.1,
-                            'n': 500,
-                        },
-                        {
-                            't': 1701878460000,  # 9:31 AM
-                            'o': 150.2,
-                            'h': 150.8,
-                            'l': 150.0,
-                            'c': 150.6,
-                            'v': 120000.0,
-                            'vw': 150.4,
-                            'n': 600,
-                        },
-                    ]
-                }
-
-        class MockSession:
-            def get(self, url, params=None):
-                return MockResponse()
-
-        service._session = MockSession()
-        service._request_times = []
+        service._rest_client = Mock(list_aggs=Mock())
+        service._sdk_call = AsyncMock(return_value=[
+            {
+                't': 1701878400000,
+                'o': 150.0,
+                'h': 150.5,
+                'l': 149.5,
+                'c': 150.2,
+                'v': 100000.0,
+                'vw': 150.1,
+                'n': 500,
+            },
+            {
+                't': 1701878460000,
+                'o': 150.2,
+                'h': 150.8,
+                'l': 150.0,
+                'c': 150.6,
+                'v': 120000.0,
+                'vw': 150.4,
+                'n': 600,
+            },
+        ])
 
         df = await service.get_bars("AAPL", timeframe="1min", days=1)
 
@@ -479,40 +361,19 @@ class TestPolygonRestDataRetrieval:
     async def test_get_bars_multi(self, polygon_rest_config):
         """Test getting bars for multiple symbols"""
         service = PolygonRestService(config=polygon_rest_config)
-
-        # Create proper async context manager mock
-        class MockResponse:
-            def __init__(self):
-                self.status = 200
-                self.headers = {}
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, *args):
-                return None
-
-            async def json(self):
-                return {
-                    'status': 'OK',
-                    'results': [{
-                        't': 1701878400000,
-                        'o': 150.0,
-                        'h': 151.0,
-                        'l': 149.0,
-                        'c': 150.5,
-                        'v': 1000000.0,
-                        'vw': 150.25,
-                        'n': 5000,
-                    }]
-                }
-
-        class MockSession:
-            def get(self, url, params=None):
-                return MockResponse()
-
-        service._session = MockSession()
-        service._request_times = []
+        service._rest_client = Mock(list_aggs=Mock())
+        service._sdk_call = AsyncMock(return_value=[
+            {
+                't': 1701878400000,
+                'o': 150.0,
+                'h': 151.0,
+                'l': 149.0,
+                'c': 150.5,
+                'v': 1000000.0,
+                'vw': 150.25,
+                'n': 5000,
+            }
+        ])
 
         data = await service.get_bars_multi(["AAPL", "TSLA"], timeframe="1min", days=1)
 
@@ -526,41 +387,16 @@ class TestPolygonRestDataRetrieval:
     async def test_get_latest_prices(self, polygon_rest_config):
         """Test getting latest prices"""
         service = PolygonRestService(config=polygon_rest_config)
+        service._rest_client = Mock(get_previous_close_agg=Mock())
+        async def mock_sdk_call(operation, *args, **kwargs):
+            ticker = kwargs.get('ticker')
+            if ticker == 'AAPL':
+                return {'results': [{'t': 1701878400000, 'o': 150.0, 'h': 151.0, 'l': 149.0, 'c': 150.5, 'v': 1000000.0}]}
+            if ticker == 'TSLA':
+                return {'results': [{'t': 1701878400000, 'o': 250.0, 'h': 251.0, 'l': 249.0, 'c': 250.5, 'v': 2000000.0}]}
+            return {'results': []}
 
-        # Mock responses for different symbols
-        responses = {
-            "AAPL": {
-                'status': 'OK',
-                'results': [{'t': 1701878400000, 'o': 150.0, 'h': 151.0, 'l': 149.0, 'c': 150.5, 'v': 1000000.0}]
-            },
-            "TSLA": {
-                'status': 'OK',
-                'results': [{'t': 1701878400000, 'o': 250.0, 'h': 251.0, 'l': 249.0, 'c': 250.5, 'v': 2000000.0}]
-            },
-        }
-
-        class MockResponse:
-            def __init__(self, symbol):
-                self.status = 200
-                self.headers = {}
-                self._symbol = symbol
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, *args):
-                return None
-
-            async def json(self):
-                return responses.get(self._symbol, {'status': 'OK', 'results': []})
-
-        class MockSession:
-            def get(self, url, params=None):
-                symbol = url.split('/')[-2]  # Extract symbol from URL
-                return MockResponse(symbol)
-
-        service._session = MockSession()
-        service._request_times = []
+        service._sdk_call = AsyncMock(side_effect=mock_sdk_call)
 
         prices = await service.get_latest_prices(["AAPL", "TSLA"])
 
@@ -1139,52 +975,31 @@ class TestPolygonErrorHandling:
 
     @pytest.mark.asyncio
     async def test_rest_service_request_error(self, polygon_rest_config):
-        """Test REST service handles request errors"""
+        """Test REST service handles SDK call errors"""
         service = PolygonRestService(config=polygon_rest_config)
+        service._rest_client = Mock()
+        service._request_times = deque()
 
-        class MockSession:
-            def get(self, url, params=None):
-                raise Exception("Network error")
+        operation = Mock(side_effect=Exception("Network error"))
 
-        service._session = MockSession()
-        service._request_times = []
-
-        data = await service._request("https://api.polygon.io/test")
-
-        assert data.get('status') == 'ERROR'
+        with pytest.raises(Exception, match="Network error"):
+            await service._sdk_call(operation)
         logger.info("✅ REST service request error test passed")
 
     @pytest.mark.asyncio
     async def test_rest_service_rate_limit_429(self, polygon_rest_config):
-        """Test REST service handles 429 rate limit"""
+        """Test REST service retries transient SDK errors"""
         service = PolygonRestService(config=polygon_rest_config)
-
-        class MockResponse:
-            def __init__(self):
-                self.status = 429
-                self.headers = {'Retry-After': '60'}
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, *args):
-                return None
-
-            async def json(self):
-                return {'status': 'ERROR', 'message': 'Rate limited'}
-
-        class MockSession:
-            def get(self, url, params=None):
-                return MockResponse()
-
-        service._session = MockSession()
+        service._rest_client = Mock()
         service._request_times = []
 
-        with patch('asyncio.sleep', new_callable=AsyncMock) as mock_sleep:
-            data = await service._request("https://api.polygon.io/test")
+        operation = Mock(side_effect=[Exception("Rate limited"), {"status": "OK"}])
 
-            # Should wait for retry
+        with patch('asyncio.sleep', new_callable=AsyncMock) as mock_sleep:
+            data = await service._sdk_call(operation)
+
             mock_sleep.assert_called()
+            assert data.get('status') == 'OK'
 
         logger.info("✅ REST service rate limit 429 test passed")
 
@@ -1231,29 +1046,23 @@ class TestPolygonDataServiceInitializationErrors:
         """Test initialization fails when manager creation fails"""
         service = PolygonDataService(config=polygon_service_config)
 
-        with patch('core_engine.data.feeds.polygon_integration.PolygonRealtimeFeedAdapter') as MockAdapter:
-            mock_adapter = Mock()
-            MockAdapter.return_value = mock_adapter
+        with patch('core_engine.data.feeds.polygon_integration.PolygonFeedConfig', side_effect=Exception("Manager creation failed")):
+            result = await service.initialize()
 
-            with patch('core_engine.data.feeds.polygon_integration.PolygonAggregatedDataManager', side_effect=Exception("Manager creation failed")):
-                result = await service.initialize()
-
-                assert result is False
-                assert not service.is_initialized
-                logger.info("✅ Initialize manager creation failure test passed")
+            assert result is False
+            assert not service.is_initialized
+            logger.info("✅ Initialize manager creation failure test passed")
 
     @pytest.mark.asyncio
     async def test_initialize_message_handler_registration_failure(self, polygon_service_config):
         """Test initialization fails when message handler registration fails"""
         service = PolygonDataService(config=polygon_service_config)
 
-        with patch('core_engine.data.feeds.polygon_integration.PolygonRealtimeFeedAdapter') as MockAdapter, \
-             patch('core_engine.data.feeds.polygon_integration.PolygonAggregatedDataManager') as MockManager:
+        with patch('core_engine.data.feeds.polygon_integration.PolygonRealtimeFeedAdapter') as MockAdapter:
 
             mock_adapter = Mock()
             mock_adapter.add_message_handler.side_effect = Exception("Handler registration failed")
             MockAdapter.return_value = mock_adapter
-            MockManager.return_value = Mock()
 
             result = await service.initialize()
 
@@ -1800,8 +1609,7 @@ class TestPolygonDataServiceIntegration:
         mock_adapter.is_connected.return_value = True
         mock_adapter.disconnect = AsyncMock(return_value=True)
 
-        with patch('core_engine.data.feeds.polygon_integration.PolygonRealtimeFeedAdapter', return_value=mock_adapter), \
-             patch('core_engine.data.feeds.polygon_integration.PolygonAggregatedDataManager'):
+        with patch('core_engine.data.feeds.polygon_integration.PolygonRealtimeFeedAdapter', return_value=mock_adapter):
 
             # Initialize
             assert await service.initialize()
@@ -1847,20 +1655,17 @@ class TestPolygonDataServiceIntegration:
         """Test integration between adapter and aggregation manager"""
         service = PolygonDataService(config=polygon_service_config)
 
-        with patch('core_engine.data.feeds.polygon_integration.PolygonRealtimeFeedAdapter') as MockAdapter, \
-             patch('core_engine.data.feeds.polygon_integration.PolygonAggregatedDataManager') as MockManager:
+        with patch('core_engine.data.feeds.polygon_integration.PolygonRealtimeFeedAdapter') as MockAdapter:
 
             mock_adapter = Mock()
-            mock_manager = Mock()
             MockAdapter.return_value = mock_adapter
-            MockManager.return_value = mock_manager
 
             # Initialize
             assert await service.initialize()
 
-            # Verify adapter and manager are created and connected
+            # Verify adapter is created and connected
             assert service._adapter == mock_adapter
-            assert service._aggregation_manager == mock_manager
+            assert service.is_initialized is True
 
             # Verify message handler is registered
             mock_adapter.add_message_handler.assert_called_once()
