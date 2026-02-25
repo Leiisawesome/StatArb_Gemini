@@ -50,6 +50,15 @@ from enum import Enum
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Set
 
 try:
+    from massive import WebSocketClient as MassiveWebSocketClient
+    from massive.websocket.models.common import Feed as MassiveFeed
+    MASSIVE_CLIENT_AVAILABLE = True
+except ImportError:
+    MassiveWebSocketClient = None
+    MassiveFeed = None
+    MASSIVE_CLIENT_AVAILABLE = False
+
+try:
     import websockets
     from websockets.exceptions import (
         ConnectionClosedError,
@@ -247,6 +256,7 @@ class PolygonRealtimeFeedAdapter(DataFeedAdapter):
         - Real-time quotes (Q.SYMBOL, Advanced tier)
 
     Features:
+        - Official Massive/Polygon Python client integration
         - Automatic authentication
         - Graceful reconnection with exponential backoff
         - Message parsing and normalization
@@ -269,10 +279,10 @@ class PolygonRealtimeFeedAdapter(DataFeedAdapter):
     def __init__(self, config: PolygonFeedConfig):
         """Initialize Polygon.io real-time adapter"""
 
-        if not WEBSOCKETS_AVAILABLE:
+        if not MASSIVE_CLIENT_AVAILABLE and not WEBSOCKETS_AVAILABLE:
             raise ImportError(
-                "websockets package required for Polygon real-time feed. "
-                "Install with: pip install websockets"
+                "massive (official Polygon client) or websockets package required for Polygon real-time feed. "
+                "Install with: pip install massive websockets"
             )
 
         # Convert to base FeedAdapterConfig for parent
@@ -292,6 +302,11 @@ class PolygonRealtimeFeedAdapter(DataFeedAdapter):
         super().__init__(base_config)
 
         self.polygon_config = config
+
+        # Official Polygon/Massive websocket client (primary path)
+        self._massive_client = None
+        self._massive_connect_task: Optional[asyncio.Task] = None
+        self._using_massive_client = False
 
         # WebSocket connection (websockets library)
         self._ws = None
@@ -336,6 +351,13 @@ class PolygonRealtimeFeedAdapter(DataFeedAdapter):
             self._should_reconnect = True
 
             self.logger.info(f"Connecting to {self.polygon_config.ws_url}...")
+
+            # Primary path: official Polygon/Massive Python websocket client
+            if MASSIVE_CLIENT_AVAILABLE:
+                try:
+                    return await self._connect_with_massive_client()
+                except Exception as e:
+                    self.logger.warning(f"Massive client connection failed: {e}, trying legacy transports...")
 
             # Try aiohttp first (better proxy bypass), then fall back to websockets
             if AIOHTTP_AVAILABLE:
@@ -476,6 +498,65 @@ class PolygonRealtimeFeedAdapter(DataFeedAdapter):
 
         return True
 
+    async def _connect_with_massive_client(self) -> bool:
+        """Connect using official Massive/Polygon WebSocketClient."""
+        if not MASSIVE_CLIENT_AVAILABLE:
+            raise ImportError("massive package not available")
+
+        feed = MassiveFeed.Delayed if self.polygon_config.cluster == PolygonCluster.STOCKS_DELAYED else MassiveFeed.RealTime
+
+        self._massive_client = MassiveWebSocketClient(
+            api_key=self.polygon_config.api_key,
+            feed=feed,
+            market=self.polygon_config.cluster.value.replace("_delayed", ""),
+            raw=True,
+            max_reconnects=self.polygon_config.max_reconnect_attempts,
+            verbose=False,
+        )
+
+        async def _processor(raw_message: Any) -> None:
+            if isinstance(raw_message, (str, bytes)):
+                await self._process_message(raw_message.decode("utf-8") if isinstance(raw_message, bytes) else raw_message)
+                return
+
+            # Defensive fallback for unexpected payload types from client
+            try:
+                if isinstance(raw_message, list):
+                    normalized = []
+                    for message in raw_message:
+                        message_dict = getattr(message, "__dict__", None)
+                        if isinstance(message_dict, dict):
+                            normalized.append(message_dict)
+                        else:
+                            normalized.append(str(message))
+                    await self._process_message(json.dumps(normalized))
+                else:
+                    await self._process_message(json.dumps(raw_message))
+            except Exception:
+                self.logger.debug("Unable to normalize non-raw Massive payload", exc_info=True)
+
+        self._set_status(AdapterStatus.CONNECTED)
+        self._stats['connection_time'] = datetime.now()
+        self._set_status(AdapterStatus.AUTHENTICATED)
+
+        # Run client connection loop in background (it handles auth and inbound streaming)
+        self._massive_connect_task = asyncio.create_task(
+            self._massive_client.connect(
+                _processor,
+                close_timeout=5,
+                ping_interval=self.polygon_config.heartbeat_interval_seconds,
+                ping_timeout=10,
+            )
+        )
+        self._using_massive_client = True
+
+        # Start heartbeat monitoring
+        self._start_task_once('_heartbeat_task', self._heartbeat_monitor, 'heartbeat monitor')
+
+        self._reconnect_count = 0
+        self.logger.info("Successfully connected via official Massive WebSocket client")
+        return True
+
     def _start_task_once(self, attr_name: str, task_factory: Callable[[], Awaitable[Any]], label: str) -> None:
         """Start a background task only when no active task exists for the slot."""
         existing_task = getattr(self, attr_name, None)
@@ -608,6 +689,25 @@ class PolygonRealtimeFeedAdapter(DataFeedAdapter):
     async def disconnect(self) -> None:
         """Disconnect from Polygon.io WebSocket"""
         self._should_reconnect = False
+
+        # Close official Massive client path first
+        if self._using_massive_client:
+            if self._massive_client is not None:
+                try:
+                    await self._massive_client.close()
+                except Exception as e:
+                    self.logger.warning(f"Error closing Massive WebSocket client: {e}")
+
+            if self._massive_connect_task and not self._massive_connect_task.done():
+                self._massive_connect_task.cancel()
+                try:
+                    await self._massive_connect_task
+                except asyncio.CancelledError:
+                    pass
+
+            self._massive_client = None
+            self._massive_connect_task = None
+            self._using_massive_client = False
 
         # Cancel tasks
         if self._receive_task and not self._receive_task.done():
@@ -761,6 +861,22 @@ class PolygonRealtimeFeedAdapter(DataFeedAdapter):
 
     async def _send_message(self, message: str) -> None:
         """Send message via active WebSocket connection"""
+        if self._using_massive_client and self._massive_client:
+            payload = json.loads(message)
+            action = payload.get("action")
+            params = payload.get("params", "")
+            channels = [channel.strip() for channel in str(params).split(",") if channel.strip()]
+
+            if action == "subscribe":
+                self._massive_client.subscribe(*channels)
+                return
+
+            if action == "unsubscribe":
+                self._massive_client.unsubscribe(*channels)
+                return
+
+            raise ValueError(f"Unsupported action for Massive client send path: {action}")
+
         if self._use_aiohttp and self._aiohttp_ws:
             await self._aiohttp_ws.send_str(message)
         elif self._ws:
@@ -770,6 +886,13 @@ class PolygonRealtimeFeedAdapter(DataFeedAdapter):
 
     def is_connected(self) -> bool:
         """Check if WebSocket is connected and authenticated"""
+        if self._using_massive_client:
+            return (
+                self._massive_connect_task is not None and
+                not self._massive_connect_task.done() and
+                self.status in [AdapterStatus.AUTHENTICATED, AdapterStatus.ACTIVE]
+            )
+
         if self._use_aiohttp:
             return (
                 self._aiohttp_ws is not None and
@@ -1075,6 +1198,13 @@ class PolygonRealtimeFeedAdapter(DataFeedAdapter):
             self.logger.error("Max reconnection attempts exceeded")
             self._set_status(AdapterStatus.ERROR)
             return
+
+        if self._using_massive_client:
+            # Official client already includes internal reconnect behavior;
+            # avoid duplicate reconnect loops unless task has ended.
+            if self._massive_connect_task and not self._massive_connect_task.done():
+                self.logger.debug("Massive client reconnect handled internally")
+                return
 
         # Exponential backoff
         delay = min(

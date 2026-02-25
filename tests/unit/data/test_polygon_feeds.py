@@ -476,13 +476,14 @@ class TestPolygonRealtimeAdapterInitialization:
             assert adapter.IS_IMPLEMENTED is True
             logger.info("✅ Adapter creation test passed")
 
-    def test_adapter_missing_websockets(self, polygon_feed_config):
-        """Test adapter requires websockets"""
-        with patch('core_engine.data.feeds.polygon_realtime.WEBSOCKETS_AVAILABLE', False):
-            with pytest.raises(ImportError, match="websockets package required"):
+    def test_adapter_missing_websocket_clients(self, polygon_feed_config):
+        """Test adapter requires at least one websocket client transport"""
+        with patch('core_engine.data.feeds.polygon_realtime.WEBSOCKETS_AVAILABLE', False), \
+             patch('core_engine.data.feeds.polygon_realtime.MASSIVE_CLIENT_AVAILABLE', False):
+            with pytest.raises(ImportError, match=r"massive \(official Polygon client\) or websockets"):
                 PolygonRealtimeFeedAdapter(polygon_feed_config)
 
-        logger.info("✅ Adapter missing websockets test passed")
+        logger.info("✅ Adapter missing websocket clients test passed")
 
     def test_adapter_subscription_tracking(self, polygon_feed_config):
         """Test adapter subscription tracking"""
