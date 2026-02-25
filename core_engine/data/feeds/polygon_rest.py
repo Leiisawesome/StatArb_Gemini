@@ -32,6 +32,7 @@ Version: 1.0.0
 """
 
 import asyncio
+import itertools
 import logging
 import os
 from collections import deque
@@ -290,6 +291,14 @@ class PolygonRestService:
         return rows
 
     @staticmethod
+    def _iter_with_cap(iterator, cap: Optional[int]):
+        """Yield up to cap items from iterator without pre-materializing all rows."""
+        if cap is None or cap <= 0:
+            yield from iterator
+            return
+        yield from itertools.islice(iterator, cap)
+
+    @staticmethod
     def _parse_event_timestamp(raw_timestamp: Any) -> Optional[datetime]:
         """Parse event timestamps in seconds/ms/us/ns into UTC datetime."""
         try:
@@ -308,6 +317,37 @@ class PolygonRestService:
             seconds = timestamp_value
 
         return datetime.fromtimestamp(seconds, tz=timezone.utc)
+
+    @staticmethod
+    def _coalesce_columns(frame: pd.DataFrame, candidates: List[str], default: Any = None) -> pd.Series:
+        """Return first non-null value across candidate columns for each row."""
+        existing = [column for column in candidates if column in frame.columns]
+        if not existing:
+            return pd.Series([default] * len(frame), index=frame.index)
+
+        coalesced = frame[existing].bfill(axis=1).iloc[:, 0]
+        if default is not None:
+            coalesced = coalesced.where(coalesced.notna(), default)
+        return coalesced
+
+    @staticmethod
+    def _parse_event_timestamp_series(raw_series: pd.Series) -> pd.Series:
+        """Vectorized timestamp parser for seconds/ms/us/ns values."""
+        numeric = pd.to_numeric(raw_series, errors='coerce')
+        absolute = numeric.abs()
+
+        seconds = pd.Series(index=numeric.index, dtype='float64')
+        mask_ns = absolute >= 1e17
+        mask_us = (absolute >= 1e14) & ~mask_ns
+        mask_ms = (absolute >= 1e11) & ~(mask_ns | mask_us)
+        mask_s = ~(mask_ns | mask_us | mask_ms)
+
+        seconds.loc[mask_ns] = numeric.loc[mask_ns] / 1e9
+        seconds.loc[mask_us] = numeric.loc[mask_us] / 1e6
+        seconds.loc[mask_ms] = numeric.loc[mask_ms] / 1e3
+        seconds.loc[mask_s] = numeric.loc[mask_s]
+
+        return pd.to_datetime(seconds, unit='s', utc=True, errors='coerce')
 
     # ========================================================================
     # DATA RETRIEVAL METHODS
@@ -463,35 +503,32 @@ class PolygonRestService:
             sort='asc',
             limit=row_cap,
         )
-        rows = self._collect_with_cap(bars_iter, row_cap)
+        frame = pd.DataFrame(
+            self._model_to_dict(item)
+            for item in self._iter_with_cap(bars_iter, row_cap)
+        )
 
-        if rows:
-            bars = []
-            timestamps = []
-            for item in rows:
-                r = self._model_to_dict(item)
-                ts_raw = self._pick_value(r, 'timestamp', 't')
-                event_ts = self._parse_event_timestamp(ts_raw)
-                if event_ts is None:
-                    continue
-
-                timestamps.append(event_ts)
-                bars.append({
-                    'open': self._pick_value(r, 'open', 'o'),
-                    'high': self._pick_value(r, 'high', 'h'),
-                    'low': self._pick_value(r, 'low', 'l'),
-                    'close': self._pick_value(r, 'close', 'c'),
-                    'volume': self._pick_value(r, 'volume', 'v'),
-                    'vwap': self._pick_value(r, 'vwap', 'vw'),
-                    'num_trades': self._pick_value(r, 'transactions', 'n'),
-                })
-
-            if not bars:
-                return pd.DataFrame(columns=['open', 'high', 'low', 'close', 'volume', 'vwap', 'num_trades'])
-
-            df = pd.DataFrame(bars, index=timestamps)
-            df.index.name = 'timestamp'
-            return df
+        if not frame.empty:
+            timestamp_raw = self._coalesce_columns(frame, ['timestamp', 't'])
+            event_ts = self._parse_event_timestamp_series(timestamp_raw)
+            valid_mask = event_ts.notna()
+            if valid_mask.any():
+                filtered = frame.loc[valid_mask]
+                filtered_ts = pd.DatetimeIndex(event_ts.loc[valid_mask])
+                df = pd.DataFrame(
+                    {
+                        'open': self._coalesce_columns(filtered, ['open', 'o']).to_numpy(),
+                        'high': self._coalesce_columns(filtered, ['high', 'h']).to_numpy(),
+                        'low': self._coalesce_columns(filtered, ['low', 'l']).to_numpy(),
+                        'close': self._coalesce_columns(filtered, ['close', 'c']).to_numpy(),
+                        'volume': self._coalesce_columns(filtered, ['volume', 'v']).to_numpy(),
+                        'vwap': self._coalesce_columns(filtered, ['vwap', 'vw']).to_numpy(),
+                        'num_trades': self._coalesce_columns(filtered, ['transactions', 'n']).to_numpy(),
+                    },
+                    index=filtered_ts,
+                )
+                df.index.name = 'timestamp'
+                return df.sort_index()
 
         # Return empty DataFrame
         return pd.DataFrame(columns=['open', 'high', 'low', 'close', 'volume', 'vwap', 'num_trades'])
@@ -726,37 +763,40 @@ class PolygonRestService:
             sort='timestamp',
             limit=page_limit,
         )
-        rows = self._collect_with_cap(trade_iter, total_cap)
-        if not rows:
+        frame = pd.DataFrame(
+            self._model_to_dict(item)
+            for item in self._iter_with_cap(trade_iter, total_cap)
+        )
+        if frame.empty:
             return pd.DataFrame(columns=['price', 'size', 'exchange', 'conditions', 'tape'])
 
-        parsed_rows = []
-        timestamps = []
-        for item in rows:
-            row = self._model_to_dict(item)
-            timestamp_value = (
-                row.get('sip_timestamp')
-                or row.get('participant_timestamp')
-                or row.get('trf_timestamp')
-                or row.get('timestamp')
-            )
-            event_ts = self._parse_event_timestamp(timestamp_value)
-            if event_ts is None:
-                continue
-
-            timestamps.append(event_ts)
-            parsed_rows.append({
-                'price': row.get('price', row.get('p')),
-                'size': row.get('size', row.get('s')),
-                'exchange': row.get('exchange', row.get('x')),
-                'conditions': row.get('conditions', row.get('c', [])),
-                'tape': row.get('tape', row.get('z')),
-            })
-
-        if not parsed_rows:
+        timestamp_raw = self._coalesce_columns(
+            frame,
+            ['sip_timestamp', 'participant_timestamp', 'trf_timestamp', 'timestamp'],
+        )
+        event_ts = self._parse_event_timestamp_series(timestamp_raw)
+        valid_mask = event_ts.notna()
+        if not valid_mask.any():
             return pd.DataFrame(columns=['price', 'size', 'exchange', 'conditions', 'tape'])
 
-        df = pd.DataFrame(parsed_rows, index=pd.DatetimeIndex(timestamps, tz=timezone.utc))
+        filtered = frame.loc[valid_mask]
+        filtered_ts = pd.DatetimeIndex(event_ts.loc[valid_mask])
+
+        conditions_series = self._coalesce_columns(filtered, ['conditions', 'c'])
+        conditions_series = conditions_series.apply(
+            lambda value: value if isinstance(value, list) else []
+        )
+
+        df = pd.DataFrame(
+            {
+                'price': self._coalesce_columns(filtered, ['price', 'p']).to_numpy(),
+                'size': self._coalesce_columns(filtered, ['size', 's']).to_numpy(),
+                'exchange': self._coalesce_columns(filtered, ['exchange', 'x']).to_numpy(),
+                'conditions': conditions_series.to_numpy(),
+                'tape': self._coalesce_columns(filtered, ['tape', 'z']).to_numpy(),
+            },
+            index=filtered_ts,
+        )
         df.index.name = 'timestamp'
         return df.sort_index()
 
@@ -787,38 +827,36 @@ class PolygonRestService:
             sort='timestamp',
             limit=page_limit,
         )
-        rows = self._collect_with_cap(quote_iter, total_cap)
-        if not rows:
+        frame = pd.DataFrame(
+            self._model_to_dict(item)
+            for item in self._iter_with_cap(quote_iter, total_cap)
+        )
+        if frame.empty:
             return pd.DataFrame(columns=['bid', 'ask', 'bid_size', 'ask_size', 'bid_exchange', 'ask_exchange'])
 
-        parsed_rows = []
-        timestamps = []
-        for item in rows:
-            row = self._model_to_dict(item)
-            timestamp_value = (
-                row.get('sip_timestamp')
-                or row.get('participant_timestamp')
-                or row.get('trf_timestamp')
-                or row.get('timestamp')
-            )
-            event_ts = self._parse_event_timestamp(timestamp_value)
-            if event_ts is None:
-                continue
-
-            timestamps.append(event_ts)
-            parsed_rows.append({
-                'bid': row.get('bid_price', row.get('bp', row.get('p'))),
-                'ask': row.get('ask_price', row.get('ap', row.get('P'))),
-                'bid_size': row.get('bid_size', row.get('bs', row.get('s'))),
-                'ask_size': row.get('ask_size', row.get('as', row.get('S'))),
-                'bid_exchange': row.get('bid_exchange', row.get('bx')),
-                'ask_exchange': row.get('ask_exchange', row.get('ax')),
-            })
-
-        if not parsed_rows:
+        timestamp_raw = self._coalesce_columns(
+            frame,
+            ['sip_timestamp', 'participant_timestamp', 'trf_timestamp', 'timestamp'],
+        )
+        event_ts = self._parse_event_timestamp_series(timestamp_raw)
+        valid_mask = event_ts.notna()
+        if not valid_mask.any():
             return pd.DataFrame(columns=['bid', 'ask', 'bid_size', 'ask_size', 'bid_exchange', 'ask_exchange'])
 
-        df = pd.DataFrame(parsed_rows, index=pd.DatetimeIndex(timestamps, tz=timezone.utc))
+        filtered = frame.loc[valid_mask]
+        filtered_ts = pd.DatetimeIndex(event_ts.loc[valid_mask])
+
+        df = pd.DataFrame(
+            {
+                'bid': self._coalesce_columns(filtered, ['bid_price', 'bp', 'p']).to_numpy(),
+                'ask': self._coalesce_columns(filtered, ['ask_price', 'ap', 'P']).to_numpy(),
+                'bid_size': self._coalesce_columns(filtered, ['bid_size', 'bs', 's']).to_numpy(),
+                'ask_size': self._coalesce_columns(filtered, ['ask_size', 'as', 'S']).to_numpy(),
+                'bid_exchange': self._coalesce_columns(filtered, ['bid_exchange', 'bx']).to_numpy(),
+                'ask_exchange': self._coalesce_columns(filtered, ['ask_exchange', 'ax']).to_numpy(),
+            },
+            index=filtered_ts,
+        )
         df.index.name = 'timestamp'
         return df.sort_index()
 
@@ -866,13 +904,12 @@ class PolygonRestService:
         if trades_df.empty:
             trade_snap = pd.DataFrame(index=second_index, columns=['trade_price', 'trade_size', 'trade_exchange', 'trade_count'])
         else:
-            trade_last = trades_df[['price', 'size', 'exchange']].resample('1s').last()
-            trade_count = trades_df[['price']].resample('1s').size().rename('trade_count').to_frame()
-            trade_snap = trade_last.join(trade_count, how='outer').rename(columns={
-                'price': 'trade_price',
-                'size': 'trade_size',
-                'exchange': 'trade_exchange',
-            })
+            trade_snap = trades_df.resample('1s').agg(
+                trade_price=('price', 'last'),
+                trade_size=('size', 'last'),
+                trade_exchange=('exchange', 'last'),
+                trade_count=('price', 'size'),
+            )
             trade_snap = trade_snap.reindex(second_index)
             if forward_fill_trades:
                 trade_snap[['trade_price', 'trade_size', 'trade_exchange']] = trade_snap[
@@ -885,14 +922,13 @@ class PolygonRestService:
                 'quote_bid', 'quote_ask', 'quote_bid_size', 'quote_ask_size', 'quote_count'
             ])
         else:
-            quote_last = quotes_df[['bid', 'ask', 'bid_size', 'ask_size']].resample('1s').last()
-            quote_count = quotes_df[['bid']].resample('1s').size().rename('quote_count').to_frame()
-            quote_snap = quote_last.join(quote_count, how='outer').rename(columns={
-                'bid': 'quote_bid',
-                'ask': 'quote_ask',
-                'bid_size': 'quote_bid_size',
-                'ask_size': 'quote_ask_size',
-            })
+            quote_snap = quotes_df.resample('1s').agg(
+                quote_bid=('bid', 'last'),
+                quote_ask=('ask', 'last'),
+                quote_bid_size=('bid_size', 'last'),
+                quote_ask_size=('ask_size', 'last'),
+                quote_count=('bid', 'size'),
+            )
             quote_snap = quote_snap.reindex(second_index)
             if forward_fill_quotes:
                 quote_snap[['quote_bid', 'quote_ask', 'quote_bid_size', 'quote_ask_size']] = quote_snap[

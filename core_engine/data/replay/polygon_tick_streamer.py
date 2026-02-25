@@ -308,28 +308,29 @@ class PolygonHistoricalTickStreamer(DataFeedAdapter):
     ) -> List[FeedMessage]:
         messages: List[FeedMessage] = []
 
-        trade_price = row.get("trade_price")
-        trade_size = row.get("trade_size")
-        trade_exchange = row.get("trade_exchange")
-        trade_count = int(row.get("trade_count", 0) or 0)
+        trade_price = self._safe_float(row.get("trade_price"), default=None)
+        trade_size = self._safe_float(row.get("trade_size"), default=0.0)
+        trade_exchange = self._safe_int(row.get("trade_exchange"), default=0)
+        trade_count = self._safe_int(row.get("trade_count"), default=0)
 
-        quote_bid = row.get("quote_bid")
-        quote_ask = row.get("quote_ask")
-        quote_bid_size = row.get("quote_bid_size")
-        quote_ask_size = row.get("quote_ask_size")
-        quote_count = int(row.get("quote_count", 0) or 0)
-        spread = row.get("spread")
+        quote_bid = self._safe_float(row.get("quote_bid"), default=None)
+        quote_ask = self._safe_float(row.get("quote_ask"), default=None)
+        quote_bid_size = self._safe_float(row.get("quote_bid_size"), default=0.0)
+        quote_ask_size = self._safe_float(row.get("quote_ask_size"), default=0.0)
+        quote_count = self._safe_int(row.get("quote_count"), default=0)
+        spread_raw = self._safe_float(row.get("spread"), default=None)
 
-        has_trade = trade_count > 0 and pd.notna(trade_price)
-        has_quote = pd.notna(quote_bid) and pd.notna(quote_ask)
+        has_trade = trade_count > 0 and trade_price is not None
+        has_quote = quote_bid is not None and quote_ask is not None
+        spread = (quote_ask - quote_bid) if has_quote else spread_raw
         event_ts = timestamp if timestamp.tzinfo else timestamp.replace(tzinfo=timezone.utc)
 
         if self.streamer_config.emit_trade and "trade" in allowed_types and has_trade:
             trade_data = {
                 "price": float(trade_price),
-                "size": float(trade_size) if pd.notna(trade_size) else 0.0,
+                "size": float(trade_size),
                 "conditions": [],
-                "exchange": int(trade_exchange) if pd.notna(trade_exchange) else 0,
+                "exchange": int(trade_exchange),
                 "tape": 0,
             }
             if not self.streamer_config.strict_live_parity:
@@ -351,9 +352,9 @@ class PolygonHistoricalTickStreamer(DataFeedAdapter):
         if self.streamer_config.emit_quote and "quote" in allowed_types and has_quote:
             quote_data = {
                 "bid": float(quote_bid),
-                "bid_size": float(quote_bid_size) if pd.notna(quote_bid_size) else 0.0,
+                "bid_size": float(quote_bid_size),
                 "ask": float(quote_ask),
-                "ask_size": float(quote_ask_size) if pd.notna(quote_ask_size) else 0.0,
+                "ask_size": float(quote_ask_size),
                 "bid_exchange": 0,
                 "ask_exchange": 0,
                 "conditions": [],
@@ -361,7 +362,7 @@ class PolygonHistoricalTickStreamer(DataFeedAdapter):
             if not self.streamer_config.strict_live_parity:
                 quote_data.update(
                     {
-                        "spread": float(spread) if pd.notna(spread) else None,
+                        "spread": float(spread) if spread is not None else 0.0,
                         "quote_count": quote_count,
                         "is_stale": quote_count == 0,
                     }
@@ -386,7 +387,7 @@ class PolygonHistoricalTickStreamer(DataFeedAdapter):
             close_price = (float(quote_bid) + float(quote_ask)) / 2.0
 
         if close_price is not None:
-            volume_value = float(trade_size) if has_trade and pd.notna(trade_size) else 0.0
+            volume_value = float(trade_size) if has_trade else 0.0
             second_start = event_ts
             second_end = second_start + timedelta(seconds=1)
 
@@ -443,6 +444,34 @@ class PolygonHistoricalTickStreamer(DataFeedAdapter):
                     prior_state["num_trades"] = int(prior_state["num_trades"]) + trade_count
 
         return messages
+
+    @staticmethod
+    def _safe_float(value: object, default: Optional[float]) -> Optional[float]:
+        if value is None:
+            return default
+        try:
+            if pd.isna(value):
+                return default
+        except TypeError:
+            pass
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _safe_int(value: object, default: int) -> int:
+        if value is None:
+            return default
+        try:
+            if pd.isna(value):
+                return default
+        except TypeError:
+            pass
+        try:
+            return int(float(value))
+        except (TypeError, ValueError):
+            return default
 
     def _build_minute_agg_message(self, symbol: str, state: Dict[str, object]) -> Optional[FeedMessage]:
         minute_start = state.get("minute_start")

@@ -157,7 +157,7 @@ async def test_streamer_enriched_mode_includes_replay_fields(tick_streamer_confi
         quote_msg = next(msg for msg in captured_messages if msg.message_type == "quote")
 
         assert trade_msg.data["trade_count"] == 3
-        assert quote_msg.data["spread"] == 0.2
+        assert quote_msg.data["spread"] == pytest.approx(0.2)
         assert quote_msg.data["quote_count"] == 7
         assert quote_msg.data["is_stale"] is False
 
@@ -179,5 +179,60 @@ async def test_subscribe_fails_when_symbol_outside_config_scope(tick_streamer_co
 
         subscribed = await streamer.subscribe(["MSFT"], ["quote"])
         assert not subscribed
+
+        await streamer.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_streamer_handles_nan_values_without_nan_payloads(tick_streamer_config):
+    ts_1 = tick_streamer_config.start_time
+    ts_2 = tick_streamer_config.start_time + timedelta(seconds=1)
+
+    snapshot_df = pd.DataFrame(
+        {
+            "trade_price": [100.1, float("nan")],
+            "trade_size": [float("nan"), float("nan")],
+            "trade_exchange": [float("nan"), float("nan")],
+            "trade_count": [1, float("nan")],
+            "quote_bid": [100.0, 100.2],
+            "quote_ask": [100.3, 100.5],
+            "quote_bid_size": [float("nan"), 11],
+            "quote_ask_size": [12, float("nan")],
+            "quote_count": [float("nan"), 2],
+            "spread": [float("nan"), float("nan")],
+        },
+        index=[ts_1, ts_2],
+    )
+
+    mock_rest_service = Mock()
+    mock_rest_service.get_trade_quote_snapshots_1s = AsyncMock(return_value=snapshot_df)
+    mock_rest_service.close = AsyncMock()
+
+    with patch(
+        "core_engine.data.replay.polygon_tick_streamer.create_polygon_rest_service",
+        new=AsyncMock(return_value=mock_rest_service),
+    ):
+        config = PolygonTickStreamerConfig(
+            symbols=tick_streamer_config.symbols,
+            start_time=tick_streamer_config.start_time,
+            end_time=tick_streamer_config.end_time,
+            api_key=tick_streamer_config.api_key,
+            playback_speed=float("inf"),
+            strict_live_parity=False,
+        )
+        streamer = PolygonHistoricalTickStreamer(config)
+        captured_messages = []
+        streamer.add_message_handler(captured_messages.append)
+
+        assert await streamer.connect()
+        assert await streamer.subscribe(["AAPL"], ["trade", "quote", "second_agg"])
+        assert await streamer.wait_until_complete(timeout=1.0)
+
+        assert captured_messages
+        for message in captured_messages:
+            for value in message.data.values():
+                if isinstance(value, (list, dict, tuple, set)):
+                    continue
+                assert not pd.isna(value), f"Found NaN in message payload: {message.message_type} {message.data}"
 
         await streamer.disconnect()
