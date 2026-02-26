@@ -499,7 +499,7 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
             else:
                 additional_data["sms_mode"] = "multiplicative"
 
-            signal_type = SignalType.BUY if side == "BUY" else SignalType.SELL
+            signal_type = SignalType.LONG_ENTRY if side == "BUY" else SignalType.SHORT_ENTRY
             # Strategy expresses allocation intent as a hint.
             # RiskManager remains the final authority for sizing.
             base_tw = float(getattr(self.config, "base_position_pct", 0.0) or 0.0)
@@ -1035,100 +1035,99 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                 mqs_penalty = getattr(self, '_current_mqs_penalty', 1.0)
                 confidence = confidence * mqs_penalty
 
-                if confidence > 0.4:  # Minimum confidence threshold (lowered for composite signals)
-                    chain_diag = getattr(self, '_last_entry_diag', {})
-                    expected_return = self._estimate_expected_return_from_chain(chain_diag)
-                    base_tw = float(getattr(self.config, "base_position_pct", 0.0) or 0.0)
-                    target_weight = self._calculate_regime_adaptive_weight(
-                        symbol=symbol,
-                        base_weight=base_tw,
+                chain_diag = getattr(self, '_last_entry_diag', {})
+                expected_return = self._estimate_expected_return_from_chain(chain_diag)
+                base_tw = float(getattr(self.config, "base_position_pct", 0.0) or 0.0)
+                target_weight = self._calculate_regime_adaptive_weight(
+                    symbol=symbol,
+                    base_weight=base_tw,
+                    side=side,
+                    ads_r=ads_ctx.get("ads_regime_vector_obj")
+                )
+
+                # Capture transition supervisor state at entry for
+                # downstream exit monitoring (coherence decay detection)
+                _entry_transition_score = float(current_data.get("transition_score", 0.0))
+                _entry_coherence = float(current_data.get("directional_coherence", 0.5))
+                _entry_vov = float(current_data.get("vol_of_vol", 0.5))
+                _entry_accel = float(current_data.get("composite_accel_norm", 0.0))
+                _entry_vol_expansion = float(current_data.get("vol_expansion", 0.0))
+                _entry_vpin = float(current_data.get("vpin", 0.5))
+                _entry_vpin_pct = float(current_data.get("vpin_percentile", 0.5))
+
+                signal = StrategySignal(
+                    strategy_id=self.strategy_id,
+                    symbol=symbol,
+                    signal_type=signal_type,
+                    strength=min(abs(momentum_strength) / self.config.momentum_threshold, 1.0),
+                    confidence=max(0.0, min(1.0, confidence)),
+                    expected_return=float(expected_return),
+                    target_weight=float(target_weight),
+                    quantity_type="PERCENTAGE",  # Explicitly mark as percentage
+                    timestamp=signal_timestamp,
+                    additional_data={
+                        'signal_reason': 'composite_entry',
+                        'entry_method': 'composite_z_pct',
+                        'composite_z': float(ads_ctx['composite_z']),
+                        'composite_pct': float(ads_ctx['composite_pct']),
+                        'ads_tau': float(tau),
+                        'ads_sms': float(sms_score),
+                        'ads_erar': float(ads_ctx['erar_val']),
+                        'ads_erar_diag': erar.get_diagnostics(),
+                        'ads_regime_vector': ads_ctx['ads_regime_vector'],
+                        'ads_fallbacks_used': ads_ctx['ads_fallbacks_used'],
+                        'ads_diag': ads_diag,
+                        'ads_fallbacks': {'ofi_source': ads_ctx.get("txn_flow_source", "proxy_volume_ratio"), 'bb_missing': True},
+                        'short_momentum': short_momentum,
+                        'medium_momentum': medium_momentum,
+                        'long_momentum': long_momentum,
+                        'adx': adx,
+                        'volume_ratio': volume_ratio,
+                        'txn_ratio': ads_ctx.get("txn_ratio"),
+                        'txn_ratio_cs_rank': ads_ctx.get("txn_ratio_cs_rank"),
+                        'avg_trade_size_ratio': ads_ctx.get("avg_trade_size_ratio"),
+                        'txn_volume_divergence': ads_ctx.get("txn_volume_divergence"),
+                        'txn_flow_source': ads_ctx.get("txn_flow_source"),
+                        'entry_price': current_data['close'] if isinstance(current_data, pd.Series) else current_data.get('close', 0),
+                        'bar_index': idx,
+                        # Transition Supervisor diagnostics (Phase 1)
+                        'transition_score': _entry_transition_score,
+                        'entry_coherence': _entry_coherence,
+                        'entry_vol_of_vol': _entry_vov,
+                        'entry_composite_accel': _entry_accel,
+                        'entry_vol_expansion': _entry_vol_expansion,
+                        # VPIN / Flow Toxicity diagnostics (v3.2)
+                        'entry_vpin': _entry_vpin,
+                        'entry_vpin_percentile': _entry_vpin_pct,
+                        # Microstructure Quality Score (v3.3)
+                        'entry_mqs': getattr(self, '_current_mqs', 1.0),
+                        'entry_mqs_penalty': getattr(self, '_current_mqs_penalty', 1.0),
+                        # Causal chain exit contract — top-level fields consumed
+                        # by multi_exit_engine for health computation.
+                        'entry_flow_confirmed': bool(
+                            getattr(self, '_last_confirmation', {}).get('has_flow_confirmation', False)
+                        ),
+                        'entry_alignment_score': float(
+                            getattr(self, '_last_entry_diag', {}).get('L1_alignment', {}).get('score', 0.0)
+                        ),
+                        'entry_short_momentum_col': f'momentum_{self.config.short_period}',
+                        'entry_medium_momentum_col': f'momentum_{self.config.medium_period}',
+                        # Structural Entry Diagnostics (3-level causal chain)
+                        'entry_diag': getattr(self, '_last_entry_diag', {}),
+                        'expected_return_bps': float(expected_return) * 10000.0,
+                    }
+                )
+                signal.additional_data.update(
+                    self._build_hybrid_metadata(
+                        signal_source="momentum",
+                        strength=signal.strength,
                         side=side,
-                        ads_r=ads_ctx.get("ads_regime_vector_obj")
+                        data_row=current_data if isinstance(current_data, pd.Series) else None,
+                        ads_r=ads_ctx.get("ads_regime_vector_obj"),
                     )
+                )
 
-                    # Capture transition supervisor state at entry for
-                    # downstream exit monitoring (coherence decay detection)
-                    _entry_transition_score = float(current_data.get("transition_score", 0.0))
-                    _entry_coherence = float(current_data.get("directional_coherence", 0.5))
-                    _entry_vov = float(current_data.get("vol_of_vol", 0.5))
-                    _entry_accel = float(current_data.get("composite_accel_norm", 0.0))
-                    _entry_vol_expansion = float(current_data.get("vol_expansion", 0.0))
-                    _entry_vpin = float(current_data.get("vpin", 0.5))
-                    _entry_vpin_pct = float(current_data.get("vpin_percentile", 0.5))
-
-                    signal = StrategySignal(
-                        strategy_id=self.strategy_id,
-                        symbol=symbol,
-                        signal_type=signal_type,
-                        strength=min(abs(momentum_strength) / self.config.momentum_threshold, 1.0),
-                        confidence=confidence,
-                        expected_return=float(expected_return),
-                        target_weight=float(target_weight),
-                        quantity_type="PERCENTAGE",  # Explicitly mark as percentage
-                        timestamp=signal_timestamp,
-                        additional_data={
-                            'signal_reason': 'composite_entry',
-                            'entry_method': 'composite_z_pct',
-                            'composite_z': float(ads_ctx['composite_z']),
-                            'composite_pct': float(ads_ctx['composite_pct']),
-                            'ads_tau': float(tau),
-                            'ads_sms': float(sms_score),
-                            'ads_erar': float(ads_ctx['erar_val']),
-                            'ads_erar_diag': erar.get_diagnostics(),
-                            'ads_regime_vector': ads_ctx['ads_regime_vector'],
-                            'ads_fallbacks_used': ads_ctx['ads_fallbacks_used'],
-                            'ads_diag': ads_diag,
-                            'ads_fallbacks': {'ofi_source': ads_ctx.get("txn_flow_source", "proxy_volume_ratio"), 'bb_missing': True},
-                            'short_momentum': short_momentum,
-                            'medium_momentum': medium_momentum,
-                            'long_momentum': long_momentum,
-                            'adx': adx,
-                            'volume_ratio': volume_ratio,
-                            'txn_ratio': ads_ctx.get("txn_ratio"),
-                            'txn_ratio_cs_rank': ads_ctx.get("txn_ratio_cs_rank"),
-                            'avg_trade_size_ratio': ads_ctx.get("avg_trade_size_ratio"),
-                            'txn_volume_divergence': ads_ctx.get("txn_volume_divergence"),
-                            'txn_flow_source': ads_ctx.get("txn_flow_source"),
-                            'entry_price': current_data['close'] if isinstance(current_data, pd.Series) else current_data.get('close', 0),
-                            'bar_index': idx,
-                            # Transition Supervisor diagnostics (Phase 1)
-                            'transition_score': _entry_transition_score,
-                            'entry_coherence': _entry_coherence,
-                            'entry_vol_of_vol': _entry_vov,
-                            'entry_composite_accel': _entry_accel,
-                            'entry_vol_expansion': _entry_vol_expansion,
-                            # VPIN / Flow Toxicity diagnostics (v3.2)
-                            'entry_vpin': _entry_vpin,
-                            'entry_vpin_percentile': _entry_vpin_pct,
-                            # Microstructure Quality Score (v3.3)
-                            'entry_mqs': getattr(self, '_current_mqs', 1.0),
-                            'entry_mqs_penalty': getattr(self, '_current_mqs_penalty', 1.0),
-                            # Causal chain exit contract — top-level fields consumed
-                            # by multi_exit_engine for health computation.
-                            'entry_flow_confirmed': bool(
-                                getattr(self, '_last_confirmation', {}).get('has_flow_confirmation', False)
-                            ),
-                            'entry_alignment_score': float(
-                                getattr(self, '_last_entry_diag', {}).get('L1_alignment', {}).get('score', 0.0)
-                            ),
-                            'entry_short_momentum_col': f'momentum_{self.config.short_period}',
-                            'entry_medium_momentum_col': f'momentum_{self.config.medium_period}',
-                            # Structural Entry Diagnostics (3-level causal chain)
-                            'entry_diag': getattr(self, '_last_entry_diag', {}),
-                            'expected_return_bps': float(expected_return) * 10000.0,
-                        }
-                    )
-                    signal.additional_data.update(
-                        self._build_hybrid_metadata(
-                            signal_source="momentum",
-                            strength=signal.strength,
-                            side=side,
-                            data_row=current_data if isinstance(current_data, pd.Series) else None,
-                            ads_r=ads_ctx.get("ads_regime_vector_obj"),
-                        )
-                    )
-
-                    return signal
+                return signal
 
             # No entry signal
             return None
@@ -1862,91 +1861,185 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
         if not alignment['long_aligned'] and not alignment['short_aligned']:
             return False, None
 
-        long_chain = self._evaluate_entry_causal_chain(
-            side='BUY',
-            symbol=symbol,
-            current_bar=current_bar,
-            enriched_data=enriched_data,
-            current_idx=current_idx,
-            alignment=alignment,
-            composite_z=float(composite_z),
-            composite_pct=float(composite_pct),
-            z_threshold=float(long_threshold),
-            pct_threshold=float(pct_threshold),
-            momentum_slope=float(momentum_slope),
-            inflection_data=inflection_data,
-        )
-
-        short_chain = self._evaluate_entry_causal_chain(
-            side='SELL',
-            symbol=symbol,
-            current_bar=current_bar,
-            enriched_data=enriched_data,
-            current_idx=current_idx,
-            alignment=alignment,
-            composite_z=float(composite_z),
-            composite_pct=float(composite_pct),
-            z_threshold=float(short_threshold),
-            pct_threshold=float(pct_threshold),
-            momentum_slope=float(momentum_slope),
-            inflection_data=inflection_data,
-        )
-
-        long_condition_met = bool(long_chain.get('passed', False))
-        short_condition_met = bool(short_chain.get('passed', False))
-
         selected_chain: Optional[Dict[str, Any]] = None
         side_label = None
-        if long_condition_met and short_condition_met:
-            selected_chain = long_chain if float(long_chain.get('overall_score', 0.0)) >= float(short_chain.get('overall_score', 0.0)) else short_chain
-            side_label = 'LONG' if selected_chain is long_chain else 'SHORT'
-            long_condition_met = side_label == 'LONG'
-            short_condition_met = side_label == 'SHORT'
-        elif long_condition_met:
-            selected_chain = long_chain
-            side_label = 'LONG'
-        elif short_condition_met:
-            selected_chain = short_chain
-            side_label = 'SHORT'
+        long_condition_met = False
+        short_condition_met = False
 
-        # Store entry diagnostics for signal metadata + tracing
-        if side_label and selected_chain is not None:
-            self._last_confirmation = selected_chain.get('confirmation', {})
-            self._last_entry_diag = {
-                'side': side_label,
-                'L1_alignment': {
-                    'short_m': round(alignment.get('short_m', 0), 6),
-                    'medium_m': round(alignment.get('medium_m', 0), 6),
-                    'long_m': round(alignment.get('long_m', 0), 6),
-                    'dominant': alignment.get('dominant_direction', 'mixed'),
-                    'score': round(alignment.get('alignment_score', 0), 4),
-                    'passed': bool(selected_chain.get('L1_passed', False)),
-                },
-                'L2_composite': {
-                    'composite_z': round(float(composite_z), 4),
-                    'composite_pct': round(float(composite_pct), 2),
-                    'z_threshold': round(float(long_threshold if long_condition_met else short_threshold), 4),
-                    'pct_threshold': round(float(pct_threshold), 2),
-                    'momentum_slope': round(float(momentum_slope), 6),
-                    'inflection_active': bool(
-                        inflection_data and inflection_data.get('inflection_detected')
-                    ),
-                    'score': round(float(selected_chain.get('trigger_score', 0.0)), 4),
-                    'passed': bool(selected_chain.get('L2_passed', False)),
-                },
-                'L3_confirmation': {
-                    **selected_chain.get('confirmation', {}),
-                    'score': round(float(selected_chain.get('confirmation_score', 0.0)), 4),
-                    'txn_quality_multiplier': round(float(selected_chain.get('txn_quality_multiplier', 1.0)), 4),
-                    'passed': bool(selected_chain.get('L3_passed', False)),
-                },
-                'causal_chain': {
-                    'overall_score': round(float(selected_chain.get('overall_score', 0.0)), 4),
-                    'entry_threshold': round(float(getattr(self.config, 'entry_score_threshold', 0.62)), 4),
-                    'passed': bool(selected_chain.get('passed', False)),
-                    'failure_reason': selected_chain.get('failure_reason'),
-                },
-            }
+        use_causal_entry_chain = bool(getattr(self.config, 'enable_causal_entry_chain', True))
+        if use_causal_entry_chain:
+            long_chain = self._evaluate_entry_causal_chain(
+                side='BUY',
+                symbol=symbol,
+                current_bar=current_bar,
+                enriched_data=enriched_data,
+                current_idx=current_idx,
+                alignment=alignment,
+                composite_z=float(composite_z),
+                composite_pct=float(composite_pct),
+                z_threshold=float(long_threshold),
+                pct_threshold=float(pct_threshold),
+                momentum_slope=float(momentum_slope),
+                inflection_data=inflection_data,
+            )
+
+            short_chain = self._evaluate_entry_causal_chain(
+                side='SELL',
+                symbol=symbol,
+                current_bar=current_bar,
+                enriched_data=enriched_data,
+                current_idx=current_idx,
+                alignment=alignment,
+                composite_z=float(composite_z),
+                composite_pct=float(composite_pct),
+                z_threshold=float(short_threshold),
+                pct_threshold=float(pct_threshold),
+                momentum_slope=float(momentum_slope),
+                inflection_data=inflection_data,
+            )
+
+            long_condition_met = bool(long_chain.get('passed', False))
+            short_condition_met = bool(short_chain.get('passed', False))
+
+            if long_condition_met and short_condition_met:
+                selected_chain = long_chain if float(long_chain.get('overall_score', 0.0)) >= float(short_chain.get('overall_score', 0.0)) else short_chain
+                side_label = 'LONG' if selected_chain is long_chain else 'SHORT'
+                long_condition_met = side_label == 'LONG'
+                short_condition_met = side_label == 'SHORT'
+            elif long_condition_met:
+                selected_chain = long_chain
+                side_label = 'LONG'
+            elif short_condition_met:
+                selected_chain = short_chain
+                side_label = 'SHORT'
+
+            # Store entry diagnostics for signal metadata + tracing
+            if side_label and selected_chain is not None:
+                self._last_confirmation = selected_chain.get('confirmation', {})
+                self._last_entry_diag = {
+                    'side': side_label,
+                    'entry_mode': 'causal_chain',
+                    'L1_alignment': {
+                        'short_m': round(alignment.get('short_m', 0), 6),
+                        'medium_m': round(alignment.get('medium_m', 0), 6),
+                        'long_m': round(alignment.get('long_m', 0), 6),
+                        'dominant': alignment.get('dominant_direction', 'mixed'),
+                        'score': round(alignment.get('alignment_score', 0), 4),
+                        'passed': bool(selected_chain.get('L1_passed', False)),
+                    },
+                    'L2_composite': {
+                        'composite_z': round(float(composite_z), 4),
+                        'composite_pct': round(float(composite_pct), 2),
+                        'z_threshold': round(float(long_threshold if long_condition_met else short_threshold), 4),
+                        'pct_threshold': round(float(pct_threshold), 2),
+                        'momentum_slope': round(float(momentum_slope), 6),
+                        'inflection_active': bool(
+                            inflection_data and inflection_data.get('inflection_detected')
+                        ),
+                        'score': round(float(selected_chain.get('trigger_score', 0.0)), 4),
+                        'passed': bool(selected_chain.get('L2_passed', False)),
+                    },
+                    'L3_confirmation': {
+                        **selected_chain.get('confirmation', {}),
+                        'score': round(float(selected_chain.get('confirmation_score', 0.0)), 4),
+                        'txn_quality_multiplier': round(float(selected_chain.get('txn_quality_multiplier', 1.0)), 4),
+                        'passed': bool(selected_chain.get('L3_passed', False)),
+                    },
+                    'causal_chain': {
+                        'overall_score': round(float(selected_chain.get('overall_score', 0.0)), 4),
+                        'entry_threshold': round(float(getattr(self.config, 'entry_score_threshold', 0.62)), 4),
+                        'passed': bool(selected_chain.get('passed', False)),
+                        'failure_reason': selected_chain.get('failure_reason'),
+                    },
+                }
+        else:
+            long_condition_met = bool(
+                alignment.get('long_aligned', False)
+                and composite_z > long_threshold
+                and composite_pct > pct_threshold
+                and momentum_slope > 0
+            )
+            short_condition_met = bool(
+                alignment.get('short_aligned', False)
+                and composite_z < -short_threshold
+                and composite_pct < (100 - pct_threshold)
+                and momentum_slope < 0
+            )
+
+            long_confirmation = {'confirmed': False, 'confirmations': []}
+            short_confirmation = {'confirmed': False, 'confirmations': []}
+            unconfirmed_mult = float(getattr(self.config, "unconfirmed_z_multiplier", 2.0))
+            stall_threshold = float(getattr(self.config, 'momentum_stall_threshold', 0.0003))
+
+            if long_condition_met:
+                long_confirmation = self._check_structural_confirmation(
+                    symbol, enriched_data, current_idx, 'BUY'
+                )
+                if not long_confirmation.get('confirmed', False):
+                    long_condition_met = composite_z > long_threshold * unconfirmed_mult
+                if long_condition_met and not long_confirmation.get('has_flow_confirmation', False):
+                    if momentum_slope < stall_threshold:
+                        long_condition_met = False
+
+            if short_condition_met:
+                short_confirmation = self._check_structural_confirmation(
+                    symbol, enriched_data, current_idx, 'SELL'
+                )
+                if not short_confirmation.get('confirmed', False):
+                    short_condition_met = composite_z < -short_threshold * unconfirmed_mult
+                if short_condition_met and not short_confirmation.get('has_flow_confirmation', False):
+                    if abs(momentum_slope) < stall_threshold:
+                        short_condition_met = False
+
+            if long_condition_met and short_condition_met:
+                long_margin = (composite_z - long_threshold)
+                short_margin = ((-composite_z) - short_threshold)
+                if long_margin >= short_margin:
+                    short_condition_met = False
+                else:
+                    long_condition_met = False
+
+            if long_condition_met:
+                side_label = 'LONG'
+                self._last_confirmation = long_confirmation
+            elif short_condition_met:
+                side_label = 'SHORT'
+                self._last_confirmation = short_confirmation
+
+            if side_label:
+                self._last_entry_diag = {
+                    'side': side_label,
+                    'entry_mode': 'heuristic_fallback',
+                    'L1_alignment': {
+                        'short_m': round(alignment.get('short_m', 0), 6),
+                        'medium_m': round(alignment.get('medium_m', 0), 6),
+                        'long_m': round(alignment.get('long_m', 0), 6),
+                        'dominant': alignment.get('dominant_direction', 'mixed'),
+                        'score': round(alignment.get('alignment_score', 0), 4),
+                        'passed': True,
+                    },
+                    'L2_composite': {
+                        'composite_z': round(float(composite_z), 4),
+                        'composite_pct': round(float(composite_pct), 2),
+                        'z_threshold': round(float(long_threshold if long_condition_met else short_threshold), 4),
+                        'pct_threshold': round(float(pct_threshold), 2),
+                        'momentum_slope': round(float(momentum_slope), 6),
+                        'inflection_active': bool(
+                            inflection_data and inflection_data.get('inflection_detected')
+                        ),
+                        'passed': True,
+                    },
+                    'L3_confirmation': {
+                        **self._last_confirmation,
+                        'passed': bool(self._last_confirmation.get('confirmed', False)),
+                    },
+                    'causal_chain': {
+                        'overall_score': round(float(alignment.get('alignment_score', 0.0)), 4),
+                        'entry_threshold': None,
+                        'passed': True,
+                        'failure_reason': None,
+                    },
+                }
 
         if long_condition_met:
             return True, SignalType.LONG_ENTRY
@@ -2036,17 +2129,25 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
         long_aligned = short_pos and medium_pos
         short_aligned = short_neg and medium_neg
 
-        # Alignment score: weighted directional agreement across horizons
+        # Alignment score: directional agreement × normalized magnitude.
+        # This preserves directional logic while separating weak drift from
+        # meaningful momentum at entry intent stage.
         signs = [float(np.sign(short_m)), float(np.sign(medium_m)), float(np.sign(long_m))]
         weights = [0.5, 0.3, 0.2]  # Short horizon matters most at 1-min
         weighted_sign = sum(s * w for s, w in zip(signs, weights))
-        alignment_score = abs(weighted_sign)
+        directional_score = abs(weighted_sign)
+
+        short_mag = float(np.clip(abs(short_m) / max(4.0 * noise_floor, 1e-9), 0.0, 1.0))
+        medium_mag = float(np.clip(abs(medium_m) / max(3.0 * noise_floor, 1e-9), 0.0, 1.0))
+        long_mag = float(np.clip(abs(long_m) / max(2.0 * noise_floor, 1e-9), 0.0, 1.0))
+        magnitude_score = (0.5 * short_mag) + (0.3 * medium_mag) + (0.2 * long_mag)
+        alignment_score = directional_score * magnitude_score
 
         # Conviction bonus if long horizon confirms
         if long_aligned and long_pos:
-            alignment_score = min(alignment_score * 1.2, 1.0)
+            alignment_score = min(alignment_score * 1.10, 1.0)
         elif short_aligned and long_neg:
-            alignment_score = min(alignment_score * 1.2, 1.0)
+            alignment_score = min(alignment_score * 1.10, 1.0)
 
         if long_aligned:
             dominant = 'long'
@@ -2059,6 +2160,8 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
         result['short_aligned'] = short_aligned
         result['alignment_score'] = float(alignment_score)
         result['dominant_direction'] = dominant
+        result['directional_score'] = float(directional_score)
+        result['magnitude_score'] = float(magnitude_score)
         return result
 
     def _check_structural_confirmation(

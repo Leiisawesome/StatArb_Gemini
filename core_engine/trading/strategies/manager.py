@@ -1389,10 +1389,6 @@ class StrategyManager(ISystemComponent, IRegimeAware):
 
     async def _should_submit_signal(self, signal: TradingSignal) -> bool:
         """Check if signal should be submitted for trading"""
-        # Basic checks
-        if signal.confidence < self.config.min_confidence_threshold:
-            return False
-
         # Check strategy allocation limits
         allocation = self.strategy_allocations.get(signal.strategy_name)
         if not allocation or not allocation.active:
@@ -2066,28 +2062,15 @@ class StrategyManager(ISystemComponent, IRegimeAware):
             final_confidence = original_agg_confidence * regime_adjustment_factor
             logger.info(f"   📊 Strong consensus detected ({signal_count} signals, {original_agg_confidence:.4f} conf) - using gentle regime adjustment")
             logger.info(f"   📊 Regime adjustment: {original_agg_confidence:.4f} * {regime_adjustment_factor:.4f} = {final_confidence:.4f}")
-        elif original_agg_confidence >= self.config.min_confidence_threshold:
-            # Original aggregated confidence was good - apply regime weight but preserve threshold
-            weighted_confidence = original_agg_confidence * regime_weight
-            # For good consensus, ensure it meets threshold (many signals agreeing is significant)
-            final_confidence = max(weighted_confidence, self.config.min_confidence_threshold)
-            agg_signal.confidence = final_confidence
-            logger.info(f"   📊 Regime adjustment: {original_agg_confidence:.4f} → {weighted_confidence:.4f} → {final_confidence:.4f} (preserved threshold)")
         else:
-            # Original aggregated confidence was already low - apply regime weight normally
+            # Apply regime weight normally
             final_confidence = original_agg_confidence * regime_weight
             logger.info(f"   📊 Regime adjustment: {original_agg_confidence:.4f} * {regime_weight:.4f} = {final_confidence:.4f}")
 
-        agg_signal.confidence = final_confidence
+        agg_signal.confidence = max(0.0, min(1.0, final_confidence))
 
         logger.info(f"   📊 Final aggregated signal confidence: {agg_signal.confidence:.4f}")
-        logger.info(f"   📊 Threshold: {self.config.min_confidence_threshold:.4f}")
-
-        # Check if aggregated signal meets threshold
-        if agg_signal.confidence < self.config.min_confidence_threshold:
-            logger.warning(f"   ❌ Aggregated signal filtered: confidence {agg_signal.confidence:.4f} < threshold {self.config.min_confidence_threshold:.4f}")
-        else:
-            logger.info(f"   ✅ Aggregated signal meets threshold")
+        logger.info("   ✅ Aggregated confidence computed (risk layer decides hard confidence eligibility)")
 
         return agg_signal
 

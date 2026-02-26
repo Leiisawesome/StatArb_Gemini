@@ -4528,13 +4528,13 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
             er = float(expected_return)
             if math.isfinite(er):
                 if abs(er) <= 1.0:
-                    er_bps = abs(er) * 10000.0
-                    if er_bps >= min_expected_return_bps_hint:
+                    er_bps = er * 10000.0
+                    if abs(er_bps) >= min_expected_return_bps_hint:
                         expected_return_bps = er_bps
                         expected_return_source = 'fractional_return'
                 else:
-                    er_bps = abs(er)
-                    if er_bps >= min_expected_return_bps_hint:
+                    er_bps = er
+                    if abs(er_bps) >= min_expected_return_bps_hint:
                         expected_return_bps = er_bps
                         expected_return_source = 'bps_hint'
 
@@ -4542,7 +4542,7 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
         max_expected_edge_bps = float(getattr(self.config, 'max_expected_edge_bps', 120.0))
 
         if expected_return_bps is not None:
-            expected_return_bps = max(0.0, min(max_expected_edge_bps, expected_return_bps))
+            expected_return_bps = max(-max_expected_edge_bps, min(max_expected_edge_bps, expected_return_bps))
             expected_edge_bps = (
                 strength_weight * strength_edge_bps
                 + expected_return_weight * expected_return_bps
@@ -4552,7 +4552,16 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
             expected_edge_bps = strength_edge_bps
             expected_edge_model = 'strength_only'
 
-        expected_edge_bps = max(min_expected_edge_bps, min(max_expected_edge_bps, expected_edge_bps))
+        if expected_return_bps is not None and expected_return_bps < 0:
+            # Negative expected-return hints must never inflate expected edge.
+            expected_edge_bps = min(expected_edge_bps, strength_edge_bps)
+
+        min_edge_floor = min_expected_edge_bps
+        if expected_return_bps is not None and expected_return_bps < 0:
+            # Preserve penalty semantics: do not floor negative-hint edges upward.
+            min_edge_floor = 0.0
+
+        expected_edge_bps = max(min_edge_floor, min(max_expected_edge_bps, expected_edge_bps))
 
         cost_breakdown['expected_edge_model'] = expected_edge_model
         cost_breakdown['strength_edge_bps'] = strength_edge_bps
