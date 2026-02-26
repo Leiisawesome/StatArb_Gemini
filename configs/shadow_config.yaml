@@ -1,0 +1,32 @@
+# Shadow Trading Configuration — v1.8-SHADOW-SHOCK
+#
+# This file is loaded by run_shadow.py. All API keys should be set via
+# environment variables (POLYGON_API_KEY, IBKR_HOST, etc.) rather than
+# hardcoded here.
+
+polygon:
+  api_key: "${POLYGON_API_KEY}"
+  subscription_tier: "advanced"
+
+ibkr:
+  host: "${IBKR_HOST:-127.0.0.1}"
+  port: 4002          # 4002 = Gateway paper, 7497 = TWS paper
+  client_id: 10
+
+clickhouse:
+  url: "http://localhost:8123"
+  db: "shadow_trading"
+
+portfolio:
+  value: 200000.0
+
+paths:
+  state_log: "data/shadow_state.json"
+  baselines: "results/shadow_backtest/baselines.json"
+  daily_log: "results/shadow_daily/"
+
+market_hours:
+  start: "09:45"
+  close: "15:45"
+  shutdown: "16:00"
+  timezone: "America/New_York"

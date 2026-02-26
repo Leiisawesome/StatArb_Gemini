@@ -41,7 +41,10 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
-from massive import RESTClient
+try:
+    from massive import RESTClient
+except ImportError:
+    RESTClient = None
 
 logger = logging.getLogger(__name__)
 

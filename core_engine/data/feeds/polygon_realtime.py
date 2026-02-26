@@ -1215,7 +1215,12 @@ class PolygonRealtimeFeedAdapter(DataFeedAdapter):
         self.logger.info(f"Reconnecting in {delay:.1f}s (attempt {self._reconnect_count})")
         await asyncio.sleep(delay)
 
-        # Reconnect
+        # Invalidate current receive task so connect() starts a fresh one.
+        # When called from within _receive_loop_aiohttp, the current task is
+        # about to break/end; clearing the reference lets _start_task_once
+        # create a replacement.
+        self._receive_task = None
+
         if await self.connect():
             # Resubscribe to all active subscriptions
             all_symbols = set()
