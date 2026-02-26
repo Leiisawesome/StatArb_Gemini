@@ -327,3 +327,54 @@ class TestReferentialIntegrity:
         unexpected = symbols - {"TSLA"}
         if unexpected:
             print(f"\nWARNING: Unexpected symbols in trace: {unexpected}")
+
+
+# ---------------------------------------------------------------------------
+# Test: CP2 telemetry integrity (entry diagnostics observability)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.integration
+@pytest.mark.requires_data
+class TestCP2TelemetryIntegrity:
+    """Verify CP2 records carry non-null entry diagnostics for MOM smoke runs."""
+
+    def _cp2_records(self, trace_records):
+        return [r for r in trace_records if r.get("checkpoint") == CP2_SIGNAL_GEN]
+
+    def test_cp2_output_has_entry_telemetry(self, trace_records):
+        """Each CP2 record should expose entry_diag, entry_mode, expected_return_bps in output_data."""
+        cp2_records = self._cp2_records(trace_records)
+        assert cp2_records, "No CP2 records found"
+
+        for i, rec in enumerate(cp2_records):
+            out = rec.get("output_data", {}) or {}
+            assert out.get("entry_diag") not in (None, {}), f"CP2[{i}] missing entry_diag"
+            assert out.get("entry_mode") not in (None, ""), f"CP2[{i}] missing entry_mode"
+            assert out.get("expected_return_bps") is not None, f"CP2[{i}] missing expected_return_bps"
+
+    def test_cp2_entry_diag_has_l1_score(self, trace_records):
+        """entry_diag must include a numeric L1 alignment score for causal-chain explainability."""
+        cp2_records = self._cp2_records(trace_records)
+        assert cp2_records, "No CP2 records found"
+
+        for i, rec in enumerate(cp2_records):
+            out = rec.get("output_data", {}) or {}
+            entry_diag = out.get("entry_diag") or {}
+            l1_score = (entry_diag.get("L1_alignment") or {}).get("score")
+            assert isinstance(l1_score, (int, float)), f"CP2[{i}] missing numeric L1 score"
+
+    def test_cp2_entry_mode_is_expected(self, trace_records):
+        """entry_mode should be one of the known momentum entry modes."""
+        cp2_records = self._cp2_records(trace_records)
+        assert cp2_records, "No CP2 records found"
+
+        allowed_modes = {"causal_chain", "heuristic_fallback"}
+        observed_modes = {
+            (rec.get("output_data", {}) or {}).get("entry_mode")
+            for rec in cp2_records
+            if (rec.get("output_data", {}) or {}).get("entry_mode")
+        }
+        assert observed_modes, "No CP2 entry_mode values observed"
+        assert observed_modes.issubset(allowed_modes), (
+            f"Unexpected CP2 entry_mode values: {sorted(observed_modes - allowed_modes)}"
+        )
