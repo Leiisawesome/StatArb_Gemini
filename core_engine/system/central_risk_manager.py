@@ -1703,8 +1703,7 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
                         if signal_strength is None:
                             signal_strength = sig_meta.get("strength", None)
                         if signal_strength is None:
-                            # Sometimes strategies express size as weight; treat as strength proxy
-                            signal_strength = sig_meta.get("target_weight", sig_meta.get("position_size", request.confidence))
+                            signal_strength = request.confidence
                         signal_strength = float(signal_strength) if signal_strength is not None else float(request.confidence)
                         signal_strength = max(0.0, min(1.0, signal_strength))
 
@@ -3785,9 +3784,14 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
                     'exit_bypass': True,
                 }
             else:
+                cost_signal_strength = float(signal.get('signal_strength', signal.get('confidence', 0.5)))
+                cost_signal_strength = max(0.0, min(1.0, cost_signal_strength))
+                cost_expected_return = signal.get('expected_return', None)
                 gate6 = self._gate6_cost_awareness(
                     symbol, side, candidate_qty, current_price,
-                    signal.get('signal_strength', 0.5), result.get('estimated_fill_price', current_price)
+                    cost_signal_strength,
+                    result.get('estimated_fill_price', current_price),
+                    cost_expected_return,
                 )
             _record_gate('G6_cost', gate6, gate6.get('adjusted_quantity', candidate_qty), _t0)
             result['gates']['G6_cost'] = gate6
@@ -4281,7 +4285,7 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
                 sig_meta = signal.get('original_signal_metadata', {}) or {}
                 ss = sig_meta.get('signal_strength', sig_meta.get('strength', None))
                 if ss is None:
-                    ss = sig_meta.get('target_weight', sig_meta.get('position_size', confidence))
+                    ss = confidence
                 ss = max(0.0, min(1.0, float(ss) if ss is not None else float(confidence)))
 
                 liquidity_factor = float(sig_meta.get('liquidity_factor', 1.0))
@@ -4394,6 +4398,7 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
         current_price: float,
         signal_strength: float,
         estimated_fill_price: float,
+        expected_return: Optional[float] = None,
     ) -> Dict[str, Any]:
         """
         Gate 6: Cost-awareness gate aligned with HistoricalExecutionSimulator.
@@ -4509,7 +4514,54 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
         # EXPECTED EDGE vs COST
         # ================================================================
         base_edge_bps = float(getattr(self.config, 'base_edge_bps', 20.0))
-        expected_edge_bps = float(signal_strength) * base_edge_bps
+        strength_weight = float(getattr(self.config, 'edge_strength_weight', 0.6))
+        expected_return_weight = float(getattr(self.config, 'edge_expected_return_weight', 0.4))
+        total_weight = max(1e-9, strength_weight + expected_return_weight)
+        strength_weight /= total_weight
+        expected_return_weight /= total_weight
+
+        strength_edge_bps = float(signal_strength) * base_edge_bps
+        expected_return_bps = None
+        expected_return_source = 'none'
+        min_expected_return_bps_hint = float(getattr(self.config, 'min_expected_return_bps_hint', 5.0))
+        if isinstance(expected_return, (int, float)):
+            er = float(expected_return)
+            if math.isfinite(er):
+                if abs(er) <= 1.0:
+                    er_bps = abs(er) * 10000.0
+                    if er_bps >= min_expected_return_bps_hint:
+                        expected_return_bps = er_bps
+                        expected_return_source = 'fractional_return'
+                else:
+                    er_bps = abs(er)
+                    if er_bps >= min_expected_return_bps_hint:
+                        expected_return_bps = er_bps
+                        expected_return_source = 'bps_hint'
+
+        min_expected_edge_bps = float(getattr(self.config, 'min_expected_edge_bps', 5.0))
+        max_expected_edge_bps = float(getattr(self.config, 'max_expected_edge_bps', 120.0))
+
+        if expected_return_bps is not None:
+            expected_return_bps = max(0.0, min(max_expected_edge_bps, expected_return_bps))
+            expected_edge_bps = (
+                strength_weight * strength_edge_bps
+                + expected_return_weight * expected_return_bps
+            )
+            expected_edge_model = 'blended'
+        else:
+            expected_edge_bps = strength_edge_bps
+            expected_edge_model = 'strength_only'
+
+        expected_edge_bps = max(min_expected_edge_bps, min(max_expected_edge_bps, expected_edge_bps))
+
+        cost_breakdown['expected_edge_model'] = expected_edge_model
+        cost_breakdown['strength_edge_bps'] = strength_edge_bps
+        cost_breakdown['expected_return_bps'] = expected_return_bps
+        cost_breakdown['expected_return_source'] = expected_return_source
+        cost_breakdown['min_expected_return_bps_hint'] = min_expected_return_bps_hint
+        cost_breakdown['edge_strength_weight'] = strength_weight
+        cost_breakdown['edge_expected_return_weight'] = expected_return_weight
+        cost_breakdown['expected_edge_bps'] = expected_edge_bps
 
         cost_edge_ratio = round_trip_cost_bps / expected_edge_bps if expected_edge_bps > 0 else float('inf')
         max_cost_edge_ratio = float(getattr(self.config, 'max_cost_edge_ratio', 0.80))

@@ -561,6 +561,44 @@ class MomentumConfig(BaseStrategyConfig):
     Shorter than SMS stale-kill (50) because transitions are ephemeral.
     Default: 15"""
 
+    # --- Causal Entry Chain (priority-based entry timing) ---
+    enable_causal_entry_chain: bool = True
+    """Enable strict causal-chain scoring for entry timing. Default: True"""
+
+    min_alignment_score: float = 0.55
+    """Minimum L1 alignment score required. Default: 0.55"""
+
+    min_trigger_score: float = 0.55
+    """Minimum L2 trigger score required. Default: 0.55"""
+
+    min_confirmation_score: float = 0.55
+    """Minimum L3 confirmation score required. Default: 0.55"""
+
+    entry_score_threshold: float = 0.62
+    """Minimum overall causal-chain score required for entry. Default: 0.62"""
+
+    trigger_slope_ref: float = 0.0025
+    """Reference slope used to normalize trigger momentum slope score. Default: 0.0025"""
+
+    trigger_inflection_bonus: float = 0.10
+    """Bonus added to L2 trigger score on matching inflection. Default: 0.10"""
+
+    # --- Expected return estimation from causal chain ---
+    expected_return_base_bps: float = 12.0
+    """Base expected return (bps) for valid entries. Default: 12.0"""
+
+    expected_return_max_bps: float = 80.0
+    """Maximum expected return (bps) cap. Default: 80.0"""
+
+    expected_return_alignment_weight: float = 0.20
+    """Weight of L1 alignment in expected return estimate. Default: 0.20"""
+
+    expected_return_trigger_weight: float = 0.45
+    """Weight of L2 trigger in expected return estimate. Default: 0.45"""
+
+    expected_return_confirmation_weight: float = 0.35
+    """Weight of L3 confirmation in expected return estimate. Default: 0.35"""
+
     def __post_init__(self):
         """Validate momentum configuration parameters"""
         if self.lookback_period <= 0:
@@ -668,6 +706,29 @@ class MomentumConfig(BaseStrategyConfig):
             raise ValueError(f"health_tp_trigger must be (0, 1], got {self.health_tp_trigger}")
         if self.transition_pending_stale_bars <= 0:
             raise ValueError(f"transition_pending_stale_bars must be > 0, got {self.transition_pending_stale_bars}")
+        if not 0.0 <= self.min_alignment_score <= 1.0:
+            raise ValueError(f"min_alignment_score must be [0, 1], got {self.min_alignment_score}")
+        if not 0.0 <= self.min_trigger_score <= 1.0:
+            raise ValueError(f"min_trigger_score must be [0, 1], got {self.min_trigger_score}")
+        if not 0.0 <= self.min_confirmation_score <= 1.0:
+            raise ValueError(f"min_confirmation_score must be [0, 1], got {self.min_confirmation_score}")
+        if not 0.0 <= self.entry_score_threshold <= 1.0:
+            raise ValueError(f"entry_score_threshold must be [0, 1], got {self.entry_score_threshold}")
+        if self.trigger_slope_ref <= 0:
+            raise ValueError(f"trigger_slope_ref must be > 0, got {self.trigger_slope_ref}")
+        if self.trigger_inflection_bonus < 0:
+            raise ValueError(f"trigger_inflection_bonus must be >= 0, got {self.trigger_inflection_bonus}")
+        if self.expected_return_base_bps < 0:
+            raise ValueError(f"expected_return_base_bps must be >= 0, got {self.expected_return_base_bps}")
+        if self.expected_return_max_bps <= 0:
+            raise ValueError(f"expected_return_max_bps must be > 0, got {self.expected_return_max_bps}")
+        if self.expected_return_max_bps < self.expected_return_base_bps:
+            raise ValueError(
+                f"expected_return_max_bps must be >= expected_return_base_bps, "
+                f"got {self.expected_return_max_bps} < {self.expected_return_base_bps}"
+            )
+        if self.expected_return_alignment_weight < 0 or self.expected_return_trigger_weight < 0 or self.expected_return_confirmation_weight < 0:
+            raise ValueError("expected_return_*_weight values must be >= 0")
 
 @dataclass
 class MeanReversionConfig(BaseStrategyConfig):

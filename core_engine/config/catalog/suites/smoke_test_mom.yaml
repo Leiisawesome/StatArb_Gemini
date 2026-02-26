@@ -153,6 +153,22 @@ papertest:
         base_position_pct: 0.20
         max_position_pct: 0.20
 
+        # Causal-chain entry prioritization (L1→L2→L3)
+        enable_causal_entry_chain: true
+        min_alignment_score: 0.55
+        min_trigger_score: 0.55
+        min_confirmation_score: 0.55
+        entry_score_threshold: 0.62
+        trigger_slope_ref: 0.0025
+        trigger_inflection_bonus: 0.10
+
+        # Strategy expected return estimate (for Gate-6 blended edge)
+        expected_return_base_bps: 12.0
+        expected_return_max_bps: 80.0
+        expected_return_alignment_weight: 0.20
+        expected_return_trigger_weight: 0.45
+        expected_return_confirmation_weight: 0.35
+
   risk:
     allow_shorts: true
     min_signal_confidence: 0.40

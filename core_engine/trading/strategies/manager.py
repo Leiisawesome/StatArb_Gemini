@@ -1526,16 +1526,10 @@ class StrategyManager(ISystemComponent, IRegimeAware):
         """Enhanced signal filtering with regime and position awareness"""
         filtered = []
 
-        logger.info(f"🔍 Filtering {len(signals)} signals (min_confidence: {self.config.min_confidence_threshold})")
+        logger.info(f"🔍 Filtering {len(signals)} signals")
 
         for signal in signals:
             filter_reason = None
-
-            # Basic confidence threshold
-            if signal.confidence < self.config.min_confidence_threshold:
-                filter_reason = f"confidence {signal.confidence:.4f} < {self.config.min_confidence_threshold}"
-                logger.warning(f"   ❌ Filtered {signal.strategy_name} {signal.symbol} {signal.signal_type}: {filter_reason}")
-                continue
 
             # Regime appropriateness check
             if not self._is_strategy_regime_supported(signal.strategy_type, regime_info):
@@ -1827,39 +1821,20 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                 logger.info(f"   Original confidence: {original_confidence:.4f}")
                 logger.info(f"   Regime weight: {strategy_weight:.4f}")
 
-                # Apply regime weighting but preserve signals that meet threshold
-                # Regime weighting should adjust for regime favorability, not eliminate good signals
-                if original_confidence >= self.config.min_confidence_threshold:
-                    # Original confidence was good - apply regime weight but ensure it stays above threshold
-                    weighted_confidence = original_confidence * strategy_weight
-                    # If regime weight reduces confidence, cap reduction but preserve threshold
-                    # If weighted confidence is below threshold, use threshold as minimum
-                    final_confidence = max(weighted_confidence, self.config.min_confidence_threshold)
-                    signal.confidence = final_confidence
-                    logger.info(f"   Regime adjustment applied: {original_confidence:.4f} → {weighted_confidence:.4f} → {final_confidence:.4f} (preserved above threshold)")
-                else:
-                    # Original confidence was low - apply regime weight normally
-                    signal.confidence = original_confidence * strategy_weight
+                weighted_confidence = original_confidence * strategy_weight
+                signal.confidence = max(0.0, min(1.0, weighted_confidence))
+                logger.info(f"   Regime adjustment applied: {original_confidence:.4f} → {weighted_confidence:.4f} → {signal.confidence:.4f}")
 
                 logger.info(f"   Final confidence: {signal.confidence:.4f}")
-                logger.info(f"   Threshold: {self.config.min_confidence_threshold:.4f}")
-
-                if signal.confidence >= self.config.min_confidence_threshold:
-                    aggregated.append(signal)
-                    logger.info(f"   ✅ Signal added to aggregated list")
-                else:
-                    logger.warning(f"   ❌ Signal filtered: confidence {signal.confidence:.4f} < threshold {self.config.min_confidence_threshold:.4f}")
+                aggregated.append(signal)
+                logger.info(f"   ✅ Signal added to aggregated list")
             else:
                 # Multiple signals - intelligent aggregation
                 logger.info(f"📊 Aggregating {len(symbol_signal_list)} signals for {symbol}")
                 agg_signal = await self._aggregate_symbol_signals_enhanced(symbol_signal_list, regime_weights)
                 if agg_signal:
-                    # Check if aggregated signal meets threshold
-                    if agg_signal.confidence >= self.config.min_confidence_threshold:
-                        aggregated.append(agg_signal)
-                        logger.info(f"   ✅ Aggregated signal added: confidence {agg_signal.confidence:.4f} >= threshold {self.config.min_confidence_threshold:.4f}")
-                    else:
-                        logger.warning(f"   ❌ Aggregated signal filtered: confidence {agg_signal.confidence:.4f} < threshold {self.config.min_confidence_threshold:.4f}")
+                    aggregated.append(agg_signal)
+                    logger.info(f"   ✅ Aggregated signal added: confidence {agg_signal.confidence:.4f}")
                 else:
                     logger.warning(f"   ❌ Aggregation returned None for {len(symbol_signal_list)} signals")
 

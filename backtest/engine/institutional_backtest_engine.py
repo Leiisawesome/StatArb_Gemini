@@ -62,12 +62,18 @@ def _signal_to_dict(s) -> dict:
     Canonical field name is ``signal_type`` (not ``signal``).
     Downstream consumers already handle both, but we standardise here.
     """
+    strength_raw = getattr(s, 'signal_strength', getattr(s, 'strength', 0.5))
+    if hasattr(strength_raw, 'value'):
+        strength_raw = strength_raw.value
+
     return {
         'strategy_id': getattr(s, 'strategy_id', 'backtest_strategy'),
         'symbol': s.symbol,
         'signal_type': s.signal_type.value if hasattr(s.signal_type, 'value') else s.signal_type,
         'confidence': s.confidence,
+        'signal_strength': strength_raw,
         'strength': getattr(s, 'strength', 0.5),
+        'expected_return': getattr(s, 'expected_return', None),
         'timestamp': getattr(s, 'timestamp', None),
         'target_weight': getattr(s, 'target_weight', None),
         'quantity_type': getattr(s, 'quantity_type', 'ABSOLUTE'),
@@ -2755,6 +2761,19 @@ class InstitutionalBacktestEngine(InitializationMixin, SessionManagementMixin, R
 
                 confidence = signal_row.get('confidence', 0.5)
                 signal_strength = signal_row.get('signal_strength', signal_row.get('strength', 0))
+                expected_return = signal_row.get('expected_return', None)
+                if isinstance(expected_return, (int, float)) and not math.isfinite(expected_return):
+                    expected_return = None
+
+                if hasattr(signal_strength, 'value'):
+                    signal_strength = signal_strength.value
+                try:
+                    signal_strength = float(signal_strength)
+                except Exception:
+                    signal_strength = float(confidence) if isinstance(confidence, (int, float)) else 0.5
+                if not math.isfinite(signal_strength):
+                    signal_strength = float(confidence) if isinstance(confidence, (int, float)) else 0.5
+                signal_strength = max(0.0, min(1.0, signal_strength))
 
                 # Guard against NaN/Inf confidence (would bypass risk gates)
                 if not isinstance(confidence, (int, float)) or not math.isfinite(confidence):
@@ -2779,10 +2798,7 @@ class InstitutionalBacktestEngine(InitializationMixin, SessionManagementMixin, R
                                 'close_long', 'close_short', 'cover', 'flatten']
                 actionable_signals = entry_signals + exit_signals
 
-                # Use config's min_confidence_threshold (default 0.6 for backward compatibility)
-                min_confidence = getattr(self.config, 'min_confidence_threshold', 0.6)
-                
-                if signal_type_lower in actionable_signals and confidence >= min_confidence:
+                if signal_type_lower in actionable_signals:
 
                     # Get current position from CentralRiskManager (Rule 4 SSOT)
                     current_position = 0.0
@@ -3039,6 +3055,7 @@ class InstitutionalBacktestEngine(InitializationMixin, SessionManagementMixin, R
                             'requested_quantity': quantity,
                             'signal_strength': signal_strength,
                             'confidence': confidence,
+                            'expected_return': expected_return,
                             'strategy_id': signal_row.get('strategy_id', 'backtest_strategy'),
                             'signal_timestamp': timestamp,
                             'arrival_price': current_price,
@@ -3051,6 +3068,7 @@ class InstitutionalBacktestEngine(InitializationMixin, SessionManagementMixin, R
                             'available_cash': _signal_available_cash,
                             'original_signal_metadata': {
                                 'strength': signal_strength,
+                                'expected_return': expected_return,
                                 'target_weight': target_weight,
                                 'signal_type': signal_type,
                             },

@@ -509,12 +509,16 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                 side=side,
                 ads_r=ads_ctx.get("ads_regime_vector_obj")
             )
+            base_bps = float(getattr(self.config, 'expected_return_base_bps', 12.0))
+            max_bps = float(getattr(self.config, 'expected_return_max_bps', 80.0))
+            pending_edge_bps = base_bps + (max_bps - base_bps) * float(np.clip(ctx.raw_signal_strength, 0.0, 1.0)) * 0.75
             return StrategySignal(
                 strategy_id=self.strategy_id,
                 symbol=symbol,
                 signal_type=signal_type,
                 strength=min(max(float(ctx.raw_signal_strength), 0.0), 1.0),
                 confidence=min(0.95, max(0.55, 0.50 + sms_score * 0.45)),
+                expected_return=float(pending_edge_bps / 10000.0),
                 target_weight=target_weight_hint,
                 quantity_type="PERCENTAGE",
                 timestamp=ts,
@@ -792,6 +796,7 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                         signal_type=SignalType.LONG_ENTRY,
                         strength=1.0,
                         confidence=confidence,
+                        expected_return=float(getattr(self.config, 'expected_return_base_bps', 12.0) / 10000.0),
                         timestamp=signal_timestamp,
                         additional_data={
                             'signal_reason': reason,
@@ -1031,6 +1036,8 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                 confidence = confidence * mqs_penalty
 
                 if confidence > 0.4:  # Minimum confidence threshold (lowered for composite signals)
+                    chain_diag = getattr(self, '_last_entry_diag', {})
+                    expected_return = self._estimate_expected_return_from_chain(chain_diag)
                     base_tw = float(getattr(self.config, "base_position_pct", 0.0) or 0.0)
                     target_weight = self._calculate_regime_adaptive_weight(
                         symbol=symbol,
@@ -1055,6 +1062,7 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                         signal_type=signal_type,
                         strength=min(abs(momentum_strength) / self.config.momentum_threshold, 1.0),
                         confidence=confidence,
+                        expected_return=float(expected_return),
                         target_weight=float(target_weight),
                         quantity_type="PERCENTAGE",  # Explicitly mark as percentage
                         timestamp=signal_timestamp,
@@ -1107,6 +1115,7 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                             'entry_medium_momentum_col': f'momentum_{self.config.medium_period}',
                             # Structural Entry Diagnostics (3-level causal chain)
                             'entry_diag': getattr(self, '_last_entry_diag', {}),
+                            'expected_return_bps': float(expected_return) * 10000.0,
                         }
                     )
                     signal.additional_data.update(
@@ -1853,103 +1862,56 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
         if not alignment['long_aligned'] and not alignment['short_aligned']:
             return False, None
 
-        # LONG entry: Composite threshold + structure + momentum
-        long_condition_met = (
-            composite_z > long_threshold and
-            composite_pct > pct_threshold and
-            momentum_slope > 0  # NEW: Momentum must be trending up
+        long_chain = self._evaluate_entry_causal_chain(
+            side='BUY',
+            symbol=symbol,
+            current_bar=current_bar,
+            enriched_data=enriched_data,
+            current_idx=current_idx,
+            alignment=alignment,
+            composite_z=float(composite_z),
+            composite_pct=float(composite_pct),
+            z_threshold=float(long_threshold),
+            pct_threshold=float(pct_threshold),
+            momentum_slope=float(momentum_slope),
+            inflection_data=inflection_data,
         )
 
-        # Inflection boost: lower thresholds if a momentum inflection is detected.
-        # Now functional because thresholds have meaningful floors (> 0).
-        if inflection_data and inflection_data.get('inflection_detected') and inflection_data.get('inflection_type') == 'bullish':
-            long_condition_met = (
-                composite_z > long_threshold * 0.8 and
-                composite_pct > pct_threshold * 0.9 and
-                inflection_data.get('momentum_accel', 0) > 0
-            )
-
-        # ================================================================
-        # LEVEL 3: STRUCTURAL CONFIRMATION (LONG)
-        # At least one structural signal must confirm the setup:
-        # price structure, volume expansion, or volatility breakout.
-        # Without confirmation, require a much stronger z-score.
-        # ================================================================
-        if long_condition_met:
-            confirmation = self._check_structural_confirmation(
-                symbol, enriched_data, current_idx, 'BUY'
-            )
-            self._last_confirmation = confirmation
-            if not confirmation['confirmed']:
-                unconfirmed_mult = float(getattr(self.config, "unconfirmed_z_multiplier", 2.0))
-                long_condition_met = composite_z > long_threshold * unconfirmed_mult
-
-            # MOMENTUM STALL GUARD: When flow is absent and momentum slope
-            # is near-zero, the entry is a late-entry trap — backward-looking
-            # price structure from the previous wave without current
-            # participant commitment.  Block entry.
-            if long_condition_met and not confirmation.get('has_flow_confirmation', False):
-                stall_threshold = float(getattr(self.config, 'momentum_stall_threshold', 0.0003))
-                if momentum_slope < stall_threshold:
-                    long_condition_met = False
-
-        # SHORT entry: Composite threshold + structure + momentum
-        short_condition_met = (
-            composite_z < -short_threshold and
-            composite_pct < (100 - pct_threshold) and
-            momentum_slope < 0
+        short_chain = self._evaluate_entry_causal_chain(
+            side='SELL',
+            symbol=symbol,
+            current_bar=current_bar,
+            enriched_data=enriched_data,
+            current_idx=current_idx,
+            alignment=alignment,
+            composite_z=float(composite_z),
+            composite_pct=float(composite_pct),
+            z_threshold=float(short_threshold),
+            pct_threshold=float(pct_threshold),
+            momentum_slope=float(momentum_slope),
+            inflection_data=inflection_data,
         )
 
-        # Inflection boost for shorts
-        if inflection_data and inflection_data.get('inflection_detected') and inflection_data.get('inflection_type') == 'bearish':
-            short_condition_met = (
-                composite_z < -short_threshold * 0.8 and
-                composite_pct < (100 - pct_threshold * 0.9) and
-                inflection_data.get('momentum_accel', 0) < 0
-            )
+        long_condition_met = bool(long_chain.get('passed', False))
+        short_condition_met = bool(short_chain.get('passed', False))
 
-        # ================================================================
-        # LEVEL 3: STRUCTURAL CONFIRMATION (SHORT)
-        # ================================================================
-        if short_condition_met:
-            confirmation = self._check_structural_confirmation(
-                symbol, enriched_data, current_idx, 'SELL'
-            )
-            self._last_confirmation = confirmation
-            if not confirmation['confirmed']:
-                unconfirmed_mult = float(getattr(self.config, "unconfirmed_z_multiplier", 2.0))
-                short_condition_met = composite_z < -short_threshold * unconfirmed_mult
-
-            # MOMENTUM STALL GUARD (short side mirror)
-            if short_condition_met and not confirmation.get('has_flow_confirmation', False):
-                stall_threshold = float(getattr(self.config, 'momentum_stall_threshold', 0.0003))
-                if abs(momentum_slope) < stall_threshold:
-                    short_condition_met = False
-
-        # Transaction-based confirmation (optional)
-        if bool(getattr(self.config, "enable_transactions_confirm", False)):
-            txn_ratio = float(current_bar.get("txn_ratio", 1.0))
-            txn_rank = float(current_bar.get("txn_ratio_cs_rank", 0.5))
-            avg_size_ratio = float(current_bar.get("avg_trade_size_ratio", 1.0))
-            txn_ratio_min = float(getattr(self.config, "txn_ratio_min", 1.1))
-            txn_rank_min = float(getattr(self.config, "txn_rank_min", 0.7))
-            avg_size_ratio_max = float(getattr(self.config, "avg_trade_size_ratio_max", 2.0))
-
-            if txn_ratio < txn_ratio_min:
-                long_condition_met = False
-                short_condition_met = False
-
-            if txn_rank < txn_rank_min:
-                long_condition_met = long_condition_met and composite_z > long_threshold * 1.1
-                short_condition_met = short_condition_met and composite_z < -short_threshold * 1.1
-
-            if avg_size_ratio > avg_size_ratio_max:
-                long_condition_met = long_condition_met and composite_z > long_threshold * 1.2
-                short_condition_met = short_condition_met and composite_z < -short_threshold * 1.2
+        selected_chain: Optional[Dict[str, Any]] = None
+        side_label = None
+        if long_condition_met and short_condition_met:
+            selected_chain = long_chain if float(long_chain.get('overall_score', 0.0)) >= float(short_chain.get('overall_score', 0.0)) else short_chain
+            side_label = 'LONG' if selected_chain is long_chain else 'SHORT'
+            long_condition_met = side_label == 'LONG'
+            short_condition_met = side_label == 'SHORT'
+        elif long_condition_met:
+            selected_chain = long_chain
+            side_label = 'LONG'
+        elif short_condition_met:
+            selected_chain = short_chain
+            side_label = 'SHORT'
 
         # Store entry diagnostics for signal metadata + tracing
-        side_label = "LONG" if long_condition_met else ("SHORT" if short_condition_met else None)
-        if side_label:
+        if side_label and selected_chain is not None:
+            self._last_confirmation = selected_chain.get('confirmation', {})
             self._last_entry_diag = {
                 'side': side_label,
                 'L1_alignment': {
@@ -1958,6 +1920,7 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                     'long_m': round(alignment.get('long_m', 0), 6),
                     'dominant': alignment.get('dominant_direction', 'mixed'),
                     'score': round(alignment.get('alignment_score', 0), 4),
+                    'passed': bool(selected_chain.get('L1_passed', False)),
                 },
                 'L2_composite': {
                     'composite_z': round(float(composite_z), 4),
@@ -1968,8 +1931,21 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                     'inflection_active': bool(
                         inflection_data and inflection_data.get('inflection_detected')
                     ),
+                    'score': round(float(selected_chain.get('trigger_score', 0.0)), 4),
+                    'passed': bool(selected_chain.get('L2_passed', False)),
                 },
-                'L3_confirmation': getattr(self, '_last_confirmation', {}),
+                'L3_confirmation': {
+                    **selected_chain.get('confirmation', {}),
+                    'score': round(float(selected_chain.get('confirmation_score', 0.0)), 4),
+                    'txn_quality_multiplier': round(float(selected_chain.get('txn_quality_multiplier', 1.0)), 4),
+                    'passed': bool(selected_chain.get('L3_passed', False)),
+                },
+                'causal_chain': {
+                    'overall_score': round(float(selected_chain.get('overall_score', 0.0)), 4),
+                    'entry_threshold': round(float(getattr(self.config, 'entry_score_threshold', 0.62)), 4),
+                    'passed': bool(selected_chain.get('passed', False)),
+                    'failure_reason': selected_chain.get('failure_reason'),
+                },
             }
 
         if long_condition_met:
@@ -2209,6 +2185,180 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
             'confirmation_count': len(confirmations),
             'has_flow_confirmation': has_flow,
         }
+
+    def _compute_txn_quality_multiplier(self, current_bar: pd.Series) -> float:
+        """Compute a bounded txn-quality multiplier used once in causal chain scoring."""
+        if not bool(getattr(self.config, "enable_transactions_confirm", False)):
+            return 1.0
+
+        txn_ratio = float(current_bar.get("txn_ratio", 1.0))
+        txn_rank = float(current_bar.get("txn_ratio_cs_rank", 0.5))
+        avg_size_ratio = float(current_bar.get("avg_trade_size_ratio", 1.0))
+
+        txn_ratio_min = float(getattr(self.config, "txn_ratio_min", 1.1))
+        txn_rank_min = float(getattr(self.config, "txn_rank_min", 0.7))
+        avg_size_ratio_max = float(getattr(self.config, "avg_trade_size_ratio_max", 2.0))
+
+        quality = 1.0
+        if txn_ratio < txn_ratio_min:
+            quality *= 0.85
+        else:
+            quality *= 1.03
+
+        if txn_rank < txn_rank_min:
+            quality *= 0.90
+        else:
+            quality *= 1.02
+
+        if avg_size_ratio > avg_size_ratio_max:
+            quality *= 0.92
+
+        return float(np.clip(quality, 0.75, 1.10))
+
+    def _evaluate_entry_causal_chain(
+        self,
+        *,
+        side: str,
+        symbol: str,
+        current_bar: pd.Series,
+        enriched_data: pd.DataFrame,
+        current_idx: int,
+        alignment: Dict[str, Any],
+        composite_z: float,
+        composite_pct: float,
+        z_threshold: float,
+        pct_threshold: float,
+        momentum_slope: float,
+        inflection_data: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Evaluate prioritized L1→L2→L3 causal chain and return scores + decision."""
+        is_buy = side == 'BUY'
+        l1_direction_ok = bool(alignment.get('long_aligned', False) if is_buy else alignment.get('short_aligned', False))
+        alignment_score = float(alignment.get('alignment_score', 0.0))
+        l1_pass = l1_direction_ok and alignment_score >= float(getattr(self.config, 'min_alignment_score', 0.55))
+        if not l1_pass:
+            return {
+                'passed': False,
+                'failure_reason': 'L1_alignment_failed',
+                'L1_passed': False,
+                'L2_passed': False,
+                'L3_passed': False,
+                'alignment_score': alignment_score,
+                'trigger_score': 0.0,
+                'confirmation_score': 0.0,
+                'overall_score': 0.0,
+                'confirmation': {'confirmed': False, 'confirmations': []},
+                'txn_quality_multiplier': 1.0,
+            }
+
+        # L2 trigger: directional composite surprise + slope + inflection
+        if is_buy:
+            z_excess = max(0.0, (composite_z - z_threshold) / max(z_threshold, 1e-6))
+            pct_excess = max(0.0, (composite_pct - pct_threshold) / max(100.0 - pct_threshold, 1e-6))
+            dir_slope = momentum_slope
+            inflect_match = bool(inflection_data and inflection_data.get('inflection_detected') and inflection_data.get('inflection_type') == 'bullish')
+        else:
+            z_excess = max(0.0, ((-composite_z) - z_threshold) / max(z_threshold, 1e-6))
+            pct_excess = max(0.0, ((100.0 - composite_pct) - pct_threshold) / max(100.0 - pct_threshold, 1e-6))
+            dir_slope = -momentum_slope
+            inflect_match = bool(inflection_data and inflection_data.get('inflection_detected') and inflection_data.get('inflection_type') == 'bearish')
+
+        z_score = float(np.clip(z_excess, 0.0, 1.5) / 1.5)
+        pct_score = float(np.clip(pct_excess, 0.0, 1.5) / 1.5)
+        slope_ref = float(getattr(self.config, 'trigger_slope_ref', 0.0025))
+        slope_score = float(np.clip(dir_slope / max(slope_ref, 1e-6), 0.0, 1.0))
+        inflection_bonus = float(getattr(self.config, 'trigger_inflection_bonus', 0.10)) if inflect_match else 0.0
+        trigger_score = float(np.clip(0.45 * z_score + 0.25 * pct_score + 0.30 * slope_score + inflection_bonus, 0.0, 1.0))
+        l2_pass = trigger_score >= float(getattr(self.config, 'min_trigger_score', 0.55))
+        if not l2_pass:
+            return {
+                'passed': False,
+                'failure_reason': 'L2_trigger_failed',
+                'L1_passed': True,
+                'L2_passed': False,
+                'L3_passed': False,
+                'alignment_score': alignment_score,
+                'trigger_score': trigger_score,
+                'confirmation_score': 0.0,
+                'overall_score': 0.0,
+                'confirmation': {'confirmed': False, 'confirmations': []},
+                'txn_quality_multiplier': 1.0,
+            }
+
+        # L3 confirmation: prioritized hierarchy (flow > structure > vol-only)
+        confirmation = self._check_structural_confirmation(symbol, enriched_data, current_idx, side)
+        has_flow = bool(confirmation.get('has_flow_confirmation', False))
+        has_structure = 'price_structure' in confirmation.get('confirmations', [])
+        has_vol = 'volatility_breakout' in confirmation.get('confirmations', [])
+
+        if has_flow:
+            confirmation_score = 1.0
+        elif has_structure and has_vol:
+            confirmation_score = 0.78
+        elif has_structure:
+            confirmation_score = 0.65
+        elif has_vol:
+            confirmation_score = 0.35
+        else:
+            confirmation_score = 0.0
+
+        # Late-entry stall guard (without flow, slope must not be near zero)
+        stall_threshold = float(getattr(self.config, 'momentum_stall_threshold', 0.0003))
+        if not has_flow and dir_slope < stall_threshold:
+            confirmation_score = min(confirmation_score, 0.30)
+
+        txn_quality = self._compute_txn_quality_multiplier(current_bar)
+        confirmation_score = float(np.clip(confirmation_score * txn_quality, 0.0, 1.0))
+
+        min_confirm = float(getattr(self.config, 'min_confirmation_score', 0.55))
+        l3_pass = confirmation_score >= min_confirm
+
+        overall_score = float(np.clip(
+            0.35 * alignment_score +
+            0.40 * trigger_score +
+            0.25 * confirmation_score,
+            0.0,
+            1.0,
+        ))
+        pass_threshold = float(getattr(self.config, 'entry_score_threshold', 0.62))
+        passed = l1_pass and l2_pass and l3_pass and overall_score >= pass_threshold
+
+        return {
+            'passed': passed,
+            'failure_reason': None if passed else ('L3_confirmation_failed' if not l3_pass else 'entry_score_below_threshold'),
+            'L1_passed': True,
+            'L2_passed': True,
+            'L3_passed': l3_pass,
+            'alignment_score': alignment_score,
+            'trigger_score': trigger_score,
+            'confirmation_score': confirmation_score,
+            'overall_score': overall_score,
+            'confirmation': confirmation,
+            'txn_quality_multiplier': txn_quality,
+        }
+
+    def _estimate_expected_return_from_chain(self, chain_diag: Dict[str, Any]) -> float:
+        """Estimate expected return (fractional, e.g., 0.003 = 30bps) from causal-chain diagnostics."""
+        base_bps = float(getattr(self.config, 'expected_return_base_bps', 12.0))
+        max_bps = float(getattr(self.config, 'expected_return_max_bps', 80.0))
+
+        w_a = float(getattr(self.config, 'expected_return_alignment_weight', 0.20))
+        w_t = float(getattr(self.config, 'expected_return_trigger_weight', 0.45))
+        w_c = float(getattr(self.config, 'expected_return_confirmation_weight', 0.35))
+        w_sum = max(w_a + w_t + w_c, 1e-9)
+        w_a, w_t, w_c = w_a / w_sum, w_t / w_sum, w_c / w_sum
+
+        alignment_score = float(chain_diag.get('alignment_score', chain_diag.get('L1_alignment', {}).get('score', 0.0)))
+        trigger_score = float(chain_diag.get('trigger_score', chain_diag.get('L2_composite', {}).get('score', 0.0)))
+        confirmation_score = float(chain_diag.get('confirmation_score', chain_diag.get('L3_confirmation', {}).get('score', 0.0)))
+        overall_score = float(chain_diag.get('overall_score', chain_diag.get('causal_chain', {}).get('overall_score', 0.0)))
+
+        composite_score = (w_a * alignment_score) + (w_t * trigger_score) + (w_c * confirmation_score)
+        effective = float(np.clip(0.55 * composite_score + 0.45 * overall_score, 0.0, 1.0))
+
+        edge_bps = base_bps + (max_bps - base_bps) * effective
+        edge_bps = float(np.clip(edge_bps, 0.0, max_bps))
+        return edge_bps / 10000.0
 
     # ========================================
     # CRITICAL FIX #1-3: MICRO-STRUCTURE & PRE-INFLECTION DETECTION
