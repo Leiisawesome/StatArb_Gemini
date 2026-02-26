@@ -487,9 +487,10 @@ class StreamingBufferManager:
                 'buffers': {},
             }
 
-            for symbol, df in self._buffers.items():
-                # Convert DataFrame to list of dicts for JSON serialization
-                state['buffers'][symbol] = df.to_dict(orient='records')
+            for symbol in self._buffers.keys():
+                # Persist only valid rows (oldest -> newest), not the full preallocated ring memory.
+                valid_df = self._ordered_view(symbol)
+                state['buffers'][symbol] = valid_df.to_dict(orient='records')
 
             return state
 
@@ -505,13 +506,49 @@ class StreamingBufferManager:
             self._warmup_required = state.get('warmup_required', self._warmup_required)
 
             self._buffers.clear()
+            self._write_idx.clear()
+            self._count.clear()
             self._warmed_up.clear()
 
             for symbol, records in state.get('buffers', {}).items():
                 df = pd.DataFrame(records)
-                self._buffers[symbol] = df
+                # Keep only most recent buffer_size rows and restore into ring layout.
+                if len(df) > self._buffer_size:
+                    df = df.tail(self._buffer_size).reset_index(drop=True)
 
-                if len(df) >= self._warmup_required:
+                self._ensure_symbol(symbol)
+                buf = self._buffers[symbol]
+
+                # Reset buffer memory explicitly.
+                buf["timestamp"] = np.full(self._buffer_size, None, dtype=object)
+                buf["symbol"] = np.full(self._buffer_size, None, dtype=object)
+                for col in ("open", "high", "low", "close", "volume"):
+                    buf[col] = np.nan
+
+                n = len(df)
+                if n > 0:
+                    for col in self.OHLCV_COLUMNS:
+                        if col in df.columns:
+                            if col == "timestamp":
+                                s = pd.to_datetime(df[col], errors="coerce")
+                                try:
+                                    if getattr(s.dtype, "tz", None) is None:
+                                        s = s.dt.tz_localize("America/New_York", ambiguous="infer", nonexistent="shift_forward")
+                                    else:
+                                        s = s.dt.tz_convert("America/New_York")
+                                except Exception:
+                                    pass
+                                buf.loc[: n - 1, col] = s.astype(object).values
+                            else:
+                                buf.loc[: n - 1, col] = df[col].values
+
+                    if "symbol" not in df.columns:
+                        buf.loc[: n - 1, "symbol"] = symbol
+
+                self._count[symbol] = n
+                self._write_idx[symbol] = 0 if n >= self._buffer_size else n
+
+                if n >= self._warmup_required:
                     self._warmed_up.add(symbol)
 
             self._stats['symbols_tracked'] = len(self._buffers)

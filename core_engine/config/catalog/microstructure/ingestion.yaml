@@ -1,0 +1,41 @@
+# Ingestion Pipeline Configuration
+# Blueprint: docs/phase_1_2_implementation_blueprint.md v1.6-FINAL Section 1.7
+
+ingestion:
+  # Date range — 130 trading days (~6 calendar months)
+  start_date: "2025-07-01"
+  end_date: "2026-01-31"
+  trading_days_target: 130
+
+  # Polygon API
+  polygon:
+    rate_limit_calls: 500
+    rate_limit_period: 1.0
+    max_concurrent_symbols: 5
+    max_pages_per_request: 100
+    batch_insert_size: 100000
+
+  # Volume bucketing
+  bucketing:
+    target_buckets_per_day: 200
+    adv_lookback_days: 20
+
+  # Validation
+  validation:
+    min_quality_score: 0.9
+    max_invalid_day_pct: 0.05
+    max_tick_rule_fallback_pct: 0.20
+    max_stale_quote_pct: 0.10
+    monotonicity_violation_threshold: 0.001
+    min_trades_per_day: 5000
+
+  # Deterministic replay
+  replay_test:
+    num_random_symbol_days: 5
+    tolerance: 0.0
+
+  # Storage budget
+  storage:
+    target_gb: 220
+    kill_switch_gb: 250
+    hard_cap_gb: 300

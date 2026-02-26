@@ -56,6 +56,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
+def configure_logging(verbose: bool = False) -> None:
+    """Configure root logging level for CLI runs."""
+    level = logging.DEBUG if verbose else logging.INFO
+    root_logger = logging.getLogger()
+    root_logger.setLevel(level)
+    for handler in root_logger.handlers:
+        handler.setLevel(level)
+
 # Experiment registry
 EXPERIMENTS = {
     'smoke_test': {
@@ -243,6 +252,9 @@ Examples:
   # Run smoke test
   python run_suite.py --experiment smoke_test
 
+    # Run smoke test with verbose logging
+    python run_suite.py --experiment smoke_test --verbose
+
   # Run with custom config
   python run_suite.py --experiment baseline --config my_config.yaml
 
@@ -285,7 +297,15 @@ Examples:
         help='List available experiments'
     )
 
+    parser.add_argument(
+        '--verbose',
+        action='store_true',
+        help='Enable verbose logging (DEBUG level)'
+    )
+
     args = parser.parse_args()
+
+    configure_logging(args.verbose)
 
     # Handle list
     if args.list:

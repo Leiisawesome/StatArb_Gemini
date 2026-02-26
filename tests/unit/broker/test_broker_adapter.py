@@ -1,389 +1,164 @@
-#!/usr/bin/env python3
-"""
-Broker Adapter Test Suite
-========================
-
-This test suite provides testing for the BrokerAdapter components
-to ensure basic functionality and interface compliance.
-
-Components Tested:
-- BrokerAdapter (Multi-broker integration)
-- StandardOrder (Order standardization)
-- StandardExecution (Execution standardization)
-- StandardPosition (Position standardization)
-- StandardAccount (Account standardization)
-"""
-
 import pytest
 from datetime import datetime
-from unittest.mock import Mock, AsyncMock
 
-# Import broker components
-from core_engine.broker.broker_adapter import (
-    BrokerCredentials, BrokerType, ConnectionStatus, StandardOrder,
-    StandardExecution, StandardPosition, StandardAccount, OrderAction,
-    OrderType, TimeInForce, BrokerAdapterFactory
+from core_engine.broker.broker_adapter import BrokerAdapter
+from core_engine.system.interfaces import RegimeContext
+from core_engine.type_definitions.broker_types import (
+    AccountInfo,
+    Order,
+    OrderSide,
+    OrderType,
+    Position,
 )
 
-class TestBrokerAdapterBasic:
-    """Basic tests for BrokerAdapter - Multi-broker integration"""
 
-    def setup_method(self):
-        """Set up test fixtures"""
-        self.config = {
-            'broker_type': BrokerType.INTERACTIVE_BROKERS,
-            'host': 'localhost',
-            'port': 7497,
-            'client_id': 1,
-            'connection_timeout': 30,
-            'max_retries': 3,
-            'retry_delay': 1.0,
-            'enable_logging': True
-        }
+class DummyAdapter:
+    def __init__(self):
+        self.connected = False
+        self.last_call = None
 
-        self.credentials = BrokerCredentials(
-            broker_type=BrokerType.INTERACTIVE_BROKERS,
-            username='test_user',
-            password='test_password',
-            api_key='test_api_key',
-            secret_key='test_api_secret'
+    async def connect(self):
+        self.connected = True
+        return True
+
+    async def disconnect(self):
+        self.connected = False
+
+    def is_connected(self):
+        return self.connected
+
+    async def check_connection_health(self):
+        return {"connected": self.connected, "latency": 0.001}
+
+    async def get_latest_quote(self, symbol):
+        return {"bid_price": 99.0, "ask_price": 101.0, "timestamp": datetime.now()}
+
+    def is_market_open(self):
+        return True
+
+    async def submit_market_order(self, symbol, quantity, side):
+        self.last_call = ("market", symbol, quantity, side)
+        return Order(symbol=symbol, side=side, quantity=quantity, order_type=OrderType.MARKET)
+
+    async def submit_limit_order(self, symbol, quantity, side, limit_price):
+        self.last_call = ("limit", symbol, quantity, side, limit_price)
+        return Order(
+            symbol=symbol,
+            side=side,
+            quantity=quantity,
+            order_type=OrderType.LIMIT,
+            price=limit_price,
         )
 
-        # Create a mock broker adapter
-        self.broker_adapter = Mock()
+    async def cancel_order(self, order_id):
+        return True
 
-        # Mock order data
-        self.mock_order = StandardOrder(
-            order_id='test_order_001',
-            symbol='AAPL',
-            action=OrderAction.BUY,
-            order_type=OrderType.MARKET,
-            quantity=100.0,
-            limit_price=150.0,
-            time_in_force=TimeInForce.DAY,
-            created_at=datetime.now()
+    async def cancel_all_orders(self):
+        return True
+
+    async def get_order(self, order_id):
+        return None
+
+    async def get_orders(self, status="open"):
+        return []
+
+    async def get_positions(self):
+        return [
+            Position(
+                symbol="AAPL",
+                quantity=10,
+                avg_entry_price=100.0,
+                market_value=1000.0,
+                unrealized_pl=0.0,
+                unrealized_plpc=0.0,
+                current_price=100.0,
+                side="long",
+                cost_basis=1000.0,
+            )
+        ]
+
+    async def get_position(self, symbol):
+        return None
+
+    async def get_account_info(self):
+        return AccountInfo(
+            account_id="DUMMY",
+            cash=1000.0,
+            buying_power=2000.0,
+            portfolio_value=1000.0,
+            equity=1000.0,
         )
 
-        # Mock execution data
-        self.mock_execution = StandardExecution(
-            execution_id='test_exec_001',
-            order_id='test_order_001',
-            symbol='AAPL',
-            side='BUY',
-            quantity=100.0,
-            price=150.25,
-            execution_time=datetime.now(),
-            commission=1.0
+    def broker_name(self):
+        return "Dummy"
+
+
+@pytest.mark.asyncio
+async def test_connect_disconnect_and_health():
+    adapter = BrokerAdapter(DummyAdapter())
+
+    assert await adapter.connect() is True
+    assert adapter.is_connected() is True
+    health = await adapter.check_health()
+    assert health["connected"] is True
+
+    await adapter.disconnect()
+    assert adapter.is_connected() is False
+
+
+@pytest.mark.asyncio
+async def test_submit_market_order_routes_to_market():
+    base = DummyAdapter()
+    adapter = BrokerAdapter(base)
+
+    order = await adapter.submit_order("AAPL", 5, OrderSide.BUY, OrderType.MARKET)
+
+    assert order.order_type == OrderType.MARKET
+    assert base.last_call[0] == "market"
+
+
+@pytest.mark.asyncio
+async def test_submit_limit_order_requires_price():
+    adapter = BrokerAdapter(DummyAdapter())
+
+    with pytest.raises(ValueError):
+        await adapter.submit_order("AAPL", 5, OrderSide.BUY, OrderType.LIMIT)
+
+
+@pytest.mark.asyncio
+async def test_high_volatility_forces_market_to_limit():
+    base = DummyAdapter()
+    adapter = BrokerAdapter(base)
+
+    adapter.update_regime_context(
+        RegimeContext(
+            primary_regime="trend",
+            volatility_regime="high_volatility",
+            regime_confidence=0.8,
+            regime_start_time=datetime.now(),
+            regime_duration_minutes=30.0,
         )
+    )
 
-        # Mock position data
-        self.mock_position = StandardPosition(
-            symbol='AAPL',
-            quantity=100.0,
-            side='long',
-            avg_cost=150.0,
-            market_value=15000.0,
-            unrealized_pnl=0.0,
-            last_price=150.0,
-            currency='USD',
-            last_updated=datetime.now()
-        )
+    order = await adapter.submit_order("AAPL", 10, OrderSide.BUY, OrderType.MARKET)
 
-        # Mock account data
-        self.mock_account = StandardAccount(
-            account_id='test_account',
-            account_type='MARGIN',
-            total_equity=150000.0,
-            buying_power=200000.0,
-            cash_balance=100000.0,
-            positions=[self.mock_position]
-        )
+    assert order.order_type == OrderType.LIMIT
+    assert order.price == pytest.approx(102.01)
+    assert base.last_call[0] == "limit"
 
-    def test_broker_type_enum(self):
-        """Test BrokerType enum values"""
-        assert BrokerType.INTERACTIVE_BROKERS.value == "interactive_brokers"
-        assert BrokerType.TD_AMERITRADE.value == "td_ameritrade"
 
-    def test_connection_status_enum(self):
-        """Test ConnectionStatus enum values"""
-        assert ConnectionStatus.DISCONNECTED.value == "disconnected"
-        assert ConnectionStatus.CONNECTED.value == "connected"
-        assert ConnectionStatus.READY.value == "ready"
+@pytest.mark.asyncio
+async def test_account_and_position_passthrough():
+    adapter = BrokerAdapter(DummyAdapter())
 
-    def test_order_action_enum(self):
-        """Test OrderAction enum values"""
-        assert OrderAction.BUY.value == "BUY"
-        assert OrderAction.SELL.value == "SELL"
+    account = await adapter.get_account_info()
+    positions = await adapter.get_positions()
 
-    def test_order_type_enum(self):
-        """Test OrderType enum values"""
-        assert OrderType.MARKET.value == "MKT"
-        assert OrderType.LIMIT.value == "LMT"
-        assert OrderType.STOP.value == "STP"
+    assert account.account_id == "DUMMY"
+    assert len(positions) == 1
+    assert positions[0].symbol == "AAPL"
 
-    def test_time_in_force_enum(self):
-        """Test TimeInForce enum values"""
-        assert TimeInForce.DAY.value == "DAY"
-        assert TimeInForce.GTC.value == "GTC"
-        assert TimeInForce.IOC.value == "IOC"
 
-    def test_broker_credentials_creation(self):
-        """Test BrokerCredentials creation"""
-        credentials = BrokerCredentials(
-            broker_type=BrokerType.INTERACTIVE_BROKERS,
-            username='test_user',
-            password='test_password',
-            api_key='test_api_key',
-            secret_key='test_api_secret'
-        )
-
-        assert credentials.username == 'test_user'
-        assert credentials.password == 'test_password'
-        assert credentials.api_key == 'test_api_key'
-        assert credentials.secret_key == 'test_api_secret'
-
-    def test_standard_order_creation(self):
-        """Test StandardOrder creation"""
-        order = StandardOrder(
-            order_id='test_order_001',
-            symbol='AAPL',
-            action=OrderAction.BUY,
-            order_type=OrderType.MARKET,
-            quantity=100.0,
-            limit_price=150.0,
-            time_in_force=TimeInForce.DAY,
-            created_at=datetime.now()
-        )
-
-        assert order.order_id == 'test_order_001'
-        assert order.symbol == 'AAPL'
-        assert order.action == OrderAction.BUY
-        assert order.order_type == OrderType.MARKET
-        assert order.quantity == 100.0
-        assert order.limit_price == 150.0
-        assert order.time_in_force == TimeInForce.DAY
-
-    def test_standard_execution_creation(self):
-        """Test StandardExecution creation"""
-        execution = StandardExecution(
-            execution_id='test_exec_001',
-            order_id='test_order_001',
-            symbol='AAPL',
-            side='BUY',
-            quantity=100.0,
-            price=150.25,
-            execution_time=datetime.now(),
-            commission=1.0
-        )
-
-        assert execution.execution_id == 'test_exec_001'
-        assert execution.order_id == 'test_order_001'
-        assert execution.symbol == 'AAPL'
-        assert execution.side == 'BUY'
-        assert execution.quantity == 100.0
-        assert execution.price == 150.25
-        assert execution.commission == 1.0
-
-    def test_standard_position_creation(self):
-        """Test StandardPosition creation"""
-        position = StandardPosition(
-            symbol='AAPL',
-            quantity=100.0,
-            side='long',
-            avg_cost=150.0,
-            market_value=15000.0,
-            unrealized_pnl=0.0,
-            last_price=150.0,
-            currency='USD',
-            last_updated=datetime.now()
-        )
-
-        assert position.symbol == 'AAPL'
-        assert position.quantity == 100.0
-        assert position.side == 'long'
-        assert position.avg_cost == 150.0
-        assert position.market_value == 15000.0
-        assert position.unrealized_pnl == 0.0
-        assert position.last_price == 150.0
-        assert position.currency == 'USD'
-
-    def test_standard_account_creation(self):
-        """Test StandardAccount creation"""
-        position = StandardPosition(
-            symbol='AAPL',
-            quantity=100.0,
-            side='long',
-            avg_cost=150.0,
-            market_value=15000.0,
-            unrealized_pnl=0.0,
-            last_price=150.0,
-            currency='USD',
-            last_updated=datetime.now()
-        )
-
-        account = StandardAccount(
-            account_id='test_account',
-            account_type='MARGIN',
-            total_equity=150000.0,
-            buying_power=200000.0,
-            cash_balance=100000.0,
-            positions=[position]
-        )
-
-        assert account.account_id == 'test_account'
-        assert account.account_type == 'MARGIN'
-        assert account.total_equity == 150000.0
-        assert account.buying_power == 200000.0
-        assert account.cash_balance == 100000.0
-        assert len(account.positions) == 1
-        assert account.positions[0].symbol == 'AAPL'
-
-    @pytest.mark.asyncio
-    async def test_broker_adapter_interface_methods(self):
-        """Test that BrokerAdapter has expected interface methods"""
-        # Test that the mock has the expected methods
-        assert hasattr(self.broker_adapter, 'connect')
-        assert hasattr(self.broker_adapter, 'disconnect')
-        assert hasattr(self.broker_adapter, 'authenticate')
-        assert hasattr(self.broker_adapter, 'submit_order')
-        assert hasattr(self.broker_adapter, 'cancel_order')
-        assert hasattr(self.broker_adapter, 'modify_order')
-        assert hasattr(self.broker_adapter, 'get_order_status')
-        assert hasattr(self.broker_adapter, 'get_positions')
-        assert hasattr(self.broker_adapter, 'get_account_info')
-        assert hasattr(self.broker_adapter, 'get_market_data')
-
-    @pytest.mark.asyncio
-    async def test_broker_adapter_connect(self):
-        """Test broker adapter connection"""
-        self.broker_adapter.connect = AsyncMock(return_value=True)
-
-        result = await self.broker_adapter.connect()
-
-        assert result is True
-        self.broker_adapter.connect.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_broker_adapter_disconnect(self):
-        """Test broker adapter disconnection"""
-        self.broker_adapter.disconnect = AsyncMock(return_value=True)
-
-        result = await self.broker_adapter.disconnect()
-
-        assert result is True
-        self.broker_adapter.disconnect.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_broker_adapter_authenticate(self):
-        """Test broker adapter authentication"""
-        self.broker_adapter.authenticate = AsyncMock(return_value=True)
-
-        result = await self.broker_adapter.authenticate()
-
-        assert result is True
-        self.broker_adapter.authenticate.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_broker_adapter_submit_order(self):
-        """Test broker adapter order submission"""
-        self.broker_adapter.submit_order = AsyncMock(return_value='order_123')
-
-        result = await self.broker_adapter.submit_order(self.mock_order)
-
-        assert result == 'order_123'
-        self.broker_adapter.submit_order.assert_called_once_with(self.mock_order)
-
-    @pytest.mark.asyncio
-    async def test_broker_adapter_cancel_order(self):
-        """Test broker adapter order cancellation"""
-        self.broker_adapter.cancel_order = AsyncMock(return_value=True)
-
-        result = await self.broker_adapter.cancel_order('order_123')
-
-        assert result is True
-        self.broker_adapter.cancel_order.assert_called_once_with('order_123')
-
-    @pytest.mark.asyncio
-    async def test_broker_adapter_modify_order(self):
-        """Test broker adapter order modification"""
-        self.broker_adapter.modify_order = AsyncMock(return_value=True)
-
-        updates = {'quantity': 150.0, 'limit_price': 149.0}
-        result = await self.broker_adapter.modify_order('order_123', updates)
-
-        assert result is True
-        self.broker_adapter.modify_order.assert_called_once_with('order_123', updates)
-
-    @pytest.mark.asyncio
-    async def test_broker_adapter_get_order_status(self):
-        """Test broker adapter order status retrieval"""
-        mock_status = {'order_id': 'order_123', 'status': 'FILLED', 'filled_qty': 100.0}
-        self.broker_adapter.get_order_status = AsyncMock(return_value=mock_status)
-
-        result = await self.broker_adapter.get_order_status('order_123')
-
-        assert result == mock_status
-        self.broker_adapter.get_order_status.assert_called_once_with('order_123')
-
-    @pytest.mark.asyncio
-    async def test_broker_adapter_get_positions(self):
-        """Test broker adapter positions retrieval"""
-        mock_positions = [self.mock_position]
-        self.broker_adapter.get_positions = AsyncMock(return_value=mock_positions)
-
-        result = await self.broker_adapter.get_positions()
-
-        assert result == mock_positions
-        assert len(result) == 1
-        assert result[0].symbol == 'AAPL'
-        self.broker_adapter.get_positions.assert_called_once_with()
-
-    @pytest.mark.asyncio
-    async def test_broker_adapter_get_account_info(self):
-        """Test broker adapter account info retrieval"""
-        self.broker_adapter.get_account_info = AsyncMock(return_value=self.mock_account)
-
-        result = await self.broker_adapter.get_account_info()
-
-        assert result == self.mock_account
-        assert result.account_id == 'test_account'
-        assert result.total_equity == 150000.0
-        self.broker_adapter.get_account_info.assert_called_once_with()
-
-    @pytest.mark.asyncio
-    async def test_broker_adapter_get_market_data(self):
-        """Test broker adapter market data retrieval"""
-        mock_market_data = {
-            'symbol': 'AAPL',
-            'price': 150.0,
-            'bid': 149.9,
-            'ask': 150.1,
-            'volume': 1000000,
-            'timestamp': datetime.now()
-        }
-        self.broker_adapter.get_market_data = AsyncMock(return_value=mock_market_data)
-
-        result = await self.broker_adapter.get_market_data('AAPL')
-
-        assert result == mock_market_data
-        assert result['symbol'] == 'AAPL'
-        assert result['price'] == 150.0
-        self.broker_adapter.get_market_data.assert_called_once_with('AAPL')
-
-class TestBrokerAdapterFactory:
-    """Tests for BrokerAdapterFactory"""
-
-    def test_factory_creation(self):
-        """Test BrokerAdapterFactory creation"""
-        factory = BrokerAdapterFactory()
-        assert factory is not None
-
-    def test_factory_broker_types(self):
-        """Test available broker types"""
-        factory = BrokerAdapterFactory()
-        # The factory should support different broker types
-        # This is a basic test to ensure the factory exists and can be instantiated
-        assert hasattr(factory, 'create_adapter')
-
-if __name__ == '__main__':
-    pytest.main([__file__])
+def test_broker_name_passthrough():
+    adapter = BrokerAdapter(DummyAdapter())
+    assert adapter.broker_name() == "Dummy"
