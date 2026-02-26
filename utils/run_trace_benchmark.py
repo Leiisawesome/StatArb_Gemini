@@ -19,6 +19,7 @@ import argparse
 import shutil
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import List
 
@@ -56,11 +57,17 @@ def main() -> int:
     parser.add_argument("--prev-rev", default="HEAD~1", help="Previous revision to benchmark")
     parser.add_argument("--python-exe", default=sys.executable, help="Python executable to use")
     parser.add_argument("--results-dir", default="backtest/results", help="Directory for trace snapshot output")
+    parser.add_argument(
+        "--report-dir",
+        default="backtest/results/trace-benchmarks",
+        help="Directory for machine-readable benchmark JSON reports",
+    )
     args = parser.parse_args()
 
     repo_root = Path(__file__).resolve().parents[1]
     config_path = repo_root / args.config
     results_dir = repo_root / args.results_dir
+    report_dir = repo_root / args.report_dir
     trace_live_path = results_dir / "trace-smoke_test.trace.jsonl"
 
     if not config_path.exists():
@@ -78,6 +85,8 @@ def main() -> int:
 
     curr_snapshot = results_dir / f"trace-smoke_test-{curr_short}.jsonl"
     prev_snapshot = results_dir / f"trace-smoke_test-{prev_short}.jsonl"
+    report_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    report_path = report_dir / f"trace-diff-{curr_short}-vs-{prev_short}-{report_timestamp}.json"
 
     print(f"[INFO] Benchmarking curr={curr_short} prev={prev_short}")
 
@@ -123,10 +132,13 @@ def main() -> int:
             curr_short,
             "--prev-label",
             prev_short,
+            "--json-out",
+            str(report_path),
         ],
         cwd=str(repo_root),
         check=True,
     )
+    print(f"[OK] Wrote JSON report {report_path}")
 
     return 0
 

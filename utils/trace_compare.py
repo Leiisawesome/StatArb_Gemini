@@ -122,6 +122,7 @@ def main() -> int:
     parser.add_argument("--prev", required=True, type=Path, help="Previous snapshot path")
     parser.add_argument("--curr-label", default="curr", help="Label for current snapshot")
     parser.add_argument("--prev-label", default="prev", help="Label for previous snapshot")
+    parser.add_argument("--json-out", type=Path, default=None, help="Optional output path for machine-readable JSON report")
     args = parser.parse_args()
 
     curr_rows = load_jsonl(args.curr)
@@ -167,6 +168,39 @@ def main() -> int:
     print("DELTA_HITS", hit_delta)
     print("L1_MODES_CURR", curr_l1["modes"])
     print("L1_MODES_PREV", prev_l1["modes"])
+
+    report = {
+        "trace_diff": {
+            "curr_label": args.curr_label,
+            "prev_label": args.prev_label,
+        },
+        "cp_counts_curr": curr_cp,
+        "cp_counts_prev": prev_cp,
+        "cp3_curr": curr_cp3,
+        "cp3_prev": prev_cp3,
+        "cp2_l1_curr": curr_l1,
+        "cp2_l1_prev": prev_l1,
+        "deltas": {
+            "cp3_count": curr_cp3["cp3_count"] - prev_cp3["cp3_count"],
+            "auth": curr_cp3["auth"] - prev_cp3["auth"],
+            "rej": curr_cp3["rej"] - prev_cp3["rej"],
+            "g6_ratio_avg": None if (curr_cp3["g6_ratio_avg"] is None or prev_cp3["g6_ratio_avg"] is None) else (curr_cp3["g6_ratio_avg"] - prev_cp3["g6_ratio_avg"]),
+            "g6_edge_avg": None if (curr_cp3["g6_edge_avg"] is None or prev_cp3["g6_edge_avg"] is None) else (curr_cp3["g6_edge_avg"] - prev_cp3["g6_edge_avg"]),
+            "g6_cost_avg": None if (curr_cp3["g6_cost_avg"] is None or prev_cp3["g6_cost_avg"] is None) else (curr_cp3["g6_cost_avg"] - prev_cp3["g6_cost_avg"]),
+            "l1_avg": None if (curr_l1["l1"]["avg"] is None or prev_l1["l1"]["avg"] is None) else (curr_l1["l1"]["avg"] - prev_l1["l1"]["avg"]),
+            "l1_p50": None if (curr_l1["l1"]["p50"] is None or prev_l1["l1"]["p50"] is None) else (curr_l1["l1"]["p50"] - prev_l1["l1"]["p50"]),
+            "l1_min": None if (curr_l1["l1"]["min"] is None or prev_l1["l1"]["min"] is None) else (curr_l1["l1"]["min"] - prev_l1["l1"]["min"]),
+            "l1_max": None if (curr_l1["l1"]["max"] is None or prev_l1["l1"]["max"] is None) else (curr_l1["l1"]["max"] - prev_l1["l1"]["max"]),
+            "hits": hit_delta,
+        },
+        "l1_modes_curr": curr_l1["modes"],
+        "l1_modes_prev": prev_l1["modes"],
+    }
+
+    if args.json_out is not None:
+        args.json_out.parent.mkdir(parents=True, exist_ok=True)
+        args.json_out.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+        print("JSON_REPORT", str(args.json_out))
 
     return 0
 
