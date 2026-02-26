@@ -2377,7 +2377,20 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                     from core_engine.utils.pipeline_trace import get_tracer, CP2_SIGNAL_GEN
                     _cp2t = get_tracer()
                     if _cp2t.enabled and out:
+                        def _extract_entry_diag(_sig):
+                            _meta = getattr(_sig, 'metadata', {}) or {}
+                            _ad = _meta.get('additional_data', {}) if isinstance(_meta, dict) else {}
+                            if not isinstance(_ad, dict):
+                                _ad = {}
+                            _entry_diag = _meta.get('entry_diag', _ad.get('entry_diag'))
+                            _entry_mode = _meta.get('entry_mode', _ad.get('entry_mode'))
+                            if _entry_mode is None and isinstance(_entry_diag, dict):
+                                _entry_mode = _entry_diag.get('entry_mode')
+                            _expected_return_bps = _meta.get('expected_return_bps', _ad.get('expected_return_bps'))
+                            return _entry_diag, _entry_mode, _expected_return_bps
+
                         for _sig in out:
+                            _entry_diag, _entry_mode, _expected_return_bps = _extract_entry_diag(_sig)
                             _cp2t.emit(
                                 trace_id=getattr(_sig, 'signal_id', '') or f"sig_{getattr(_sig, 'symbol', 'UNK')}",
                                 checkpoint=CP2_SIGNAL_GEN,
@@ -2397,10 +2410,16 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                                     "confidence": float(getattr(_sig, 'confidence', 0)),
                                     "strategy_id": getattr(_sig, 'strategy_id', ''),
                                     "target_weight": getattr(_sig, 'target_weight', None),
+                                    "entry_diag": _entry_diag,
+                                    "entry_mode": _entry_mode,
+                                    "expected_return_bps": _expected_return_bps,
                                 },
                                 metadata={
                                     "signal_count": len(out),
                                     "mode": "traditional",
+                                    "entry_diag": _entry_diag,
+                                    "entry_mode": _entry_mode,
+                                    "expected_return_bps": _expected_return_bps,
                                 },
                             )
                 except Exception:
@@ -2439,7 +2458,20 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                 from core_engine.utils.pipeline_trace import get_tracer, CP2_SIGNAL_GEN
                 _cp2m = get_tracer()
                 if _cp2m.enabled and aggregated_signals:
+                    def _extract_entry_diag(_sig):
+                        _meta = getattr(_sig, 'metadata', {}) or {}
+                        _ad = _meta.get('additional_data', {}) if isinstance(_meta, dict) else {}
+                        if not isinstance(_ad, dict):
+                            _ad = {}
+                        _entry_diag = _meta.get('entry_diag', _ad.get('entry_diag'))
+                        _entry_mode = _meta.get('entry_mode', _ad.get('entry_mode'))
+                        if _entry_mode is None and isinstance(_entry_diag, dict):
+                            _entry_mode = _entry_diag.get('entry_mode')
+                        _expected_return_bps = _meta.get('expected_return_bps', _ad.get('expected_return_bps'))
+                        return _entry_diag, _entry_mode, _expected_return_bps
+
                     for _sig in aggregated_signals:
+                        _entry_diag, _entry_mode, _expected_return_bps = _extract_entry_diag(_sig)
                         _cp2m.emit(
                             trace_id=getattr(_sig, 'signal_id', '') or f"sig_{getattr(_sig, 'symbol', 'UNK')}",
                             checkpoint=CP2_SIGNAL_GEN,
@@ -2459,11 +2491,17 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                                 "confidence": float(getattr(_sig, 'confidence', 0)),
                                 "strategy_id": getattr(_sig, 'strategy_id', ''),
                                 "target_weight": getattr(_sig, 'target_weight', None),
+                                "entry_diag": _entry_diag,
+                                "entry_mode": _entry_mode,
+                                "expected_return_bps": _expected_return_bps,
                             },
                             metadata={
                                 "raw_signal_count": sum(len(s) for s in strategy_signals.values()) if isinstance(strategy_signals, dict) else len(strategy_signals),
                                 "aggregated_count": len(aggregated_signals),
                                 "mode": "multi_strategy",
+                                "entry_diag": _entry_diag,
+                                "entry_mode": _entry_mode,
+                                "expected_return_bps": _expected_return_bps,
                             },
                         )
             except Exception:
@@ -2532,6 +2570,10 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                         target_weight = getattr(rs, "target_weight", None)
                         target_qty = getattr(rs, "target_quantity", None)
 
+                        _rs_additional_data = getattr(rs, "additional_data", {}) or {}
+                        if not isinstance(_rs_additional_data, dict):
+                            _rs_additional_data = {}
+
                         qty = float(target_qty or 0.0)
                         out.append(
                             EnhancedSignal(
@@ -2550,6 +2592,8 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                                 metadata={
                                     "strategy_name": strategy_name,
                                     "legacy_mode": True,
+                                    "additional_data": _rs_additional_data,
+                                    **_rs_additional_data,
                                 },
                             )
                         )

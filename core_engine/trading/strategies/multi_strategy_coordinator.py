@@ -543,6 +543,10 @@ class MultiStrategySignalAggregator(ISystemComponent):
             else:
                 return None
 
+            raw_additional_data = getattr(raw_signal, 'additional_data', {}) or {}
+            if not isinstance(raw_additional_data, dict):
+                raw_additional_data = {}
+
             enhanced_signal = EnhancedSignal(
                 signal_id=f"{strategy_id}_{uuid.uuid4().hex[:8]}",
                 symbol=getattr(raw_signal, 'symbol', 'UNKNOWN'),
@@ -560,7 +564,9 @@ class MultiStrategySignalAggregator(ISystemComponent):
                 metadata={
                     'strategy_priority': registration.priority,
                     'strategy_allocation': registration.allocation_pct,
-                    'risk_limit': registration.risk_limit
+                    'risk_limit': registration.risk_limit,
+                    'additional_data': raw_additional_data,
+                    **raw_additional_data,
                 }
             )
 
