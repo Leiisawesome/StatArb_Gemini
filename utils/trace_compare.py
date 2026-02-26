@@ -37,12 +37,14 @@ def cp3_stats(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     costs: List[float] = []
 
     for row in cp3:
-        waterfall = ((row.get("metadata", {}) or {}).get("waterfall", []) or [])
-        g6 = [gate for gate in waterfall if gate.get("gate") == "G6_cost"]
-        if not g6:
-            continue
-
-        data = g6[-1].get("data", {}) or {}
+        metadata = row.get("metadata", {}) or {}
+        data = (metadata.get("g6_cost") or {})
+        if not data:
+            waterfall = (metadata.get("waterfall", []) or [])
+            g6 = [gate for gate in waterfall if gate.get("gate") == "G6_cost"]
+            if not g6:
+                continue
+            data = g6[-1].get("data", {}) or {}
         for sink, key in ((ratios, "cost_edge_ratio"), (edges, "expected_edge_bps"), (costs, "cost_bps")):
             value = data.get(key)
             if isinstance(value, (int, float)):

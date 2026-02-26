@@ -421,26 +421,27 @@ class MultiStrategySignalAggregator(ISystemComponent):
                         enhanced_signal = self._convert_to_enhanced_signal(signal, strategy_id, registration)
                         if enhanced_signal:
                             self.logger.debug(f"🔍 Converted signal: confidence={enhanced_signal.confidence:.3f}, threshold={self.min_confidence_threshold}")
-                            if enhanced_signal.confidence >= self.min_confidence_threshold:
-                                enhanced_signals.append(enhanced_signal)
-                            else:
-                                self.logger.debug(f"🔍 Signal filtered: {enhanced_signal.confidence:.3f} < {self.min_confidence_threshold}")
+                            if enhanced_signal.confidence < self.min_confidence_threshold:
+                                self.logger.debug(
+                                    f"🔍 Signal below strategy threshold ({enhanced_signal.confidence:.3f} < {self.min_confidence_threshold}); routing to risk for final authority"
+                                )
+                            enhanced_signals.append(enhanced_signal)
                         else:
                             self.logger.warning(f"🔍 Signal conversion returned None for signal: {signal}")
 
                     passed_n = len(enhanced_signals)
                     if passed_n > 0:
                         self.logger.info(
-                            f"🔍 After filtering: {passed_n} signals passed threshold {self.min_confidence_threshold}"
+                            f"🔍 After conversion: {passed_n} enhanced signals routed (risk is final authority)"
                         )
                     elif raw_n > 0:
-                        # Interesting case: strategy emitted, but none passed threshold
+                        # Interesting case: strategy emitted raw signals, but none were convertible
                         self.logger.debug(
-                            f"🔍 After filtering: 0 signals passed threshold {self.min_confidence_threshold} (raw={raw_n})"
+                            f"🔍 After conversion: 0 enhanced signals routed (raw={raw_n})"
                         )
                     elif do_heartbeat:
                         self.logger.debug(
-                            f"🔍 After filtering: 0 signals passed threshold {self.min_confidence_threshold} (heartbeat)"
+                            f"🔍 After conversion: 0 enhanced signals routed (heartbeat)"
                         )
                     strategy_signals[strategy_id] = enhanced_signals
 

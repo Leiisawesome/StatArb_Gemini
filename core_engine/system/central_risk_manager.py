@@ -3893,6 +3893,7 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
                 metadata={
                     "authorized": result['authorized'],
                     "sizing_diagnostics": result['sizing_diagnostics'],
+                    "g6_cost": (result.get('gates', {}) or {}).get('G6_cost', {}),
                     "waterfall": waterfall,
                     "pipeline_elapsed_us": result['_pipeline_elapsed_us'],
                 },
@@ -4524,19 +4525,47 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
         expected_return_bps = None
         expected_return_source = 'none'
         min_expected_return_bps_hint = float(getattr(self.config, 'min_expected_return_bps_hint', 5.0))
+        raw_expected_return_bps_hint = None
+        negative_hint_detected = False
+        negative_hint_action = 'none'
+        negative_hint_reason = None
+        negative_hint_penalty_applied = False
+        negative_hint_floor_relaxed = False
         if isinstance(expected_return, (int, float)):
             er = float(expected_return)
             if math.isfinite(er):
                 if abs(er) <= 1.0:
                     er_bps = er * 10000.0
+                    raw_expected_return_bps_hint = er_bps
+                    if er_bps < 0:
+                        negative_hint_detected = True
                     if abs(er_bps) >= min_expected_return_bps_hint:
                         expected_return_bps = er_bps
                         expected_return_source = 'fractional_return'
+                        if er_bps < 0:
+                            negative_hint_action = 'penalized_blend'
+                            negative_hint_reason = 'negative_hint_used_in_blended_edge'
+                    elif er_bps < 0:
+                        negative_hint_action = 'ignored_below_min_hint'
+                        negative_hint_reason = (
+                            f'abs_hint_bps {abs(er_bps):.2f} < min_hint_bps {min_expected_return_bps_hint:.2f}'
+                        )
                 else:
                     er_bps = er
+                    raw_expected_return_bps_hint = er_bps
+                    if er_bps < 0:
+                        negative_hint_detected = True
                     if abs(er_bps) >= min_expected_return_bps_hint:
                         expected_return_bps = er_bps
                         expected_return_source = 'bps_hint'
+                        if er_bps < 0:
+                            negative_hint_action = 'penalized_blend'
+                            negative_hint_reason = 'negative_hint_used_in_blended_edge'
+                    elif er_bps < 0:
+                        negative_hint_action = 'ignored_below_min_hint'
+                        negative_hint_reason = (
+                            f'abs_hint_bps {abs(er_bps):.2f} < min_hint_bps {min_expected_return_bps_hint:.2f}'
+                        )
 
         min_expected_edge_bps = float(getattr(self.config, 'min_expected_edge_bps', 5.0))
         max_expected_edge_bps = float(getattr(self.config, 'max_expected_edge_bps', 120.0))
@@ -4555,19 +4584,27 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
         if expected_return_bps is not None and expected_return_bps < 0:
             # Negative expected-return hints must never inflate expected edge.
             expected_edge_bps = min(expected_edge_bps, strength_edge_bps)
+            negative_hint_penalty_applied = True
 
         min_edge_floor = min_expected_edge_bps
         if expected_return_bps is not None and expected_return_bps < 0:
             # Preserve penalty semantics: do not floor negative-hint edges upward.
             min_edge_floor = 0.0
+            negative_hint_floor_relaxed = True
 
         expected_edge_bps = max(min_edge_floor, min(max_expected_edge_bps, expected_edge_bps))
 
         cost_breakdown['expected_edge_model'] = expected_edge_model
         cost_breakdown['strength_edge_bps'] = strength_edge_bps
         cost_breakdown['expected_return_bps'] = expected_return_bps
+        cost_breakdown['raw_expected_return_bps_hint'] = raw_expected_return_bps_hint
         cost_breakdown['expected_return_source'] = expected_return_source
         cost_breakdown['min_expected_return_bps_hint'] = min_expected_return_bps_hint
+        cost_breakdown['negative_hint_detected'] = negative_hint_detected
+        cost_breakdown['negative_hint_action'] = negative_hint_action
+        cost_breakdown['negative_hint_reason'] = negative_hint_reason
+        cost_breakdown['negative_hint_penalty_applied'] = negative_hint_penalty_applied
+        cost_breakdown['negative_hint_floor_relaxed'] = negative_hint_floor_relaxed
         cost_breakdown['edge_strength_weight'] = strength_weight
         cost_breakdown['edge_expected_return_weight'] = expected_return_weight
         cost_breakdown['expected_edge_bps'] = expected_edge_bps
