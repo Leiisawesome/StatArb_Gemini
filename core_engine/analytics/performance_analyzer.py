@@ -37,6 +37,12 @@ from .core_metrics import (
     calculate_drawdown,
     calculate_downside_volatility as core_downside_volatility,
     calculate_volatility as core_volatility,
+    calculate_total_return as core_calculate_total_return,
+    calculate_annualized_return as core_calculate_annualized_return,
+    calculate_sharpe_ratio as core_calculate_sharpe_ratio,
+    calculate_sortino_ratio as core_calculate_sortino_ratio,
+    calculate_max_drawdown as core_calculate_max_drawdown,
+    calculate_calmar_ratio as core_calculate_calmar_ratio,
 )
 
 warnings.filterwarnings('ignore')
@@ -1030,7 +1036,7 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
         return period_days.get(period, 30)
 
     def _get_periods_per_year(self, returns: pd.Series) -> float:
-        """Determine periods per year based on data frequency"""
+        """Determine periods per year based on data frequency (P2 F1: 1min/5min support)."""
 
         if len(returns) < 2:
             return self.config.trading_days_per_year
@@ -1040,6 +1046,22 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
             # Calculate average time difference
             time_diffs = returns.index.to_series().diff().dropna()
             avg_diff = time_diffs.mean()
+
+            # P2 F1: Intraday intervals — bars_per_day * 252 for proper annualization
+            _bars_per_day = {
+                pd.Timedelta(minutes=1): 390,
+                pd.Timedelta(minutes=5): 78,
+                pd.Timedelta(minutes=15): 26,
+                pd.Timedelta(minutes=30): 13,
+                pd.Timedelta(hours=1): 7,
+            }
+            bars_per_day = None
+            for td, bars in _bars_per_day.items():
+                if avg_diff <= td * 1.5:  # Allow small tolerance
+                    bars_per_day = bars
+                    break
+            if bars_per_day is not None:
+                return 252 * bars_per_day
 
             if avg_diff <= pd.Timedelta(days=1):
                 return self.config.trading_days_per_year  # Daily
@@ -2641,37 +2663,32 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
     # ========================================
 
     def calculate_total_return(self, returns: pd.Series) -> float:
-        """Calculate total return from returns series"""
-        if returns.empty:
-            return 0.0
-
-        # Calculate cumulative return
-        cumulative_return = (1 + returns).prod() - 1
-        return float(cumulative_return)
+        """Calculate total return from returns series (delegates to core_metrics SSOT)."""
+        return core_calculate_total_return(returns)
 
     def calculate_volatility(self, returns: pd.Series) -> float:
         """Calculate annualized volatility - delegates to core_metrics"""
-        return core_volatility(returns, periods_per_year=252)
+        ppy = int(self._get_periods_per_year(returns))
+        return core_volatility(returns, periods_per_year=ppy)
 
     def calculate_sortino_ratio(self, returns: pd.Series, risk_free_rate: float = 0.04) -> float:
         """Calculate Sortino ratio - delegates to core_metrics"""
-        from .core_metrics import calculate_sortino_ratio as core_sortino
-        return core_sortino(returns, risk_free_rate=risk_free_rate, periods_per_year=252)
+        ppy = int(self._get_periods_per_year(returns))
+        return core_calculate_sortino_ratio(
+            returns, risk_free_rate=risk_free_rate, periods_per_year=ppy
+        )
 
     def calculate_calmar_ratio(self, returns: pd.Series) -> float:
         """Calculate Calmar ratio - delegates to core_metrics"""
-        from .core_metrics import calculate_calmar_ratio as core_calmar
-        return core_calmar(returns, periods_per_year=252)
+        ppy = int(self._get_periods_per_year(returns))
+        return core_calculate_calmar_ratio(returns, periods_per_year=ppy)
 
     def calculate_performance_metrics(self, returns: pd.Series) -> Dict[str, Any]:
         """
-        Calculate performance metrics for analytics integration
+        Calculate performance metrics for analytics integration.
 
-        Args:
-            returns: Series of returns data
-
-        Returns:
-            Dictionary containing performance metrics
+        Uses core_metrics (SSOT) for all return/risk metrics: geometric total return,
+        geometric annualized return, volatility, Sharpe, Sortino, Calmar, max drawdown.
         """
         try:
             if returns.empty:
@@ -2681,19 +2698,23 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
                     'calculation_timestamp': datetime.now()
                 }
 
-            # Calculate basic performance metrics
-            total_return = returns.sum()
-            annualized_return = returns.mean() * 252
-            volatility = returns.std() * np.sqrt(252)
-            sharpe_ratio = annualized_return / volatility if volatility > 0 else 0.0
+            # P0 F1 Fix: Use core_metrics (geometric) instead of arithmetic
+            ppy = int(self._get_periods_per_year(returns))
+            rf = self._get_risk_free_rate()
 
-            # Calculate drawdown metrics
-            cumulative_returns = (1 + returns).cumprod()
-            running_max = cumulative_returns.expanding().max()
-            drawdown = (cumulative_returns - running_max) / running_max
-            max_drawdown = drawdown.min()
+            total_return = core_calculate_total_return(returns)
+            annualized_return = core_calculate_annualized_return(returns, periods_per_year=ppy)
+            volatility = core_volatility(returns, periods_per_year=ppy)
+            sharpe_ratio = core_calculate_sharpe_ratio(
+                returns, risk_free_rate=rf, periods_per_year=ppy
+            )
+            max_drawdown = core_calculate_max_drawdown(returns)
+            sortino_ratio = core_calculate_sortino_ratio(
+                returns, risk_free_rate=rf, periods_per_year=ppy
+            )
+            calmar_ratio = core_calculate_calmar_ratio(returns, periods_per_year=ppy)
 
-            # Calculate additional metrics
+            # Additional metrics (not in core_metrics)
             positive_returns = returns[returns > 0]
             negative_returns = returns[returns < 0]
 
@@ -2702,21 +2723,13 @@ class PerformanceAnalyzer(ISystemComponent, IRegimeAware):
             avg_loss = negative_returns.mean() if len(negative_returns) > 0 else 0.0
             profit_factor = abs(avg_win / avg_loss) if avg_loss != 0 else 0.0
 
-            # Calculate risk metrics
+            # Risk metrics
             var_95 = np.percentile(returns, 5)
             cvar_95 = returns[returns <= var_95].mean() if len(returns[returns <= var_95]) > 0 else var_95
 
             # Skewness and kurtosis
             skewness = returns.skew()
             kurtosis = returns.kurtosis()
-
-            # Calmar ratio
-            calmar_ratio = annualized_return / abs(max_drawdown) if max_drawdown != 0 else 0.0
-
-            # Sortino ratio (downside deviation)
-            downside_returns = returns[returns < 0]
-            downside_deviation = downside_returns.std() * np.sqrt(252) if len(downside_returns) > 0 else 0.0
-            sortino_ratio = annualized_return / downside_deviation if downside_deviation > 0 else 0.0
 
             result = {
                 'performance_calculated': True,

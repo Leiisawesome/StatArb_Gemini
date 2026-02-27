@@ -73,8 +73,9 @@ def _run_smoke_test() -> Dict[str, Any]:
 
 def _extract_trade_fingerprints(result: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Extract a deterministic trade fingerprint list from engine results."""
-    engine = result.get("engine_results", {})
-    history = engine.get("execution_history", engine.get("summary", {}).get("execution_history", []))
+    engine = result.get("engine_results") or {}
+    summary = engine.get("summary") or {}
+    history = engine.get("execution_history") or summary.get("execution_history") or []
     if not history:
         return []
 
@@ -95,7 +96,7 @@ def _extract_trade_fingerprints(result: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 def _extract_metrics_fingerprint(result: Dict[str, Any]) -> Dict[str, Any]:
     """Extract key performance metrics for comparison."""
-    perf = result.get("performance", {})
+    perf = result.get("performance") or {}
     return {
         "total_return_pct": perf.get("total_return_pct", 0.0),
         "sharpe_ratio": perf.get("sharpe_ratio", 0.0),
@@ -107,7 +108,7 @@ def _extract_metrics_fingerprint(result: Dict[str, Any]) -> Dict[str, Any]:
 
 def _extract_funnel_fingerprint(result: Dict[str, Any]) -> Dict[str, int]:
     """Extract pipeline trace funnel counts."""
-    return result.get("custom_metrics", {}).get("trace_funnel", {})
+    return (result.get("custom_metrics") or {}).get("trace_funnel") or {}
 
 
 def _build_golden(result: Dict[str, Any]) -> Dict[str, Any]:

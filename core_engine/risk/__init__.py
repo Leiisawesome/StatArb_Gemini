@@ -24,6 +24,12 @@ from .correlation_analyzer import (
     CorrelationAnalyzer, CorrelationMethod, CorrelationRegime, CorrelationResult,
     CorrelationMatrix, RegimeDetectionResult, TailDependenceResult
 )
+from .stop_loss import (
+    compute_stop_price,
+    check_stop_loss_triggered,
+    compute_pnl_pct,
+    DEFAULT_STOP_LOSS_PCT,
+)
 
 __all__ = [
     # Main risk manager
@@ -74,5 +80,11 @@ __all__ = [
     'CorrelationResult',
     'CorrelationMatrix',
     'RegimeDetectionResult',
-    'TailDependenceResult'
+    'TailDependenceResult',
+
+    # Stop-loss (F6 centralized)
+    'compute_stop_price',
+    'check_stop_loss_triggered',
+    'compute_pnl_pct',
+    'DEFAULT_STOP_LOSS_PCT',
 ]

@@ -335,7 +335,12 @@ class TransitionPredictor:
             return pd.DataFrame(), pd.Series()
 
     def _create_transition_labels(self, regime_history: pd.Series, horizon: int) -> pd.Series:
-        """Create transition labels for given horizon"""
+        """Create transition labels for given horizon.
+
+        TRAINING-ONLY (P2 F2): Uses regime_history.shift(-horizon) — future regime.
+        Must NOT be used in live signal generation. For inference, use backward-looking
+        features only.
+        """
 
         try:
             # Create binary labels for regime transitions

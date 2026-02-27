@@ -19,7 +19,7 @@ Version: 1.0.0
 
 import numpy as np
 import pandas as pd
-from typing import Union, Tuple
+from typing import Union, Tuple, Optional
 from scipy import stats
 from enum import Enum
 
@@ -38,7 +38,8 @@ def calculate_var(
     returns: Union[np.ndarray, pd.Series],
     confidence_level: float = 0.95,
     method: str = "historical",
-    n_simulations: int = 10000
+    n_simulations: int = 10000,
+    seed: Optional[int] = 42
 ) -> float:
     """
     Calculate Value at Risk (VaR)
@@ -51,6 +52,8 @@ def calculate_var(
         confidence_level: Confidence level (e.g., 0.95 for 95% VaR)
         method: 'historical', 'parametric', or 'monte_carlo'
         n_simulations: Number of simulations for Monte Carlo method
+        seed: RNG seed for Monte Carlo (P1 F8: isolated RNG, no global np.random.seed).
+              Default 42 for reproducibility. Pass None for non-deterministic.
 
     Returns:
         VaR value (negative number representing loss)
@@ -79,8 +82,8 @@ def calculate_var(
     elif method == "monte_carlo":
         mu = np.mean(returns)
         sigma = np.std(returns, ddof=1)
-        np.random.seed(42)  # Reproducibility
-        simulated = np.random.normal(mu, sigma, n_simulations)
+        rng = np.random.default_rng(seed)
+        simulated = rng.normal(mu, sigma, n_simulations)
         return float(np.percentile(simulated, alpha * 100))
 
     elif method == "cornish_fisher":

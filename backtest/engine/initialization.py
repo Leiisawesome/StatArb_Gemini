@@ -562,7 +562,12 @@ class InitializationMixin:
         signature) and logs warnings. Does NOT auto-correct — the user must
         ensure data is split-adjusted before running backtests.
 
-        This is a defensive heuristic, not a guarantee.
+        DATA ASSUMPTION (P0 Audit F7):
+        - All OHLCV data MUST be split-adjusted and dividend-adjusted before
+          backtest. Polygon, Yahoo, and most providers supply adjusted close.
+        - If unadjusted data is detected (jump > 40%), backtest results are
+          invalid. Apply split_ratio retroactively or use adjusted data source.
+        - This is a defensive heuristic, not a guarantee.
         """
         JUMP_THRESHOLD = 0.40  # 40% overnight move = suspicious
 
@@ -1007,8 +1012,9 @@ class InitializationMixin:
         - Rule 2: Hierarchical Architecture with Regime-First (regime-aware risk limits)
         - Professional position tracking and cash management
 
-        This is the governance layer that ensures institutional-grade
-        risk controls across all trading activities.
+        P1 F6: Backtest does NOT populate risk_metrics['var_utilization'].
+        VaR gate (Gate 6) never fires; CRM relies on position/concentration limits.
+        Live/Paper must wire VaRCalculator → risk_metrics for VaR enforcement.
         """
         logger.info("\n" + "-" * 80)
         logger.info("🟡 BRICK #8: CentralRiskManager (order=25) - GOVERNANCE LAYER")

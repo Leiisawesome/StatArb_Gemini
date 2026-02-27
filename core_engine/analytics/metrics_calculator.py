@@ -273,23 +273,37 @@ class ReturnMetricsCalculator:
         return metrics
 
     def _get_periods_per_year(self, returns: pd.Series) -> float:
-        """Determine periods per year based on data frequency"""
+        """Determine periods per year based on data frequency (P2 F1: 1min/5min support)."""
 
         if len(returns) < 2:
             return self.config.trading_days_per_year
 
-        # Calculate average time difference
+        if not isinstance(returns.index, pd.DatetimeIndex) and not pd.api.types.is_datetime64_any_dtype(returns.index):
+            return self.config.trading_days_per_year
+
         time_diffs = returns.index.to_series().diff().dropna()
         avg_diff = time_diffs.mean()
 
+        # P2 F1: Intraday intervals
+        _bars_per_day = [
+            (pd.Timedelta(minutes=1), 390),
+            (pd.Timedelta(minutes=5), 78),
+            (pd.Timedelta(minutes=15), 26),
+            (pd.Timedelta(minutes=30), 13),
+            (pd.Timedelta(hours=1), 7),
+        ]
+        for td, bars in _bars_per_day:
+            if avg_diff <= td * 1.5:
+                return 252 * bars
+
         if avg_diff <= pd.Timedelta(days=1):
-            return self.config.trading_days_per_year  # Daily
+            return self.config.trading_days_per_year
         elif avg_diff <= pd.Timedelta(weeks=1):
-            return 52  # Weekly
+            return 52
         elif avg_diff <= pd.Timedelta(days=32):
-            return 12  # Monthly
+            return 12
         else:
-            return 4  # Quarterly
+            return 4
 
 class RiskMetricsCalculator:
     """Risk metrics calculator"""
@@ -369,8 +383,25 @@ class RiskMetricsCalculator:
         return metrics
 
     def _get_periods_per_year(self, returns: pd.Series) -> float:
-        """Get periods per year"""
-        return self.config.trading_days_per_year  # Simplified
+        """Get periods per year (P2 F1: delegates to ReturnMetricsCalculator logic)."""
+        if len(returns) < 2:
+            return self.config.trading_days_per_year
+        if not isinstance(returns.index, pd.DatetimeIndex) and not pd.api.types.is_datetime64_any_dtype(returns.index):
+            return self.config.trading_days_per_year
+        time_diffs = returns.index.to_series().diff().dropna()
+        avg_diff = time_diffs.mean()
+        for td, bars in [(pd.Timedelta(minutes=1), 390), (pd.Timedelta(minutes=5), 78),
+                         (pd.Timedelta(minutes=15), 26), (pd.Timedelta(minutes=30), 13),
+                         (pd.Timedelta(hours=1), 7)]:
+            if avg_diff <= td * 1.5:
+                return 252 * bars
+        if avg_diff <= pd.Timedelta(days=1):
+            return self.config.trading_days_per_year
+        elif avg_diff <= pd.Timedelta(weeks=1):
+            return 52
+        elif avg_diff <= pd.Timedelta(days=32):
+            return 12
+        return 4
 
     def _calculate_var(self, returns: pd.Series, confidence_level: float, method: str) -> float:
         """Calculate Value at Risk - delegates to core_metrics"""

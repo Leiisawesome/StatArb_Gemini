@@ -131,18 +131,27 @@ class OrderManager:
         self._open_positions[order_id] = position
         self._paper_orders += 1
 
+        # Shadow mode: immediate paper fill at limit price.
+        # IBKR fills will be reconciled separately if the broker is connected.
+        position.filled = True
+        position.fill_time_ns = signal.entry_timestamp_ns
+        position.fill_price = signal.limit_price
+        self._paper_fills += 1
+
         # Persist state transition
         self._persist_state(OrderStateRecord(
             order_id=order_id,
             symbol=signal.symbol,
             side=signal.side,
-            intent=OrderIntent.ENTRY_SUBMITTED,
+            intent=OrderIntent.MONITORING_EXIT,
             size=CLIP_SIZE,
             limit_price=signal.limit_price,
             timestamp_ns=signal.entry_timestamp_ns,
+            fill_price=signal.limit_price,
+            fill_size=CLIP_SIZE,
         ))
 
-        # Submit to broker if available
+        # Submit to broker for operational testing (fire-and-forget)
         if self._broker_submit:
             self._broker_submit(
                 symbol=signal.symbol,
@@ -153,7 +162,7 @@ class OrderManager:
             )
 
         logger.info(
-            "Order placed: %s %s %s %d @ %.4f (spread_ratio=%.3f, depth=%.2f)",
+            "Order placed+filled: %s %s %s %d @ %.4f (spread_ratio=%.3f, depth=%.2f)",
             order_id, signal.symbol, signal.side, CLIP_SIZE,
             signal.limit_price, signal.spread_ratio, depth_ratio,
         )
@@ -163,18 +172,39 @@ class OrderManager:
     def on_fill(
         self, order_id: str, fill_price: float, fill_size: int
     ) -> None:
-        """Handle entry fill callback from broker."""
+        """Handle entry fill callback from broker (IBKR reconciliation).
+
+        In shadow mode, place_order() already auto-fills the position.
+        This callback reconciles the broker fill with the paper fill:
+        it logs the price difference but does NOT re-increment counters
+        or overwrite the exchange-time fill_time_ns.
+        """
         if order_id not in self._open_positions:
             logger.warning("Fill for unknown order_id: %s", order_id)
             return
 
         pos = self._open_positions[order_id]
+
+        if pos.filled:
+            slippage = fill_price - (pos.fill_price or pos.entry_price)
+            slippage_bps = (
+                slippage / pos.entry_price * 10_000
+                if pos.entry_price > 0 else 0.0
+            )
+            logger.info(
+                "IBKR reconciliation: %s %s broker=%.4f paper=%.4f "
+                "slippage=%.2f bps",
+                order_id, pos.symbol, fill_price,
+                pos.fill_price, slippage_bps,
+            )
+            pos.broker_fill_price = fill_price
+            return
+
         pos.filled = True
         pos.fill_time_ns = time.time_ns()
         pos.fill_price = fill_price
         self._paper_fills += 1
 
-        # Persist state transition
         self._persist_state(OrderStateRecord(
             order_id=order_id,
             symbol=pos.symbol,
@@ -234,8 +264,52 @@ class OrderManager:
         """Returns (paper_orders, paper_fills, model_fills)."""
         return self._paper_orders, self._paper_fills, self._model_fills
 
+    def flatten_all(self, current_quote_by_symbol: Dict[str, Quote]) -> List[TradeOutcome]:
+        """Force-close all open positions at EOD using last known quotes.
+
+        If no quote is available for a position's symbol, a synthetic quote
+        at the fill price is used (P&L = 0 bps). This prevents position leaks
+        across daily resets.
+        """
+        outcomes = []
+        for order_id in list(self._open_positions.keys()):
+            pos = self._open_positions[order_id]
+            quote = current_quote_by_symbol.get(pos.symbol)
+            if quote is None:
+                fill = pos.fill_price or pos.entry_price
+                quote = Quote(
+                    symbol=pos.symbol,
+                    timestamp_ns=pos.fill_time_ns or pos.entry_time_ns,
+                    bid_price=fill,
+                    ask_price=fill,
+                    bid_size=0,
+                    ask_size=0,
+                )
+                logger.warning(
+                    "EOD flatten: no quote for %s — using fill price $%.4f "
+                    "(P&L will be 0)",
+                    pos.symbol, fill,
+                )
+            outcome = self._close_position(
+                order_id, pos, quote, ExitReason.MANUAL_CLOSE,
+            )
+            outcomes.append(outcome)
+            logger.info(
+                "EOD flatten: %s %s pnl=%.2f bps",
+                pos.symbol, pos.side, outcome.pnl_bps,
+            )
+        return outcomes
+
     def reset_daily(self) -> None:
         """Reset daily counters at start of new trading day."""
+        if self._open_positions:
+            logger.error(
+                "reset_daily called with %d open positions — "
+                "force-clearing (positions should have been flattened at EOD)",
+                len(self._open_positions),
+            )
+            self._open_positions.clear()
+
         self._daily_realized_pnl_bps = 0.0
         self._daily_realized_pnl_dollars = 0.0
         self._paper_fills = 0
@@ -243,10 +317,24 @@ class OrderManager:
         self._paper_orders = 0
         self._completed_trades.clear()
 
+        self._state_log.clear()
+        try:
+            if self._state_log_path.exists():
+                self._state_log_path.write_text("[]")
+        except OSError as e:
+            logger.warning("Failed to truncate state log: %s", e)
+
     def recover_state(self) -> int:
         """Recover from crash using persisted state log.
 
-        Returns number of positions recovered.
+        KNOWN LIMITATION: This method counts recoverable positions but does
+        NOT reconstruct OpenPosition objects. The state log lacks the fields
+        needed for reconstruction (baseline_spread, spread_ratio, sub_strategy,
+        etc.). In shadow mode, positions have a max 30s lifetime (TIMEOUT_S),
+        so any position from before a crash has already expired by restart.
+        A production system would need to persist full OpenPosition state.
+
+        Returns number of positions that would need recovery.
         """
         if not self._state_log_path.exists():
             return 0

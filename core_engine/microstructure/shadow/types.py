@@ -114,7 +114,7 @@ class Quote:
 
     @property
     def is_locked(self) -> bool:
-        return self.bid_price >= self.ask_price and self.bid_price > 0
+        return abs(self.bid_price - self.ask_price) < 1e-10 and self.bid_price > 0
 
     @property
     def is_crossed(self) -> bool:
@@ -225,6 +225,7 @@ class OpenPosition:
     filled: bool = False
     fill_time_ns: Optional[int] = None
     fill_price: Optional[float] = None
+    broker_fill_price: Optional[float] = None
 
     exit_order_id: Optional[str] = None
     exit_price: Optional[float] = None

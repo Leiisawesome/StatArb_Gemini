@@ -14,6 +14,15 @@ This simulator applies realistic execution costs:
 
 Follows Rule 7 Section B (Liquidity Management) and Rule 2 (Regime-First Principle).
 
+ASSUMPTIONS (F5 - Execution Simulation):
+- **Order type:** Market-like execution only. All orders are simulated as immediate
+  market orders filled at bar close (or decision price). Limit orders are NOT
+  modeled — no queue position, no fill probability, no partial-fill simulation.
+  Strategies that submit limit orders will be filled as if they were market orders.
+- **Partial fills:** Not supported in backtest. UnifiedExecutionEngine (live/paper)
+  supports partial fills; this simulator fills 100% or 0%.
+- **Slippage:** Clamped non-negative (never better than mid). No favorable slippage.
+
 Author: StatArb_Gemini Backtest System
 Version: 1.0.0
 """

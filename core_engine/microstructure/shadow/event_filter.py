@@ -11,9 +11,7 @@ Build Plan: v4-FINAL, Step 2
 
 from __future__ import annotations
 
-import asyncio
 import logging
-import time
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Deque, Dict, List, Optional
@@ -33,7 +31,6 @@ from core_engine.microstructure.shadow.constants import (
 from core_engine.microstructure.shadow.types import (
     ImbalanceEvent,
     NBBOIntegrityReport,
-    NBBOIssue,
     Quote,
     SubStrategy,
     TradeSignal,
@@ -331,6 +328,28 @@ class EventLevelFilter:
             odd_lot_dominance_ratio=odd_lot_ratio,
             locked_crossed_by_symbol=per_symbol,
         )
+
+    @property
+    def baseline_spreads(self) -> Dict[str, float]:
+        return dict(self._baseline_spreads)
+
+    def reset_daily(self) -> None:
+        """Reset daily-scoped counters. Call after generating daily report."""
+        self._total_events = 0
+        self._accepted = 0
+        self._rejected_deadzone = 0
+        self._rejected_inventory = 0
+        self._rejected_position = 0
+        self._rejected_nbbo = 0
+        self._rejected_staleness = 0
+
+        for w in self._quote_windows.values():
+            w.total_evaluations = 0
+            w.locked_crossed_rejections = 0
+            w.stale_rejections = 0
+            w.flickering_rejections = 0
+            w.odd_lot_quotes = 0
+            w.total_quotes_tracked = 0
 
     @property
     def rejection_counts(self) -> Dict[str, int]:

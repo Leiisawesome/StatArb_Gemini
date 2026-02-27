@@ -201,11 +201,7 @@ class IBKRBridge:
                 paper_trading=True,
             )
             self._adapter = IBKRAdapter(ibkr_config)
-            connected = await self._adapter.connect(
-                host=self._host,
-                port=self._port,
-                client_id=self._client_id,
-            )
+            connected = await self._adapter.connect()
             if not connected:
                 logger.error("IBKR connection failed (host=%s, port=%d)", self._host, self._port)
                 return False
@@ -439,6 +435,16 @@ class ShadowRunner:
 
     async def _cleanup(self) -> None:
         logger.info("Cleanup: stopping engine and disconnecting")
+        if self._engine.is_running and self._engine._order_manager._open_positions:
+            try:
+                logger.info(
+                    "Running emergency daily close before shutdown "
+                    "(%d open positions)",
+                    len(self._engine._order_manager._open_positions),
+                )
+                await self._engine.run_daily_close()
+            except Exception as e:
+                logger.error("Emergency daily close failed: %s", e)
         await self._engine.stop()
         await self._polygon.disconnect()
         await self._ibkr.disconnect()

@@ -476,6 +476,38 @@ class TestPipelineOrchestrator:
         assert is_valid is False
         assert "Inf values" in error
 
+    def test_validate_no_forward_looking_features_rejects_fwd_return(self, pipeline_orchestrator):
+        """F2: Reject fwd_return_* features (look-ahead guard)"""
+        df = pd.DataFrame({
+            'close': [100.0] * 10,
+            'fwd_return_5bar_bps': [1.0] * 10,
+        })
+        is_valid, error = pipeline_orchestrator._validate_no_forward_looking_features(df)
+        assert is_valid is False
+        assert "fwd_return" in error
+        assert "forward-looking" in error
+
+    def test_validate_no_forward_looking_features_rejects_fwd_spans_overnight(self, pipeline_orchestrator):
+        """F2: Reject fwd_spans_overnight_* features (look-ahead guard)"""
+        df = pd.DataFrame({
+            'close': [100.0] * 10,
+            'fwd_spans_overnight_5bar': [False] * 10,
+        })
+        is_valid, error = pipeline_orchestrator._validate_no_forward_looking_features(df)
+        assert is_valid is False
+        assert "fwd_spans_overnight" in error
+
+    def test_validate_no_forward_looking_features_passes_safe_features(self, pipeline_orchestrator):
+        """F2: Accept backward-looking features"""
+        df = pd.DataFrame({
+            'close': [100.0] * 10,
+            'return_1d': [0.01] * 10,
+            'momentum_20': [0.02] * 10,
+        })
+        is_valid, error = pipeline_orchestrator._validate_no_forward_looking_features(df)
+        assert is_valid is True
+        assert error is None
+
     def test_clean_dataframe(self, pipeline_orchestrator):
         """Test dataframe cleaning functionality"""
         df_with_nans = pd.DataFrame({

@@ -270,22 +270,22 @@ class BenchmarkDataManager:
         start_date: datetime,
         end_date: datetime
     ) -> Dict[str, pd.Series]:
-        """Generate mock benchmark data for testing"""
+        """Generate mock benchmark data for testing (P1 F8: isolated RNG)."""
 
         # Create date range
         dates = pd.bdate_range(start=start_date, end=end_date)
 
-        # Generate mock returns based on symbol
-        np.random.seed(hash(symbol) % 2**32)
+        # Isolated RNG — avoids global np.random.seed
+        rng = np.random.default_rng(hash(symbol) % 2**32)
 
         if symbol == "SPY":
-            returns = np.random.normal(0.0008, 0.012, len(dates))  # Market returns
+            returns = rng.normal(0.0008, 0.012, len(dates))  # Market returns
         elif symbol == "QQQ":
-            returns = np.random.normal(0.001, 0.018, len(dates))   # Tech-heavy
+            returns = rng.normal(0.001, 0.018, len(dates))   # Tech-heavy
         elif symbol == "IWM":
-            returns = np.random.normal(0.0007, 0.015, len(dates))  # Small cap
+            returns = rng.normal(0.0007, 0.015, len(dates))  # Small cap
         else:
-            returns = np.random.normal(0.0005, 0.010, len(dates))  # Default
+            returns = rng.normal(0.0005, 0.010, len(dates))  # Default
 
         returns_series = pd.Series(returns, index=dates)
 
@@ -835,27 +835,27 @@ class BenchmarkAnalyzer:
         return results
 
     def _generate_standard_factors(self, dates: pd.DatetimeIndex) -> Dict[str, pd.Series]:
-        """Generate standard factor data (mock implementation)"""
+        """Generate standard factor data (mock implementation; P1 F8: isolated RNG)."""
 
-        np.random.seed(42)
+        rng = np.random.default_rng(42)
 
         factors = {}
 
         # Market factor (excess market return)
-        market_returns = np.random.normal(0.0008, 0.012, len(dates))
+        market_returns = rng.normal(0.0008, 0.012, len(dates))
         risk_free = self.config.risk_free_rate / 252
         factors['market'] = pd.Series(market_returns - risk_free, index=dates)
 
         # Size factor (SMB - Small minus Big)
-        smb_returns = np.random.normal(0.0002, 0.008, len(dates))
+        smb_returns = rng.normal(0.0002, 0.008, len(dates))
         factors['size'] = pd.Series(smb_returns, index=dates)
 
         # Value factor (HML - High minus Low)
-        hml_returns = np.random.normal(0.0001, 0.006, len(dates))
+        hml_returns = rng.normal(0.0001, 0.006, len(dates))
         factors['value'] = pd.Series(hml_returns, index=dates)
 
         # Momentum factor (WML - Winners minus Losers)
-        wml_returns = np.random.normal(0.0003, 0.009, len(dates))
+        wml_returns = rng.normal(0.0003, 0.009, len(dates))
         factors['momentum'] = pd.Series(wml_returns, index=dates)
 
         return factors

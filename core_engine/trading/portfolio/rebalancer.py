@@ -362,8 +362,8 @@ class PortfolioRebalancer:
             if strategy_positions:
                 current_position = sum(p.quantity for p in strategy_positions)
 
-            # Calculate target position (simplified)
-            price = Decimal('100')  # This should come from market data
+            # Calculate target position (P2 F1: market data when available)
+            price = self.allocation_engine.get_price(target.symbol)
             target_position = target.target_allocation / price if price > 0 else Decimal('0')
 
             trade_amount = target_position - current_position

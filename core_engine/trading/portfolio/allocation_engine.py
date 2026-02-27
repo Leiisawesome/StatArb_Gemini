@@ -94,6 +94,9 @@ class AllocationEngine:
         self.correlation_matrix: Dict[Tuple[str, str], Decimal] = {}
         self.risk_scores: Dict[str, Decimal] = {}
 
+        # P2 F1: Market prices for position sizing (when available)
+        self.market_prices: Dict[str, Decimal] = {}
+
         # Strategy allocation limits
         self.strategy_limits: Dict[str, Decimal] = {}
 
@@ -370,11 +373,17 @@ class AllocationEngine:
 
         return final_allocation, constraints_applied
 
+    def get_price(self, symbol: str) -> Decimal:
+        """Get price for symbol (P2 F1: market data when available)."""
+        return self.market_prices.get(symbol, Decimal('100'))
+
+    def update_market_prices(self, prices: Dict[str, Decimal]) -> None:
+        """Update market prices for position sizing (P2 F1)."""
+        self.market_prices.update(prices)
+
     def _calculate_position_size(self, allocation: Decimal, symbol: str) -> Decimal:
-        """Calculate position size from allocation"""
-        # This would typically use current price
-        # For now, assume $100 per share
-        price = Decimal('100')  # This should come from market data
+        """Calculate position size from allocation (P2 F1: uses market_prices when available)."""
+        price = self.get_price(symbol)
 
         if price > 0:
             return allocation / price

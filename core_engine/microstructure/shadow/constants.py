@@ -103,7 +103,7 @@ MARKET_CLOSE_MINUTE: int = 45
 # ============================================================================
 # NBBO INTEGRITY
 # ============================================================================
-QUOTE_STALENESS_MAX_MS: int = 200
+QUOTE_STALENESS_MAX_MS: int = 500
 MIN_QUOTE_UPDATES_IN_WINDOW: int = 2
 ODD_LOT_DOMINANCE_FLAG_PCT: float = 0.30
 LOCKED_CROSSED_ALERT_RATE: float = 0.02

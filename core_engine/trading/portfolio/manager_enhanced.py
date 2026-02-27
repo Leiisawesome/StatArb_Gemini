@@ -10,6 +10,8 @@ import logging
 import threading
 import uuid
 
+import numpy as np
+
 # Import standard interfaces
 try:
     from ...system.interfaces import ISystemComponent, IRegimeAware, IRegimeSubscriber, RegimeContext
@@ -52,6 +54,7 @@ except ImportError:
 
 from ...type_definitions.regime import MarketRegimeState
 
+from ...analytics.core_metrics import calculate_total_return, calculate_annualized_return
 from .position_manager import PositionManager, PositionType
 from .allocation_engine import AllocationEngine, AllocationRequest, AllocationMethod
 from .rebalancer import PortfolioRebalancer, RebalanceType, RebalanceResult
@@ -594,8 +597,10 @@ class EnhancedPortfolioManager(ISystemComponent, IRegimeAware, IRegimeSubscriber
                 ):
                     return None
 
-                # Calculate position size and entry price
-                entry_price = kwargs.get('entry_price', Decimal('100'))  # Should come from market data
+                # Calculate position size and entry price (P2 F1: market data when available)
+                entry_price = kwargs.get('entry_price') or (
+                    self.allocation_engine.get_price(symbol) if hasattr(self.allocation_engine, 'get_price') else Decimal('100')
+                )
                 quantity = allocation_result.position_size
 
                 # Open position
@@ -801,28 +806,27 @@ class EnhancedPortfolioManager(ISystemComponent, IRegimeAware, IRegimeSubscriber
             if len(self.portfolio_snapshots) < 2:
                 return self.portfolio_metrics
 
-            # Calculate returns
+            # Calculate returns (SSOT: core_metrics for geometric total/annualized)
             returns = []
-            values = [snapshot.total_value for snapshot in self.portfolio_snapshots[-252:]]  # Last year
+            values = [float(snapshot.total_value) for snapshot in self.portfolio_snapshots[-252:]]  # Last year
 
             for i in range(1, len(values)):
-                if values[i-1] > 0:
-                    daily_return = (values[i] - values[i-1]) / values[i-1]
+                if values[i - 1] > 0:
+                    daily_return = (values[i] - values[i - 1]) / values[i - 1]
                     returns.append(daily_return)
 
             if not returns:
                 return self.portfolio_metrics
 
-            # Total return
-            if len(values) > 1 and values[0] > 0:
-                total_return = (values[-1] - values[0]) / values[0]
-                self.portfolio_metrics['total_return'] = total_return
+            returns_arr = np.array(returns)
 
-                # Annualized return
-                days = len(values) - 1
-                if days > 0:
-                    annualized_return = ((1 + total_return) ** (Decimal('252') / Decimal(str(days)))) - 1
-                    self.portfolio_metrics['annualized_return'] = annualized_return
+            # Total return (geometric: prod(1+r)-1) — SSOT from core_metrics
+            total_return = calculate_total_return(returns_arr)
+            self.portfolio_metrics['total_return'] = Decimal(str(total_return))
+
+            # Annualized return (geometric) — SSOT from core_metrics
+            annualized_return = calculate_annualized_return(returns_arr, periods_per_year=252)
+            self.portfolio_metrics['annualized_return'] = Decimal(str(annualized_return))
 
             # Volatility (annualized)
             if len(returns) > 1:

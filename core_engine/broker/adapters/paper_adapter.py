@@ -1,6 +1,9 @@
 """
 Paper Trading Adapter (Async)
 Simulated broker for testing and paper trading.
+
+P0 Audit F8: Uses isolated RNG (np.random.default_rng) instead of global
+np.random.seed() to avoid breaking reproducibility in other components.
 """
 
 import asyncio
@@ -8,6 +11,8 @@ import logging
 import uuid
 from typing import List, Optional, Dict, Any, Callable
 from datetime import datetime
+
+import numpy as np
 
 from core_engine.broker.adapters.base_adapter import BaseBrokerAdapter
 from core_engine.type_definitions.broker_types import (
@@ -56,11 +61,9 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
         self._fill_callback = None
         self._next_order_context = {}
 
-        if seed is not None:
-            import random
-            random.seed(seed)
-            import numpy as np
-            np.random.seed(seed)
+        # Isolated RNG — avoids global np.random.seed() which breaks reproducibility
+        # in other components (P0 Audit F8)
+        self._rng = np.random.default_rng(seed)
 
     def set_time_source(self, time_source: Any) -> None:
         self._time_source = time_source
@@ -102,15 +105,14 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
         if not self._connected:
             raise RuntimeError("Broker not connected")
 
-        # Simulate latency
-        import random
-        latency_sec = random.uniform(self.latency_ms_min, self.latency_ms_max) / 1000.0
+        # Simulate latency (isolated RNG)
+        latency_sec = float(self._rng.uniform(self.latency_ms_min, self.latency_ms_max)) / 1000.0
         await asyncio.sleep(latency_sec)
 
         order_id = str(uuid.uuid4())
         
-        # Check fill probability
-        if random.random() > self.fill_probability:
+        # Check fill probability (isolated RNG)
+        if self._rng.random() > self.fill_probability:
             order = Order(
                 symbol=symbol,
                 side=side,
@@ -135,8 +137,8 @@ class PaperBrokerAdapter(BaseBrokerAdapter):
         else:
             logger.warning(f"No price context for {symbol}, using default mock price $100.0")
         
-        # Apply slippage
-        slippage = random.uniform(0, self.slippage_bps_max) / 10000.0
+        # Apply slippage (isolated RNG)
+        slippage = float(self._rng.uniform(0, self.slippage_bps_max)) / 10000.0
         if side == OrderSide.BUY:
             fill_price *= (1 + slippage)
         else:

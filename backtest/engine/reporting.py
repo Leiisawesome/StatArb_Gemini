@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING, Any, Dict, Optional
 import numpy as np
 import pandas as pd
 
+from core_engine.analytics.core_metrics import calculate_total_return
+
 if TYPE_CHECKING:
     pass
 
@@ -71,8 +73,12 @@ class ReportingMixin:
             if self.risk_manager and hasattr(self.risk_manager, 'portfolio_value'):
                 final_capital = self.risk_manager.portfolio_value
 
-            # Calculate basic metrics
-            total_return = (final_capital - initial_capital) / initial_capital if initial_capital > 0 else 0
+            # Calculate basic metrics (SSOT: geometric total return from core_metrics)
+            if initial_capital > 0:
+                returns = np.array([(final_capital - initial_capital) / initial_capital])
+                total_return = float(calculate_total_return(returns))
+            else:
+                total_return = 0.0
 
             # Generate basic report
             report_lines = [
@@ -84,6 +90,7 @@ class ReportingMixin:
                 "## Summary Statistics",
                 f"- **Total Bars Processed**: {total_bars}",
                 f"- **Total Trades**: {total_trades}",
+                f"- **Symbols Dropped Out (P1 F3)**: {len(getattr(self, '_symbol_dropout_tracker', set()))} — {sorted(getattr(self, '_symbol_dropout_tracker', set()))[:5]}{' ...' if len(getattr(self, '_symbol_dropout_tracker', set())) > 5 else ''}",
                 f"- **Initial Capital**: ${initial_capital:,.2f}",
                 f"- **Final Capital**: ${final_capital:,.2f}",
                 f"- **Total Return**: {total_return:.2%}",
@@ -169,8 +176,12 @@ class ReportingMixin:
             if self.risk_manager and hasattr(self.risk_manager, 'portfolio_value'):
                 final_capital = self.risk_manager.portfolio_value
 
-            # Calculate basic metrics
-            total_return = (final_capital - initial_capital) / initial_capital if initial_capital > 0 else 0
+            # Calculate basic metrics (SSOT: geometric total return from core_metrics)
+            if initial_capital > 0:
+                returns = np.array([(final_capital - initial_capital) / initial_capital])
+                total_return = float(calculate_total_return(returns))
+            else:
+                total_return = 0.0
 
             # Win rate: only count trades with realized P&L (closed positions)
             winning_trades = 0
@@ -240,8 +251,7 @@ class ReportingMixin:
             if _filtered_history and len(_filtered_history) > 1:
                 equity_values = [snap.get('equity', initial_capital) for snap in _filtered_history]
                 if len(equity_values) > 1:
-                    import numpy as np
-                    # Calculate returns
+                    # Calculate returns (np from module-level import)
                     returns = []
                     for i in range(1, len(equity_values)):
                         if equity_values[i-1] > 0:

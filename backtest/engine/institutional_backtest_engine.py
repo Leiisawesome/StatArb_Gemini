@@ -264,6 +264,9 @@ class InstitutionalBacktestEngine(InitializationMixin, SessionManagementMixin, R
         # EOD guard (extracted helper — owns all EOD time parsing & signal gating)
         self.eod_guard = EODGuard(config)
 
+        # P1 F3: Survivorship bias — track symbols that had no price when we had positions
+        self._symbol_dropout_tracker: set = set()
+
         # Intraday Session Isolation (day-boundary state reset)
         self._intraday_session_isolation: bool = bool(
             getattr(config, "intraday_session_isolation", False)
@@ -1168,7 +1171,9 @@ class InstitutionalBacktestEngine(InitializationMixin, SessionManagementMixin, R
                 'bars_per_second': bars_processed / duration if duration > 0 else 0,
                 'report': report,
                 'start_time': start_time,
-                'end_time': end_time
+                'end_time': end_time,
+                # P1 F3: Survivorship bias — symbols that had no price when we had positions
+                'symbols_dropped_out': list(self._symbol_dropout_tracker),
             }
 
             return results
@@ -2344,6 +2349,31 @@ class InstitutionalBacktestEngine(InitializationMixin, SessionManagementMixin, R
                         current_prices[symbol] = float(symbol_data[close_col].iloc[-1])
                 except Exception:
                     pass
+
+        # P1 F3: Survivorship bias — symbols without price when we have positions
+        for symbol in list(self.risk_manager.current_positions.keys()):
+            if symbol not in current_prices:
+                self._symbol_dropout_tracker.add(symbol)
+                fallback_price = None
+                if hasattr(self.risk_manager, 'pnl_tracker') and self.risk_manager.pnl_tracker:
+                    fallback_price = self.risk_manager.pnl_tracker.position_cost_basis.get(symbol)
+                if fallback_price is None and self.position_book:
+                    pos = self.position_book.get_position(symbol)
+                    if pos is not None:
+                        fallback_price = getattr(pos, 'avg_entry_price', None) or getattr(pos, 'current_price', None)
+                if fallback_price is not None and fallback_price > 0:
+                    current_prices[symbol] = float(fallback_price)
+                    logger.warning(
+                        "⚠️ P1 F3: No price for %s (position held) — using cost basis $%.4f; "
+                        "symbol tracked as dropout",
+                        symbol, fallback_price,
+                    )
+                else:
+                    logger.warning(
+                        "⚠️ P1 F3: No price for %s (position held) — cannot update; "
+                        "symbol tracked as dropout",
+                        symbol,
+                    )
 
         # Update via CentralRiskManager (single source of truth)
         if current_prices and hasattr(self.risk_manager, 'update_market_prices'):
@@ -4186,6 +4216,14 @@ class InstitutionalBacktestEngine(InitializationMixin, SessionManagementMixin, R
             self.component_ids.clear()
             self.is_running = False
             self.is_initialized = False
+
+            # P1 F8: Reset singletons to prevent state leakage between backtest runs
+            try:
+                from core_engine.utils.pipeline_trace import PipelineTracer
+                PipelineTracer.reset_instance()
+                logger.debug("PipelineTracer singleton reset")
+            except Exception as e:
+                logger.debug("PipelineTracer reset skipped: %s", e)
 
             logger.info("✅ Shutdown complete\n")
             return True

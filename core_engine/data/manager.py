@@ -13,6 +13,11 @@ Key Features:
 - Manager pattern with high-quality fallbacks
 - Integration with existing core_engine types
 
+DATA ASSUMPTION (P0 Audit F7 - Corporate Actions):
+- OHLCV data MUST be split-adjusted and dividend-adjusted. Polygon, Yahoo, and
+  most providers supply adjusted close. Unadjusted data invalidates backtest returns.
+- Backtest engine's _check_corporate_action_integrity() detects suspicious jumps >40%.
+
 Author: StatArb_Gemini Core Engine (Architecture Compliant)
 Version: 2.0.0 (Enhanced Architecture)
 """
@@ -1328,6 +1333,26 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
                     validation_results['issues'].append(f"Found {negative_volume} negative volume values")
                     validation_results['score'] -= 0.2  # More severe penalty for negative volume
 
+            # P1 F7: Gap detection — missing bars within expected intervals
+            gap_count = 0
+            gap_details = []
+            if 'timestamp' in data.columns and 'symbol' in data.columns:
+                for sym in data['symbol'].unique()[:5]:  # Limit to first 5 symbols
+                    sym_df = data[data['symbol'] == sym].sort_values('timestamp')
+                    if len(sym_df) < 2:
+                        continue
+                    sym_ts = pd.to_datetime(sym_df['timestamp']).diff()
+                    median_delta = sym_ts.dropna().median()
+                    if pd.notna(median_delta) and median_delta.total_seconds() > 0:
+                        gap_mask = sym_ts > (median_delta * 2)
+                        n_gaps = int(gap_mask.sum())
+                        if n_gaps > 0:
+                            gap_count += n_gaps
+                            gap_details.append(f"{sym}:{n_gaps}")
+            if gap_details:
+                validation_results['issues'].append(f"Data gaps detected: {gap_count} (P1 F7)")
+                validation_results['score'] -= min(0.1 * (gap_count / max(1, len(data))), 0.2)
+
             # Calculate quality metrics
             validation_results['metrics'] = {
                 'total_records': len(data),
@@ -1337,7 +1362,9 @@ class ClickHouseDataManager(BaseDataManager, ISystemComponent):
                     'end': data['timestamp'].max().isoformat() if 'timestamp' in data.columns else None
                 },
                 'null_percentage': (total_nulls / (len(data) * len(data.columns))) * 100,
-                'completeness_score': 1.0 - (total_nulls / (len(data) * len(data.columns)))
+                'completeness_score': 1.0 - (total_nulls / (len(data) * len(data.columns))),
+                'gap_count': gap_count,
+                'gap_details': gap_details[:5] if gap_details else [],
             }
 
             # Ensure score doesn't go below 0

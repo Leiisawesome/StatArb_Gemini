@@ -41,20 +41,32 @@ class PerformanceMetrics:
     calmar_ratio: float = 0.0  # Return / Max Drawdown
     recovery_factor: float = 0.0
 
-    def calculate_from_returns(self, returns: pd.Series, benchmark_returns: Optional[pd.Series] = None):
-        """Calculate metrics from return series"""
+    def calculate_from_returns(
+        self,
+        returns: pd.Series,
+        benchmark_returns: Optional[pd.Series] = None,
+        periods_per_year: int = 252,
+    ):
+        """Calculate metrics from return series (SSOT: core_metrics for returns)."""
         if len(returns) == 0:
             return
 
-        # Basic returns
-        self.total_return = (1 + returns).prod() - 1
+        from core_engine.analytics.core_metrics import (
+            calculate_total_return,
+            calculate_annualized_return,
+        )
+
+        returns_arr = returns.dropna().values
         self.period_days = len(returns)
 
-        if self.period_days > 0:
-            self.annualized_return = (1 + self.total_return) ** (252 / self.period_days) - 1
+        # Basic returns — SSOT from core_metrics (P1 Audit F1)
+        self.total_return = float(calculate_total_return(returns_arr))
+        self.annualized_return = float(
+            calculate_annualized_return(returns_arr, periods_per_year=periods_per_year)
+        )
 
         # Risk metrics
-        self.volatility = returns.std() * np.sqrt(252)
+        self.volatility = float(returns.std() * np.sqrt(periods_per_year))
 
         if self.volatility > 0:
             self.sharpe_ratio = (self.annualized_return) / self.volatility
@@ -62,7 +74,7 @@ class PerformanceMetrics:
         # Sortino ratio (downside deviation)
         downside_returns = returns[returns < 0]
         if len(downside_returns) > 0:
-            downside_std = downside_returns.std() * np.sqrt(252)
+            downside_std = downside_returns.std() * np.sqrt(periods_per_year)
             if downside_std > 0:
                 self.sortino_ratio = self.annualized_return / downside_std
 
@@ -79,9 +91,9 @@ class PerformanceMetrics:
         if self.max_drawdown < 0:
             self.calmar_ratio = self.annualized_return / abs(self.max_drawdown)
 
-        # Excess return vs benchmark
+        # Excess return vs benchmark (SSOT: core_metrics)
         if benchmark_returns is not None and len(benchmark_returns) == len(returns):
-            benchmark_total = (1 + benchmark_returns).prod() - 1
+            benchmark_total = float(calculate_total_return(benchmark_returns.dropna().values))
             self.excess_return = self.total_return - benchmark_total
 
         # Set dates

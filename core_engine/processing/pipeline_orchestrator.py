@@ -71,6 +71,12 @@ class PipelineConstants:
     # Warmup bars for indicators (P0 Fix: Lookback window)
     WARMUP_BARS: int = 200
 
+    # F2 Look-Ahead Guard: Forbidden feature prefixes (forward-looking)
+    FORBIDDEN_FEATURE_PREFIXES: Tuple[str, ...] = (
+        "fwd_return_",
+        "fwd_spans_overnight_",
+    )
+
 PIPELINE_CONSTANTS = PipelineConstants()
 
 # ============================================================================
@@ -701,6 +707,33 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
             if not df['timestamp'].is_monotonic_increasing:
                 logger.warning(f"⚠️  {phase}: Timestamps are not sorted (may cause issues)")
 
+        return True, None
+
+    def _validate_no_forward_looking_features(self, df: pd.DataFrame) -> Tuple[bool, Optional[str]]:
+        """
+        F2 Look-Ahead Guard: Reject features that use future data.
+
+        Forward-return features (fwd_return_*, fwd_spans_overnight_*) are
+        training/labeling only — must not be used in signal generation.
+
+        Returns:
+            Tuple of (is_valid, error_message)
+        """
+        forbidden = getattr(
+            PIPELINE_CONSTANTS,
+            "FORBIDDEN_FEATURE_PREFIXES",
+            ("fwd_return_", "fwd_spans_overnight_"),
+        )
+        for col in df.columns:
+            for prefix in forbidden:
+                if str(col).startswith(prefix):
+                    msg = (
+                        f"F2 Look-Ahead: Feature '{col}' uses forward-looking data. "
+                        f"Forward-return features are for training/labeling only — "
+                        f"exclude from signal pipeline."
+                    )
+                    logger.error(f"❌ {msg}")
+                    return False, msg
         return True, None
 
     def _clean_dataframe(self, df: pd.DataFrame, phase: str) -> pd.DataFrame:
@@ -1569,6 +1602,12 @@ class ProcessingPipelineOrchestrator(ISystemComponent, IRegimeAware):
             )
             if not is_valid:
                 logger.error(f"❌ Feature engineering output validation failed: {error}")
+                return data.copy()  # Return previous stage as fallback
+
+            # F2 Look-Ahead Guard: Reject forward-looking features in signal pipeline
+            is_valid, error = self._validate_no_forward_looking_features(features_df)
+            if not is_valid:
+                logger.error(f"❌ {error}")
                 return data.copy()  # Return previous stage as fallback
 
             # Clean NaN/Inf from features

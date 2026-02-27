@@ -1,407 +1,398 @@
-# Momentum Signal Intent Resolution Plan
+# Momentum Signal Intent Resolution Plan — Implementation Guide
 
-**Goal**: Make signal intent **effective**, **edge-rigorous**, and **at the right time**.
-
-**Scope**: Pre-ADS signal generation (Level 1–3 composite logic, state machine, confirmation hierarchy). ADS gates (SMS, ERAR) and downstream risk/execution remain unchanged.
-
-**Principle**: Problem → Conjecture → Criticism → Implementation → Test (scientific process).
+**Version**: 2.1 (SSOT)  
+**Goal**: Signal intent that is **effective**, **edge-rigorous**, and **at the right time**.  
+**Status**: Single source of truth for implementation. Incorporates AQR-style scrub (v2.0).
 
 ---
 
-## Phase 0: Lock the Causal Hypothesis (Before Any Code)
+## 1. Scope
 
-### 0.1 Choose One Primary Mechanism
-
-Pick **one** causal story and design around it. Options:
-
-| Option | Mechanism | Signal Logic | Timing Implication |
-|--------|-----------|--------------|--------------------|
-| **A** | Underreaction to information | Momentum acceleration + flow confirmation | Enter when acceleration is *increasing*, not when already extended |
-| **B** | Breakout from consolidation | Vol compression → expansion + volume surge | Enter at breakout *initiation*, not chase |
-| **C** | Flow-driven continuation | Order flow imbalance + price alignment | Enter when flow and price agree and flow is *recent* |
-
-**Recommendation**: Option A (underreaction) or B (breakout) — both have clearer "right time" definitions than the current composite confluence.
-
-**Deliverable**: One-page hypothesis document stating:
-- Causal mechanism
-- Why it produces edge
-- What "right time" means (operational definition)
-- What invalidates the thesis immediately
-
-### 0.2 Unify Entry Paths
-
-- **Current**: Two disjoint paths (state machine vs composite) selected by config.
-- **Target**: Single path driven by the chosen hypothesis.
-  - If A (underreaction): Composite path, but refactored around acceleration/flow.
-  - If B (breakout): State machine path, but with explicit causal checks.
-  - If C (flow): New path; requires flow data (BVC, OFI proxy).
-
-**Deliverable**: Architecture decision — one entry path, one hypothesis.
+| In scope | Out of scope |
+|----------|--------------|
+| Pre-ADS signal generation (Level 1–3 composite, state machine, confirmation) | ADS gates (SMS, ERAR) — revalidated only |
+| `engineer.py` composite construction | Transition Supervisor (VoV, VPIN, BVC, MQS) |
+| `enhanced_momentum.py` entry logic | CRM, PositionBook, execution pipeline |
 
 ---
 
-## Phase 1: Statistical Rigor (Indicator Construction)
+## 2. Implementation Roadmap
 
-### 1.1 Factor Decomposition (Replace Equal-Weight Composite)
+Execute in order. Do not skip steps.
 
-**Problem**: 10 indicators, equal weights, many correlated (momentum_10/20/50, roc_10).
-
-**Resolution**:
-
-1. **Correlation analysis**: Compute pairwise correlations of all 10 inputs over a representative sample (e.g., 252 days × N symbols). Identify clusters.
-2. **Dimensionality reduction**:
-   - **Option 1**: PCA on z-scored inputs; use top 2–3 PCs as factors. Weights are data-driven, not arbitrary.
-   - **Option 2**: IC-based weighting — compute rolling information coefficient of each indicator vs. forward return; weight by |IC|.
-   - **Option 3**: Keep 3–4 *theoretically distinct* factors: (a) momentum, (b) trend strength, (c) flow/volume, (d) volatility regime. Drop redundant indicators.
-3. **Composite construction**: Multiplicative or min-gate across factors (ADS-compliant), not linear sum.
-
-**Deliverable**: New `composite_z` / `composite_pct` spec with explicit factor list and weights (or PCA loadings). Fallback when data is insufficient.
-
-### 1.2 Threshold Calibration (Out-of-Sample)
-
-**Problem**: `composite_z_entry = 0.8`, `composite_pct_entry = 65` — no empirical basis.
-
-**Resolution**:
-
-1. **Train period**: Use 60% of available history (e.g., first 150 days of 250).
-2. **Grid search**: Over (z_threshold, pct_threshold) with step sizes (0.1, 5). Metric: Sharpe or risk-adjusted return, not raw PnL.
-3. **Validation period**: Remaining 40%. Apply best thresholds. Report:
-   - In-sample vs out-of-sample Sharpe
-   - Threshold stability (sensitivity analysis)
-4. **Regime splits**: Repeat calibration in low-vol vs high-vol regimes. If optimal thresholds differ >20%, use regime-adaptive thresholds (already partially in place).
-
-**Deliverable**: Calibrated thresholds with confidence intervals. Document in config with `_calibrated` suffix and date.
-
-### 1.3 Inflection / Acceleration Definition
-
-**Problem**: "Inflection boost" reduces thresholds when "inflection detected" — definition is vague.
-
-**Resolution**:
-
-1. **Operational definition**: Inflection = (a) `composite_acceleration > 0` and `composite_velocity` sign matches direction, OR (b) momentum_10 crossed zero in last 3 bars with volume expansion.
-2. **No threshold reduction**: Instead of lowering z/pct thresholds, use inflection as a *required* condition for early entry. If no inflection, require higher thresholds (current behavior). This inverts the logic: inflection = permission to enter at lower bar, not permission to use weaker signals.
-3. **Empirical check**: Backtest with/without inflection filter. Does it improve Sharpe or reduce drawdown?
-
-**Deliverable**: Clear inflection spec. Remove arbitrary 80%/90% multiplier.
+```
+Step 0   Pre-flight (audit, baseline, feature flag)
+Step 1   Lock hypothesis
+Step 2   Factor decomposition (engineer.py)
+Step 3   Threshold calibration
+Step 4   Inflection spec
+Step 5   Right-time filters
+Step 6   Confirmation alignment
+Step 7   ADS revalidation + exit compatibility
+Step 8   Validation & merge
+Step 9   Cross-sectional (optional, requires multi-symbol)
+```
 
 ---
 
-## Phase 2: Right Time (Timing Discipline)
+## 3. Step-by-Step Execution Guide
 
-### 2.1 Define "Right Time" Operationally
+### Step 0: Pre-Flight
 
-For the chosen hypothesis, specify:
+**Prerequisites**: None.
 
-| Hypothesis | Right Time | Wrong Time |
-|------------|------------|------------|
-| Underreaction | Acceleration increasing, flow confirming, not yet extended | Momentum already high, price far from MA, chasing |
-| Breakout | First bar(s) after breakout with volume | Late breakout, already extended |
-| Flow | Flow and price aligned, flow is recent (not stale) | Stale flow, price already moved |
+**Actions**:
 
-**Resolution**: Add explicit "too late" / "chase" filters:
+1. **Data source checklist** — Document in `docs/momentum_pipeline_audit.md`:
 
-- **Extension filter** (already exists partially): `(close - MA) / ATR > max_extension_atr` → block. Ensure this is applied consistently.
-- **Acceleration filter**: For underreaction, require `composite_acceleration > 0` at entry. Block when `composite_acceleration < -0.2` (exhaustion).
-- **Bar-since-trigger**: For breakout, allow entry only within first N bars after trigger (e.g., N=3). Beyond that, treat as chase.
+   | Item | Definition / Constraint |
+   |------|-------------------------|
+   | Data type | Polygon OHLCV 1-min (or tick-level if available) |
+   | `buy_volume_pct` | BVC from indicators engine: Φ(ΔP/σ) on bar returns. **Always a proxy** for OHLCV (no aggressor side). |
+   | **Option C viable** | **No** for Polygon OHLCV. Reject Option C at Step 1 without further analysis. |
+   | `spread_proxy_bps` | `(high - low) / close * 10000`. Not bid-ask; range-based proxy. |
+   | `spread_baseline` | Rolling median of `spread_proxy_bps` over `spread_baseline_window` bars (default 20). Config: `spread_baseline_window`. |
+   | `volume_ratio` | `volume / volume_sma`. SMA window from indicators engine (document in audit). |
+   | `composite_acceleration` warm-up | First 50 bars (or velocity window + 1) may have NaN. **Block entry until valid.** |
 
-**Deliverable**: "Right time" checklist in code comments and config. Each entry must pass.
+2. **Pipeline audit** — Document:
+   - Columns guaranteed for momentum: `composite_z`, `composite_pct`, `momentum_10/20/50`, `volume_ratio`, `buy_volume_pct`, `composite_acceleration`, `composite_velocity`, `atr`, `adx`
+   - Warm-up bars: 50 (for momentum_50)
+   - `volume_ratio` SMA window (from indicators engine)
+   - If `buy_volume_pct` is proxy only (OHLCV) → **reject Option C** in Step 1
 
-### 2.2 ORB and Time-of-Day
+4. **Baseline capture**:
+   ```bash
+   PYTHONPATH=. python backtest/experiments/smoke_test.py --config backtest/configs/smoke_test_mom.yaml
+   ```
+   Save to `results/baseline_momentum_v1.json`: `{sharpe, trade_count, win_rate, max_dd}`
 
-**Current**: ORB blocks first 15 minutes. No other time filters.
+5. **Feature flag** — Add to `smoke_test_mom.yaml` (or strategy config):
+   ```yaml
+   enable_momentum_v2_signal: false
+   ```
 
-**Resolution**:
+**Deliverables**: `docs/momentum_pipeline_audit.md`, `results/baseline_momentum_v1.json`, config flag.
 
-1. **ORB**: Keep. Document rationale (overnight imbalance clearing).
-2. **Power hour / lunch**: Optional filters — e.g., reduce size or block 11:45–13:00 if evidence shows lower edge. Calibrate with time-of-day PnL breakdown.
-3. **End-of-day**: Already handled by EOD liquidation. No change.
-
-**Deliverable**: Time-of-day analysis report. Config flags for optional filters.
-
----
-
-## Phase 3: Cross-Sectional Component (Optional but High-Impact)
-
-### 3.1 Relative Strength
-
-**Problem**: Pure time-series. No cross-sectional ranking.
-
-**Resolution**:
-
-1. **Universe**: Use existing symbol list (e.g., TSLA in smoke test; expand to 5–10 names for proper cross-section).
-2. **Rank**: Each bar, compute `composite_z` (or new factor score) for all symbols. Rank 0–1.
-3. **Entry condition**: Only enter when symbol is in top quartile (long) or bottom quartile (short). This filters "strongest in universe" vs "strong in isolation."
-4. **Data requirement**: Need multi-symbol data in same bar. Pipeline may need to pass universe-level context.
-
-**Deliverable**: Cross-sectional rank feature. Gate: `rank >= 0.75` for long, `rank <= 0.25` for short. Config flag `enable_cross_sectional_rank`.
+**Acceptance**: Audit doc exists; baseline file exists; flag defaults to false.
 
 ---
 
-## Phase 4: Confirmation Hierarchy (Causal Alignment)
+### Step 1: Lock Hypothesis
 
-### 4.1 Align Confirmation to Hypothesis
+**Prerequisites**: Step 0 complete.
 
-**Current**: Volume expansion, price structure, volatility breakout — ad hoc hierarchy.
+**Actions**:
 
-**Resolution**:
+1. **Decision matrix** — Evaluate options:
+
+   | Option | Mechanism | Data need | Reject if |
+   |--------|-----------|-----------|-----------|
+   | A | Underreaction: acceleration + flow | composite_acceleration, buy_volume_pct | acceleration noisy (rolling std > 0.5) |
+   | B | Breakout: vol compression → expansion | atr, volume, high/low | — |
+   | C | Flow-driven continuation | BVC/tick-level flow | **Reject for Polygon OHLCV** — buy_volume_pct is always proxy (Step 0 audit) |
+
+   **Data constraint**: If data is Polygon OHLCV (no tick-level flow), Option C is **infeasible**. Reject without further analysis.
+
+2. **Choose one** using: (1) Data availability, (2) Architectural fit (A→composite path, B→state machine), (3) External review if available.
+
+3. **Write hypothesis doc** (`docs/momentum_hypothesis_v2.md`):
+   - Causal mechanism
+   - Edge source
+   - "Right time" (operational definition)
+   - Invalidation conditions
+   - Data requirements
+   - **Expected half-life of edge** (from literature or empirical decay; if unknown, state assumption)
+
+4. **Unify entry path** — If A: composite path. If B: state machine path. If C: new flow path. Remove the other path or gate it behind a config flag.
+
+**Deliverables**: `docs/momentum_hypothesis_v2.md`, architecture decision (one path).
+
+**Acceptance**: One hypothesis doc; single active entry path.
+
+---
+
+### Step 2: Factor Decomposition
+
+**Prerequisites**: Step 1 complete.
+
+**Files**: `core_engine/processing/features/engineer.py`
+
+**Actions**:
+
+1. **Correlation analysis** — Pairwise correlations of 10 composite inputs over 252 days × N symbols. Identify clusters.
+
+2. **Choose construction**:
+   - **PCA**: Top 2–3 PCs. Note: unsupervised; still needs calibration.
+   - **IC**: Rolling IC vs forward return (next 5 bars). No look-ahead: forward return must not overlap indicator window.
+   - **Theory**: 3–4 factors: momentum, trend_strength, flow/volume, vol_regime. Drop redundant (e.g., roc_10 if momentum_10 exists).
+
+3. **Implement** — Add `composite_z_v2` (and `composite_pct_v2`) in `engineer.py`. Multiplicative or min-gate across factors (ADS-compliant). Define fallback when data insufficient: `composite_z_v2 = 0.0`, `composite_pct_v2 = 50.0`.
+
+4. **Wire strategy** — When `enable_momentum_v2_signal: true`, strategy reads `composite_z_v2` / `composite_pct_v2` instead of `composite_z` / `composite_pct`.
+
+**Deliverables**: New composite spec, `engineer.py` changes, unit tests.
+
+**Acceptance**: Smoke test passes with v2 enabled; composite values non-trivial.
+
+---
+
+### Step 3: Threshold Calibration
+
+**Prerequisites**: Step 2 complete.
+
+**Actions**:
+
+1. **Data check** — Count train-period trades. If < 100:
+   - **Sparse branch**: Skip grid search. Use theory-based: `composite_z > 0.7`, `composite_pct > 60` (exploratory; see Appendix D). Run sensitivity ±15%. Report.
+   - **Rationale**: 100 trades ≈ minimum for ~30% OOS Sharpe std error; if fewer, theory-based only with explicit sensitivity report.
+   - **Else**: Proceed with grid search.
+
+2. **Grid search** (if sufficient data):
+   - **Single split**: Train 60% of history, validate 40%. Report bootstrap 90% CI on validation Sharpe.
+   - **Walk-forward** (preferred): 5 rolling windows (e.g., train 6 months, validate 1 month). Report mean and std of Sharpe across folds.
+   - Grid: (z_threshold, pct_threshold), steps (0.1, 5). Metric: Sharpe.
+   - **Multiplicity**: Report best Sharpe; if multiple thresholds achieve similar Sharpe, prefer simpler (higher z, higher pct). Consider Bonferroni or permutation-based p-value for robustness.
+
+3. **Regime split** — If data allows, calibrate in low-vol vs high-vol. Use bootstrap difference in Sharpe; if 90% CI excludes 0, use regime-adaptive thresholds.
+
+4. **Config** — Add `composite_z_entry_calibrated`, `composite_pct_entry_calibrated` with `_date` suffix.
+
+**Deliverables**: Calibrated thresholds, calibration report (with CI / walk-forward stats).
+
+**Acceptance**: Thresholds documented; backtest vs baseline shows ΔSharpe.
+
+---
+
+### Step 4: Inflection Spec
+
+**Prerequisites**: Step 1 complete.
+
+**Files**: `core_engine/trading/strategies/implementations/momentum/enhanced_momentum.py`
+
+**Actions**:
+
+1. **Define inflection** — (a) `composite_acceleration > 0` AND `composite_velocity` sign matches direction, OR (b) `momentum_10` crossed zero in last 3 bars with `volume_ratio > 1.0`. (3 bars ≈ 3 min at 1-min; sensitivity ±1 bar — see Appendix D.)
+
+2. **Logic change** — Inflection is *required* for early entry (lower thresholds). No inflection → require full thresholds. Remove 80%/90% multiplier heuristic.
+
+3. **Config** — `inflection_required_for_early_entry: true`.
+
+4. **Backtest** — With/without inflection filter. Report ΔSharpe, Δdrawdown.
+
+**Deliverables**: Inflection spec in code, config key, backtest comparison.
+
+**Acceptance**: No arbitrary threshold reduction; inflection is a gate.
+
+---
+
+### Step 5: Right-Time Filters
+
+**Prerequisites**: Step 1 complete.
+
+**Files**: `enhanced_momentum.py`, `momentum_state_machine.py` — see code map below.
+
+**Actions** (hypothesis-specific):
+
+| Hypothesis | Filter | Location | Config |
+|------------|--------|----------|--------|
+| A | `composite_acceleration > 0` at entry; block if `< -0.2` | `_check_composite_entry` or new gate | — |
+| A/B | `(close - MA) / ATR > max_extension_atr` → block | **Both paths** (see below) | `max_extension_atr: 1.5` |
+| B | Entry only within first N bars of breakout | `momentum_state_machine.evaluate()` | `max_bars_since_breakout: 3` |
+| All | `spread_proxy_bps > baseline × multiplier` → block | Before entry | `spread_baseline_window: 20`, `spread_bps_block_multiplier: 2.0` |
+
+**Extension filter (A/B) — must apply in BOTH paths**:
+- **State machine**: Already in `momentum_state_machine.evaluate()` breakout branch.
+- **Composite path**: Implement `(close - MA) / ATR > max_extension_atr` → block in `_check_composite_entry` (or equivalent) before entry. **Verify both paths apply when enabled.**
+
+**Spread block**:
+- `spread_proxy_bps = (high - low) / close * 10000`
+- `baseline = rolling_median(spread_proxy_bps, spread_baseline_window)`
+- Block if `spread_proxy_bps > baseline * spread_bps_block_multiplier`
+
+**Regime override** — If `regime_detector.confidence` (or `regime_manager.trend_conf` — document which) < 0.5, use neutral thresholds (no regime adjustment). Config: `regime_confidence_source`.
+
+**Document** — Add "Right time checklist" in code comments.
+
+**Deliverables**: Filters implemented, code map updated, config keys.
+
+**Acceptance**: Each entry passes right-time checklist.
+
+---
+
+### Step 6: Confirmation Alignment
+
+**Prerequisites**: Step 1 complete.
+
+**Actions**:
 
 1. **Map to hypothesis**:
-   - Underreaction: Flow confirmation (buy_volume_pct, volume_ratio) is primary. Price structure secondary.
-   - Breakout: Volume surge is primary. Volatility expansion secondary. Price structure (higher lows) is setup, not confirmation.
-2. **Single primary confirmation**: Define one confirmation type that *must* be present for the chosen hypothesis. Others are optional boosts.
-3. **Calibrate thresholds**: `volume_ratio > X`, `buy_volume_pct > Y` — derive from data (e.g., median volume_ratio on profitable entries vs unprofitable).
+   - A: Primary = flow (buy_volume_pct, volume_ratio). Secondary = price structure.
+   - B: Primary = volume surge. Secondary = vol expansion.
+   - C: Primary = flow. (**Rejected for OHLCV** — requires tick-level BVC.)
 
-**Deliverable**: Confirmation spec aligned to hypothesis. Remove "unconfirmed requires 2x threshold" heuristic; replace with "no primary confirmation → no entry."
+2. **Primary required** — No entry without primary confirmation. Remove "unconfirmed requires 2× threshold".
 
----
+3. **Calibrate** — If profitable vs unprofitable entries ≥ 20 each: derive `volume_ratio > X`, `buy_volume_pct > Y` from data. Else: theory-based (volume_ratio 1.0 = neutral/no expansion; buy_volume_pct 0.52 from Lee-Ready/BVC literature or data-derived — see Appendix D) + sensitivity.
 
-## Phase 5: Validation Discipline
+4. **Config** — `confirmation_primary_required: true`.
 
-### 5.1 Pre-Implementation Checks
+**Deliverables**: Confirmation spec, config.
 
-Before merging any change:
-
-1. **Unit tests**: New factor construction, threshold logic, inflection definition.
-2. **Smoke test**: Must pass. No regression in pipeline funnel.
-3. **Backtest**: Same period (Dec 16–20, 2024) + extended period if available. Report:
-   - Trade count, win rate, Sharpe, max DD
-   - Comparison to baseline (current logic)
-
-### 5.2 Post-Implementation Monitoring
-
-1. **Sensitivity**: Vary thresholds ±10%. Document impact on Sharpe.
-2. **Regime stability**: Performance in low-vol vs high-vol periods.
-3. **Decay check**: If 30+ days of live/paper data, test for edge decay (rolling Sharpe degradation).
+**Acceptance**: No entry without primary confirmation.
 
 ---
 
-## Execution Order
+### Step 7: ADS Revalidation & Exit Compatibility
 
-| Phase | Dependency | Effort | Impact |
-|-------|-------------|--------|--------|
-| 0 | None | 1–2 days | Critical — locks direction |
-| 1 | Phase 0 | 3–5 days | High — fixes statistical flaws |
-| 2 | Phase 0 | 1–2 days | High — fixes timing |
-| 3 | Phase 0, 1 | 2–3 days | Medium–High (needs multi-symbol) |
-| 4 | Phase 0 | 1–2 days | Medium |
-| 5 | All | Ongoing | Required |
+**Prerequisites**: Steps 2–6 complete.
 
-**Recommended sequence**: 0 → 1 → 2 → 4 → 5. Phase 3 (cross-sectional) can follow once multi-symbol pipeline is stable.
+**Actions**:
 
----
+1. **Backtest** — Run with v2 enabled. Inspect SMS scores at entry, ERAR values.
 
-## Success Criteria
+2. **ADS gates** — If signal quality distribution shifted: consider tau/gamma adjustment ±0.05. Document rationale; run sensitivity before deploying.
 
-Signal intent is **effective** when:
-- Out-of-sample Sharpe ≥ 0.5 (or positive and stable over 20+ trades)
-- Win rate and payoff structure are consistent with the causal hypothesis
+3. **Exit logic** — CRM exits use `composite_z`. If we changed to `composite_z_v2`:
+   - Option A: Update CRM exit formulas to use `composite_z_v2`.
+   - Option B: Keep `composite_z` for exits during transition; add `composite_z_v2` for entry only. Migrate exits after validation.
 
-Signal intent is **edge-rigorous** when:
-- Factor construction has explicit justification (PCA, IC, or theory)
-- Thresholds are calibrated with train/validation split
-- No arbitrary magic numbers without documentation
+4. **Verify** — Exits still fire when thesis invalid; no excessive early exit.
 
-Signal intent is **at the right time** when:
-- "Right time" is operationally defined and enforced
-- Chase/extension filters block late entries
-- Time-of-day filters (if any) are evidence-based
+**Deliverables**: ADS revalidation note, exit compatibility confirmed.
+
+**Acceptance**: No exit misfire; ADS gates still appropriate.
 
 ---
 
-## Round 2: Deeper Review (Missed Spots & Hotspot Improvements)
+### Step 8: Validation & Merge
 
-### A. Missed Spots
+**Prerequisites**: Steps 0–7 complete.
 
-#### A1. ADS Gate Recalibration (Downstream Ripple)
+**Actions**:
 
-**Miss**: Plan states "ADS gates remain unchanged." Changing signal distribution (fewer, higher-quality signals) can make existing SMS tau and ERAR gamma mis-calibrated.
+1. **Unit tests** — Factor construction, threshold logic, inflection, confirmation.
 
-**Add**: After Phase 1–4, add **Phase 5.0: ADS Gate Revalidation**:
-- Re-run backtest with new signal logic. Inspect SMS scores at entry and ERAR values.
-- If signal quality distribution has shifted, consider minor tau/gamma adjustment (e.g., ±0.05). Document any change.
-- Exit logic (DIRECTION_REVERSAL, ALIGNMENT_BREAKDOWN) uses `composite_z` — if we change its construction, verify these exits still fire correctly. May need to add `composite_z_legacy` for exit compatibility during transition.
+2. **Smoke test** — Must pass. No funnel regression.
 
-#### A2. Statistical Power & Minimum Data Requirements
+3. **Backtest report** — Same period + extended if available. Include: vs baseline (ΔSharpe, Δtrades, Δwin_rate). **Report gross and net of config execution costs** (commission + slippage). Report turnover: trades per period × avg position size / capital.
 
-**Miss**: Phase 1.2 assumes 250 days of 1-min bars. Smoke test has 5 days. With ~1–2 trades/day, train set has ~10–20 trades — insufficient for reliable grid search.
+4. **Milestones** (all apply to **net** Sharpe unless noted):
+   - M1: Net Sharpe > 0 (proceed)
+   - M2: Net Sharpe > 0.3, win rate ≥ 50%, max DD < 2% (ship)
+   - M3: Net Sharpe ≥ 0.5, ≥ 20 trades, **and** bootstrap 90% CI for Sharpe > 0.2 (scale)
 
-**Add**:
-- **Minimum data**: Require ≥ 100 trades in train period. If unavailable, use **Option 2**: theory-based thresholds (e.g., from literature) + sensitivity analysis instead of grid search.
-- **Multiple comparisons**: Grid search over K thresholds = multiple testing. Use Bonferroni or single validation set; report confidence intervals, not point estimates.
-- **Overfitting guard**: When N_trades < 50, prefer simpler models (fewer factors, coarser grid). Add explicit "sparse data" branch in Phase 1.2.
+5. **Merge** — Enable v2 by default or keep behind flag for staged rollout.
 
-#### A3. Data Availability & Fallbacks
+**Deliverables**: Test suite, backtest report, milestone status.
 
-**Miss**: Plan assumes `buy_volume_pct`, `volume_ratio`, `composite_z` exist. Pipeline may not provide them consistently (warm-up, missing columns, different data sources).
-
-**Add**:
-- **Pre-Phase 0**: Audit pipeline — which columns are guaranteed for momentum strategy? Document warm-up bars (e.g., 50 for momentum_50).
-- **Fallback spec**: For each new logic block, define: "If X missing → block entry" vs "If X missing → use fallback Y". Align with ADS § "Missing data: every gate must define fallback."
-- **Confirmation data**: `buy_volume_pct` requires BVC/Lee-Ready. In 1-min bar pipeline, is it a proxy (e.g., close vs open heuristic)? If unreliable, Option C (flow) may be infeasible; Option A/B preferred.
-
-#### A4. Exit Logic Alignment
-
-**Miss**: Exits (DIRECTION_REVERSAL, ALIGNMENT_BREAKDOWN) consume `composite_z` and momentum_10/20. If we change their construction, exit triggers may misfire.
-
-**Add**:
-- **Exit compatibility check**: After Phase 1.1 (new composite), run backtest and inspect: Do exits still trigger when thesis is invalid? Do they trigger too early (false positive)?
-- **Transition period**: Consider keeping `composite_z_legacy` for exit logic until new composite is validated. Or: explicitly update exit formulas to use new factors.
-
-#### A5. Regime Vector Consistency
-
-**Miss**: Regime-adaptive thresholds (R.volatility, R.trend, R.liquidity) come from regime detector. If regime is stale or misaligned with momentum hypothesis, adjustments can hurt.
-
-**Add**:
-- **Regime audit**: Document regime detector source and update frequency. Is it bar-synchronous or lagged?
-- **Regime override**: If regime confidence < 0.5, use neutral thresholds (no adjustment). Avoid amplifying noise.
-
-#### A6. Cost Structure of "Right Time"
-
-**Miss**: Early vs late entries may have different slippage/cost. Early breakout may face wider spread; late chase may face worse fill.
-
-**Add**:
-- **Cost awareness**: In Phase 2, add a check: "If estimated spread_bps > 2× baseline, block". ERAR already models cost; ensure "right time" filters don't force entries into high-cost regimes.
-- **Optional**: Time-of-day cost analysis — are certain hours systematically more expensive?
-
-#### A7. Operational Safety & Rollback
-
-**Miss**: No feature flag or rollback path if new logic is worse.
-
-**Add**:
-- **Feature flag**: `enable_momentum_v2_signal` (or similar). When False, use current logic. When True, use new logic. Allows A/B comparison and instant rollback.
-- **Baseline capture**: Before any change, capture baseline metrics (Sharpe, trade count, win rate) for the same period. Store in `results/baseline_momentum_*.json`.
-
-#### A8. Hypothesis Selection Criteria
-
-**Miss**: Phase 0 says "choose one" but doesn't specify how to decide.
-
-**Add**:
-- **Decision framework**:
-  1. **Data availability**: Does pipeline provide required inputs? (A/B: yes; C: needs tick/BVC)
-  2. **Empirical support**: Does any option have prior backtest evidence in this codebase?
-  3. **Architectural fit**: Which path (state machine vs composite) has less refactor? B favors state machine; A favors composite.
-  4. **External review**: If available, get hypothesis choice validated by external quant before locking.
+**Acceptance**: M1 passed; smoke test green.
 
 ---
 
-### B. Hotspot Improvements
+### Step 9: Cross-Sectional (Optional)
 
-#### B1. Phase 0 — Decision Framework (Strengthen)
+**Prerequisites**: Steps 0–8 complete. **Requires**: Multi-symbol pipeline. **Minimum universe size**: N ≥ 10 symbols (with N < 10, rank thresholds are unstable).
 
-**Current**: "Pick one" with table. Vague.
+**Actions**:
 
-**Improvement**:
-- Add explicit decision matrix (see A8).
-- Add **rejection criteria** for each option: e.g., "Reject A if acceleration data is noisy (check rolling std of composite_acceleration)."
-- Add **one-page hypothesis** template: mechanism, edge source, right time, invalidation, data requirements.
+1. **Pipeline check** — Verify strategy receives `universe_df` (all symbols, same timestamp). If not, pipeline change first.
 
-#### B2. Phase 1.1 — Factor Construction (Look-Ahead & Bias)
+2. **Universe construction** — Symbols passing liquidity filter (volume, spread). Consider sector-neutral rank (within-sector) if factor exposure is a concern.
 
-**Current**: PCA and IC options. IC is supervised.
+3. **Rank** — Each bar, rank `composite_z_v2` across symbols. Entry: long if rank ≥ 0.75, short if rank ≤ 0.25.
 
-**Improvement**:
-- **IC look-ahead**: When computing IC(indicator, forward_return), use forward return over *next* N bars. Ensure no overlap with indicator computation window. Document: "Forward return = close[t+1] / close[t] - 1 over next 5 bars" (or similar).
-- **PCA**: Unsupervised — may not align with returns. Add: "PCA factors are for dimensionality reduction only; final signal alignment with returns still requires empirical calibration."
-- **Option 3 (theory-based)**: Add explicit factor definitions and rationale. E.g., "Momentum factor = mean(momentum_10, momentum_20, momentum_50) — captures multi-horizon trend."
+4. **Config** — `enable_cross_sectional_rank: false` (default). Use multi-symbol config for validation.
 
-#### B3. Phase 1.2 — Calibration (Sparse Data & Overfitting)
+**Deliverables**: Rank feature, config. Cannot validate with 1-symbol smoke test.
 
-**Current**: 60/40 split, grid search.
-
-**Improvement**:
-- **Sparse-data branch**: If train trades < 100: (a) skip grid search; (b) use theory-based thresholds (e.g., composite_z > 0.7 from literature); (c) run sensitivity ±15% and report.
-- **Regularization**: Use coarser grid (e.g., z_step=0.2, pct_step=10) when data is sparse. Avoid overfitting to noise.
-- **Walk-forward**: If data ≥ 1 year, consider walk-forward calibration (train on months 1–6, validate on 7, roll forward). More robust than single split.
-
-#### B4. Phase 2 — Code Location Mapping
-
-**Current**: "Add explicit filters" — conceptual.
-
-**Improvement**:
-- **Code map**: Add table mapping each "right time" filter to the exact method/location in `enhanced_momentum.py`:
-  | Filter | Method | Location |
-  |--------|--------|-----------|
-  | Extension | `_check_composite_entry` or state machine | `max_extension_atr` |
-  | Acceleration | `_passes_transition_supervisor_gate` or new | TBD |
-  | Bar-since-trigger | State machine `evaluate()` | `breakout_acceleration` branch |
-- Ensures implementation traceability.
-
-#### B5. Phase 3 — Pipeline Architecture Check
-
-**Current**: "Need multi-symbol data in same bar."
-
-**Improvement**:
-- **Pre-Phase 3 check**: Verify pipeline can pass `universe_df` (all symbols, same timestamp) to strategy. If not, Phase 3 requires pipeline change first.
-
-#### B6. Phase 4 — Confirmation Data Reliability
-
-**Current**: "Flow confirmation primary for underreaction."
-
-**Improvement**:
-- **Data audit**: Before Phase 4, confirm `buy_volume_pct` source. Is it BVC from tick data, or a bar-level proxy (e.g., (close - open) / (high - low) heuristic)?
-- **If proxy**: Document that proxy is imperfect; consider lowering confidence when flow confirmation is primary.
-
-#### B7. Success Criteria — Graduated Milestones
-
-**Current**: Sharpe ≥ 0.5. Current is -4.43 — huge jump.
-
-**Improvement**:
-- **Milestone 1**: Sharpe > 0 (positive risk-adjusted return). Must pass before proceeding.
-- **Milestone 2**: Sharpe > 0.3, win rate ≥ 50%, max DD < 2%.
-- **Milestone 3**: Sharpe ≥ 0.5, stable over 20+ trades.
-- **Milestone 2** is the "ship" gate; **Milestone 3** is the "scale" gate.
-
-#### B8. Phase 5 — Baseline & Comparison Protocol
-
-**Current**: "Comparison to baseline."
-
-**Improvement**:
-- **Baseline capture**: Before Phase 1, run: `python backtest/experiments/smoke_test.py --config smoke_test_mom.yaml` and save to `results/baseline_momentum_v1.json` (metrics: Sharpe, trades, win rate, DD).
-- **Comparison protocol**: Every phase deliverable must include: "vs baseline: ΔSharpe, Δtrades, Δwin_rate."
+**Acceptance**: Multi-symbol backtest shows rank filter effect.
 
 ---
 
-### C. Revised Execution Order (with Dependencies)
+## 4. Success Criteria
 
-```
-Phase 0     → Lock hypothesis, unify paths
-    ↓
-Pre-phase   → Pipeline audit, baseline capture, data availability check
-    ↓
-Phase 1.1   → Factor decomposition (new composite)
-    ↓
-Phase 1.2   → Threshold calibration (with sparse-data branch)
-    ↓
-Phase 1.3   → Inflection spec
-    ↓
-Phase 2     → Right-time filters (with code map)
-    ↓
-Phase 4     → Confirmation alignment
-    ↓
-Phase 5.0   → ADS gate revalidation
-    ↓
-Phase 5.1   → Pre-implementation checks
-    ↓
-Phase 5.2   → Post-implementation monitoring
-    ↓
-Phase 3     → Cross-sectional (optional, after pipeline supports)
-```
+| Criterion | Measure |
+|-----------|---------|
+| Effective | M1: Net Sharpe > 0; M2: Net Sharpe > 0.3, win rate ≥ 50%, max DD < 2% |
+| Edge-rigorous | Factor construction justified; thresholds calibrated or theory-based; constants cited or labeled (Appendix D) |
+| Right time | Right-time checklist enforced; extension filter in both paths; chase filters block late entries |
 
 ---
 
-### D. Summary of Additions
+## 5. Appendices
 
-| Category | Additions |
-|----------|-----------|
-| **Missed** | ADS recalibration, statistical power, data fallbacks, exit alignment, regime consistency, cost structure, rollback, hypothesis selection criteria |
-| **Hotspots** | Decision framework, look-ahead guard, sparse-data branch, code map, pipeline check, confirmation reliability, graduated milestones, baseline protocol |
-| **New** | Phase 5.0 (ADS revalidation), Pre-phase (audit + baseline), feature flag, `composite_z_legacy` for exit compatibility |
+### A. Config Keys
+
+| Key | Default | Step |
+|-----|---------|------|
+| `enable_momentum_v2_signal` | false | 0 |
+| `composite_z_entry_calibrated` | — | 3 |
+| `composite_pct_entry_calibrated` | — | 3 |
+| `inflection_required_for_early_entry` | true | 4 |
+| `max_extension_atr` | 1.5 | 5 |
+| `max_bars_since_breakout` | 3 | 5 |
+| `spread_baseline_window` | 20 | 5 |
+| `spread_bps_block_multiplier` | 2.0 | 5 |
+| `regime_confidence_source` | — | 5 (document: regime_detector.confidence or regime_manager.trend_conf) |
+| `confirmation_primary_required` | true | 6 |
+| `enable_cross_sectional_rank` | false | 9 |
+
+### B. Code Map (Right-Time Filters)
+
+| Filter | File | Method | Notes |
+|--------|------|--------|-------|
+| Extension | `enhanced_momentum.py` | `_check_composite_entry` | **Implement** — composite path currently lacks this |
+| Extension | `momentum_state_machine.py` | `evaluate()` breakout branch | Already present |
+| Acceleration | `enhanced_momentum.py` | New gate or `_passes_transition_supervisor_gate` | — |
+| Bar-since-trigger | `momentum_state_machine.py` | `evaluate()` breakout branch | — |
+| Spread block | `enhanced_momentum.py` | Before `place_order` or in `_check_composite_entry` | Use spread_proxy_bps, baseline from Step 0 |
+
+### C. Fallback Spec (ADS-Aligned)
+
+For each new gate: define "If X missing → block" or "If X missing → use Y".
+
+| Input | Missing behavior |
+|-------|------------------|
+| composite_z_v2 | Use 0.0 (neutral) |
+| composite_pct_v2 | Use 50.0 |
+| composite_acceleration | Block entry (inflection unknown) |
+| buy_volume_pct | Use 0.5 (neutral) if proxy; block if primary confirmation |
+| volume_ratio | Use 1.0 (neutral) |
+| regime confidence < 0.5 | Use neutral thresholds (no regime adjustment) |
+| composite_acceleration NaN (warm-up) | Block entry until valid (first 50 bars) |
+
+### D. Constant Justification Table
+
+| Constant | Value | Source |
+|----------|-------|--------|
+| composite_z sparse | 0.7 | Exploratory; sensitivity ±0.15 |
+| composite_pct sparse | 60 | Exploratory; sensitivity ±5 |
+| buy_volume_pct | 0.52 | Lee-Ready / BVC literature; or data-derived |
+| volume_ratio | 1.0 | Neutral (no expansion) |
+| inflection bars | 3 | 1-min bars; sensitivity ±1 bar |
+| tau/gamma adjustment | ±0.05 | Document rationale; sensitivity before deploy |
 
 ---
 
-## Document Control
+## 6. Pre-Implementation Checklist
 
-| Version | Date | Author | Changes |
-|---------|------|--------|---------|
-| 1.0 | 2026-02-26 | — | Initial plan |
-| 1.1 | 2026-02-26 | — | Round 2: missed spots, hotspot improvements, revised execution order |
+Before starting Step 0:
+
+- [ ] Plan v2.1 (SSOT) approved
+- [ ] Backtest environment runnable (`smoke_test_mom.yaml`)
+- [ ] Access to `engineer.py`, `enhanced_momentum.py`, `momentum_state_machine.py`
+- [ ] Data source confirmed (Polygon OHLCV vs tick-level) — Option C viability
+- [ ] Spread proxy and baseline defined (Step 0)
+- [ ] Extension filter will be wired to composite path (Step 5)
+- [ ] Net-of-cost validation in milestones (Step 8)
+- [ ] All constants either cited or labeled exploratory (Appendix D)
+
+---
+
+## 7. Changelog
+
+| Version | Change |
+|---------|--------|
+| 2.0 | Initial implementation guide |
+| 2.1 (SSOT) | AQR scrub: data source constraints, extension filter composite path, spread baseline, regime source, statistical rigor (walk-forward, multiplicity, bootstrap CI), net-of-cost milestones, turnover, constant justification table, pre-implementation checklist |

@@ -342,7 +342,10 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
         self.authorization_audit: List[Dict[str, Any]] = []
         self.escalation_audit: List[Dict[str, Any]] = []
 
-        # Risk metrics
+        # Risk metrics (P1 F6: var_utilization population)
+        # - Backtest: NOT populated. VaR gate never fires; CRM relies on position/concentration limits.
+        # - Live/Paper: MUST wire VaRCalculator → risk_metrics['var_utilization'] before authorization
+        #   so Gate 6 (var_utilization > max_daily_var) can reject when VaR limit exceeded.
         self.risk_metrics = {
             'total_exposure': 0.0,
             'concentration_risk': 0.0,

@@ -2,36 +2,92 @@
   "_comment": "AUTO-GENERATED golden baseline. Regenerate with: pytest tests/backtest/test_regression_golden.py --update-golden",
   "trades": [
     {
-      "timestamp": "2025-01-07 09:32:00",
+      "timestamp": "2024-12-16 11:15:00",
       "symbol": "TSLA",
       "side": "buy",
-      "quantity": 19.876814,
-      "fill_price": 408.2071
+      "quantity": 35.613663,
+      "fill_price": 455.5664
     },
     {
-      "timestamp": "2025-01-07 09:34:00",
+      "timestamp": "2024-12-16 11:21:00",
       "symbol": "TSLA",
       "side": "sell",
-      "quantity": 19.876814,
-      "fill_price": 408.8348
+      "quantity": 35.613663,
+      "fill_price": 455.4716
+    },
+    {
+      "timestamp": "2024-12-17 10:50:00",
+      "symbol": "TSLA",
+      "side": "buy",
+      "quantity": 16.890736,
+      "fill_price": 480.1736
+    },
+    {
+      "timestamp": "2024-12-17 11:05:00",
+      "symbol": "TSLA",
+      "side": "sell",
+      "quantity": 16.890736,
+      "fill_price": 477.2001
+    },
+    {
+      "timestamp": "2024-12-19 13:14:00",
+      "symbol": "TSLA",
+      "side": "buy",
+      "quantity": 18.691821,
+      "fill_price": 433.6692
+    },
+    {
+      "timestamp": "2024-12-19 13:15:00",
+      "symbol": "TSLA",
+      "side": "sell",
+      "quantity": 18.691821,
+      "fill_price": 434.1872
+    },
+    {
+      "timestamp": "2024-12-19 13:16:00",
+      "symbol": "TSLA",
+      "side": "buy",
+      "quantity": 18.723636,
+      "fill_price": 433.126
+    },
+    {
+      "timestamp": "2024-12-19 13:27:00",
+      "symbol": "TSLA",
+      "side": "sell",
+      "quantity": 18.723636,
+      "fill_price": 433.1584
+    },
+    {
+      "timestamp": "2024-12-20 10:33:00",
+      "symbol": "TSLA",
+      "side": "buy",
+      "quantity": 18.513638,
+      "fill_price": 438.041
+    },
+    {
+      "timestamp": "2024-12-20 10:57:00",
+      "symbol": "TSLA",
+      "side": "sell",
+      "quantity": 18.513638,
+      "fill_price": 439.3046
     }
   ],
   "metrics": {
-    "total_return_pct": 0.012477094550413311,
-    "sharpe_ratio": -23.60494269708454,
-    "max_drawdown_pct": 0.005369458146885152,
-    "total_trades": 1,
-    "win_rate": 100.0
+    "total_return_pct": -0.019916103257977547,
+    "sharpe_ratio": -4.425272232897201,
+    "max_drawdown_pct": 0.1414363562626711,
+    "total_trades": 5,
+    "win_rate": 60.0
   },
   "funnel": {
-    "CP0": 1,
-    "CP1": 1,
-    "CP2": 24,
-    "CP3": 25,
-    "CP4": 2,
-    "CP5": 2,
-    "CP6": 2,
-    "CP7": 2
+    "CP0": 5,
+    "CP1": 5,
+    "CP2": 10,
+    "CP3": 15,
+    "CP4": 10,
+    "CP5": 10,
+    "CP6": 10,
+    "CP7": 10
   },
-  "trade_count": 2
+  "trade_count": 10
 }
