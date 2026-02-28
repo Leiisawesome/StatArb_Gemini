@@ -140,6 +140,11 @@ class BacktestConfig:
     emergency_threshold: float = 0.25
     """Emergency threshold - reject if risk impact > 25%. Default: 0.25 (25%)"""
 
+    # Intent-engine rollout controls (Phase A/B/C)
+    intent_engine_rollout_phase: str = "A"
+    enable_intent_engine_shadow: bool = False
+    enable_intent_engine_authoritative: bool = False
+
     # Regime-adjusted multipliers (Rule 2 - Regime-First)
     enable_regime_adjustments: bool = True
     regime_risk_multipliers: Dict[str, float] = field(default_factory=lambda: {

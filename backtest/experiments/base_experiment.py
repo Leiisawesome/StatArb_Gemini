@@ -153,6 +153,9 @@ class BaseExperiment(ABC):
             'enable_signal_aggregation': config_source.get('enable_signal_aggregation', True),
             'enable_conflict_resolution': config_source.get('enable_conflict_resolution', True),
             'enable_dynamic_weighting': config_source.get('enable_dynamic_weighting', True),
+            'intent_engine_rollout_phase': config_source.get('intent_engine_rollout_phase', 'A'),
+            'enable_intent_engine_shadow': config_source.get('enable_intent_engine_shadow', False),
+            'enable_intent_engine_authoritative': config_source.get('enable_intent_engine_authoritative', False),
             'output_directory': str(backtest_results_dir()),
         }
 

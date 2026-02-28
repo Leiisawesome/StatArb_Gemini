@@ -301,6 +301,27 @@ class PolygonRestService:
             return
         yield from itertools.islice(iterator, cap)
 
+    def _collect_iterator_rows(
+        self,
+        iterator,
+        cap: Optional[int],
+        *,
+        context: str,
+    ) -> List[Any]:
+        """Collect rows with cap-aware truncation detection and warning."""
+        if cap is None or cap <= 0:
+            return list(iterator)
+
+        rows = list(itertools.islice(iterator, cap + 1))
+        if len(rows) > cap:
+            self.logger.warning(
+                "%s results truncated at cap=%s; increase limit/max_pages for full fidelity",
+                context,
+                cap,
+            )
+            return rows[:cap]
+        return rows
+
     @staticmethod
     def _parse_event_timestamp(raw_timestamp: Any) -> Optional[datetime]:
         """Parse event timestamps in seconds/ms/us/ns into UTC datetime."""
@@ -746,6 +767,7 @@ class PolygonRestService:
         end: datetime,
         limit: int = 50000,
         max_pages: int = 25,
+        full_fidelity: bool = False,
     ) -> pd.DataFrame:
         """
         Get historical trades for a symbol from Polygon v3 trades endpoint.
@@ -766,10 +788,12 @@ class PolygonRestService:
             sort='timestamp',
             limit=page_limit,
         )
-        frame = pd.DataFrame(
-            self._model_to_dict(item)
-            for item in self._iter_with_cap(trade_iter, total_cap)
+        trade_rows = self._collect_iterator_rows(
+            trade_iter,
+            total_cap,
+            context=f"Historical trades for {symbol_upper}",
         )
+        frame = pd.DataFrame(self._model_to_dict(item) for item in trade_rows)
         if frame.empty:
             return pd.DataFrame(columns=['price', 'size', 'exchange', 'conditions', 'tape'])
 
@@ -790,16 +814,28 @@ class PolygonRestService:
             lambda value: value if isinstance(value, list) else []
         )
 
-        df = pd.DataFrame(
-            {
-                'price': self._coalesce_columns(filtered, ['price', 'p']).to_numpy(),
-                'size': self._coalesce_columns(filtered, ['size', 's']).to_numpy(),
-                'exchange': self._coalesce_columns(filtered, ['exchange', 'x']).to_numpy(),
-                'conditions': conditions_series.to_numpy(),
-                'tape': self._coalesce_columns(filtered, ['tape', 'z']).to_numpy(),
-            },
-            index=filtered_ts,
-        )
+        data = {
+            'price': self._coalesce_columns(filtered, ['price', 'p']).to_numpy(),
+            'size': self._coalesce_columns(filtered, ['size', 's']).to_numpy(),
+            'exchange': self._coalesce_columns(filtered, ['exchange', 'x']).to_numpy(),
+            'conditions': conditions_series.to_numpy(),
+            'tape': self._coalesce_columns(filtered, ['tape', 'z']).to_numpy(),
+        }
+
+        if full_fidelity:
+            data.update(
+                {
+                    'event_id': self._coalesce_columns(filtered, ['id', 'i']).to_numpy(),
+                    'sequence_number': self._coalesce_columns(filtered, ['sequence_number', 'q']).to_numpy(),
+                    'sip_timestamp_raw': self._coalesce_columns(filtered, ['sip_timestamp']).to_numpy(),
+                    'participant_timestamp_raw': self._coalesce_columns(filtered, ['participant_timestamp']).to_numpy(),
+                    'trf_timestamp_raw': self._coalesce_columns(filtered, ['trf_timestamp']).to_numpy(),
+                    'trf_id': self._coalesce_columns(filtered, ['trf_id']).to_numpy(),
+                    'correction': self._coalesce_columns(filtered, ['correction']).to_numpy(),
+                }
+            )
+
+        df = pd.DataFrame(data, index=filtered_ts)
         df.index.name = 'timestamp'
         return df.sort_index()
 
@@ -810,6 +846,7 @@ class PolygonRestService:
         end: datetime,
         limit: int = 50000,
         max_pages: int = 25,
+        full_fidelity: bool = False,
     ) -> pd.DataFrame:
         """
         Get historical NBBO quotes for a symbol from Polygon v3 quotes endpoint.
@@ -830,10 +867,12 @@ class PolygonRestService:
             sort='timestamp',
             limit=page_limit,
         )
-        frame = pd.DataFrame(
-            self._model_to_dict(item)
-            for item in self._iter_with_cap(quote_iter, total_cap)
+        quote_rows = self._collect_iterator_rows(
+            quote_iter,
+            total_cap,
+            context=f"Historical quotes for {symbol_upper}",
         )
+        frame = pd.DataFrame(self._model_to_dict(item) for item in quote_rows)
         if frame.empty:
             return pd.DataFrame(columns=['bid', 'ask', 'bid_size', 'ask_size', 'bid_exchange', 'ask_exchange'])
 
@@ -849,17 +888,34 @@ class PolygonRestService:
         filtered = frame.loc[valid_mask]
         filtered_ts = pd.DatetimeIndex(event_ts.loc[valid_mask])
 
-        df = pd.DataFrame(
-            {
-                'bid': self._coalesce_columns(filtered, ['bid_price', 'bp', 'p']).to_numpy(),
-                'ask': self._coalesce_columns(filtered, ['ask_price', 'ap', 'P']).to_numpy(),
-                'bid_size': self._coalesce_columns(filtered, ['bid_size', 'bs', 's']).to_numpy(),
-                'ask_size': self._coalesce_columns(filtered, ['ask_size', 'as', 'S']).to_numpy(),
-                'bid_exchange': self._coalesce_columns(filtered, ['bid_exchange', 'bx']).to_numpy(),
-                'ask_exchange': self._coalesce_columns(filtered, ['ask_exchange', 'ax']).to_numpy(),
-            },
-            index=filtered_ts,
+        quote_conditions = self._coalesce_columns(filtered, ['conditions', 'c'])
+        quote_conditions = quote_conditions.apply(
+            lambda value: value if isinstance(value, list) else []
         )
+
+        data = {
+            'bid': self._coalesce_columns(filtered, ['bid_price', 'bp', 'p']).to_numpy(),
+            'ask': self._coalesce_columns(filtered, ['ask_price', 'ap', 'P']).to_numpy(),
+            'bid_size': self._coalesce_columns(filtered, ['bid_size', 'bs', 's']).to_numpy(),
+            'ask_size': self._coalesce_columns(filtered, ['ask_size', 'as', 'S']).to_numpy(),
+            'bid_exchange': self._coalesce_columns(filtered, ['bid_exchange', 'bx']).to_numpy(),
+            'ask_exchange': self._coalesce_columns(filtered, ['ask_exchange', 'ax']).to_numpy(),
+        }
+
+        if full_fidelity:
+            data.update(
+                {
+                    'conditions': quote_conditions.to_numpy(),
+                    'sequence_number': self._coalesce_columns(filtered, ['sequence_number', 'q']).to_numpy(),
+                    'sip_timestamp_raw': self._coalesce_columns(filtered, ['sip_timestamp']).to_numpy(),
+                    'participant_timestamp_raw': self._coalesce_columns(filtered, ['participant_timestamp']).to_numpy(),
+                    'trf_timestamp_raw': self._coalesce_columns(filtered, ['trf_timestamp']).to_numpy(),
+                    'event_id': self._coalesce_columns(filtered, ['id', 'i']).to_numpy(),
+                    'tape': self._coalesce_columns(filtered, ['tape', 'z']).to_numpy(),
+                }
+            )
+
+        df = pd.DataFrame(data, index=filtered_ts)
         df.index.name = 'timestamp'
         return df.sort_index()
 
@@ -872,6 +928,7 @@ class PolygonRestService:
         forward_fill_trades: bool = False,
         limit: int = 50000,
         max_pages: int = 25,
+        full_fidelity: bool = False,
     ) -> pd.DataFrame:
         """
         Build per-second historical snapshots by combining trades and quotes.
@@ -893,8 +950,22 @@ class PolygonRestService:
             raise ValueError("end must be greater than or equal to start")
 
         trades_df, quotes_df = await asyncio.gather(
-            self.get_historical_trades(symbol, start, end, limit=limit, max_pages=max_pages),
-            self.get_historical_quotes(symbol, start, end, limit=limit, max_pages=max_pages),
+            self.get_historical_trades(
+                symbol,
+                start,
+                end,
+                limit=limit,
+                max_pages=max_pages,
+                full_fidelity=full_fidelity,
+            ),
+            self.get_historical_quotes(
+                symbol,
+                start,
+                end,
+                limit=limit,
+                max_pages=max_pages,
+                full_fidelity=full_fidelity,
+            ),
         )
 
         second_index = pd.date_range(
@@ -907,12 +978,29 @@ class PolygonRestService:
         if trades_df.empty:
             trade_snap = pd.DataFrame(index=second_index, columns=['trade_price', 'trade_size', 'trade_exchange', 'trade_count'])
         else:
-            trade_snap = trades_df.resample('1s').agg(
-                trade_price=('price', 'last'),
-                trade_size=('size', 'last'),
-                trade_exchange=('exchange', 'last'),
-                trade_count=('price', 'size'),
-            )
+            trade_agg = {
+                'trade_price': ('price', 'last'),
+                'trade_size': ('size', 'last'),
+                'trade_exchange': ('exchange', 'last'),
+                'trade_count': ('price', 'size'),
+            }
+            if full_fidelity:
+                optional_trade_map = {
+                    'conditions': 'trade_conditions',
+                    'tape': 'trade_tape',
+                    'sequence_number': 'trade_sequence_number',
+                    'event_id': 'trade_event_id',
+                    'sip_timestamp_raw': 'trade_sip_timestamp_raw',
+                    'participant_timestamp_raw': 'trade_participant_timestamp_raw',
+                    'trf_timestamp_raw': 'trade_trf_timestamp_raw',
+                    'trf_id': 'trade_trf_id',
+                    'correction': 'trade_correction',
+                }
+                for source_column, output_column in optional_trade_map.items():
+                    if source_column in trades_df.columns:
+                        trade_agg[output_column] = (source_column, 'last')
+
+            trade_snap = trades_df.resample('1s').agg(**trade_agg)
             trade_snap = trade_snap.reindex(second_index)
             if forward_fill_trades:
                 trade_snap[['trade_price', 'trade_size', 'trade_exchange']] = trade_snap[
@@ -925,22 +1013,50 @@ class PolygonRestService:
                 'quote_bid', 'quote_ask', 'quote_bid_size', 'quote_ask_size', 'quote_count'
             ])
         else:
-            quote_snap = quotes_df.resample('1s').agg(
-                quote_bid=('bid', 'last'),
-                quote_ask=('ask', 'last'),
-                quote_bid_size=('bid_size', 'last'),
-                quote_ask_size=('ask_size', 'last'),
-                quote_count=('bid', 'size'),
-            )
+            quote_input = quotes_df.copy()
+            quote_input['quote_event_timestamp'] = quote_input.index
+
+            quote_agg = {
+                'quote_bid': ('bid', 'last'),
+                'quote_ask': ('ask', 'last'),
+                'quote_bid_size': ('bid_size', 'last'),
+                'quote_ask_size': ('ask_size', 'last'),
+                'quote_count': ('bid', 'size'),
+                'quote_event_timestamp': ('quote_event_timestamp', 'last'),
+            }
+
+            if full_fidelity:
+                optional_quote_map = {
+                    'bid_exchange': 'quote_bid_exchange',
+                    'ask_exchange': 'quote_ask_exchange',
+                    'conditions': 'quote_conditions',
+                    'sequence_number': 'quote_sequence_number',
+                    'event_id': 'quote_event_id',
+                    'tape': 'quote_tape',
+                    'sip_timestamp_raw': 'quote_sip_timestamp_raw',
+                    'participant_timestamp_raw': 'quote_participant_timestamp_raw',
+                    'trf_timestamp_raw': 'quote_trf_timestamp_raw',
+                }
+                for source_column, output_column in optional_quote_map.items():
+                    if source_column in quote_input.columns:
+                        quote_agg[output_column] = (source_column, 'last')
+
+            quote_snap = quote_input.resample('1s').agg(**quote_agg)
             quote_snap = quote_snap.reindex(second_index)
             if forward_fill_quotes:
                 quote_snap[['quote_bid', 'quote_ask', 'quote_bid_size', 'quote_ask_size']] = quote_snap[
                     ['quote_bid', 'quote_ask', 'quote_bid_size', 'quote_ask_size']
                 ].ffill()
+                quote_snap['quote_event_timestamp'] = quote_snap['quote_event_timestamp'].ffill()
             quote_snap['quote_count'] = quote_snap['quote_count'].fillna(0).astype(int)
 
         snapshot_df = trade_snap.join(quote_snap, how='outer')
         snapshot_df['spread'] = snapshot_df['quote_ask'] - snapshot_df['quote_bid']
+        quote_event_ts = pd.to_datetime(snapshot_df['quote_event_timestamp'], utc=True)
+        snapshot_df['quote_age_ms'] = (
+            (snapshot_df.index.to_series() - quote_event_ts).dt.total_seconds() * 1000.0
+        )
+        snapshot_df.loc[snapshot_df['quote_event_timestamp'].isna(), 'quote_age_ms'] = float('nan')
         snapshot_df.index.name = 'timestamp'
         return snapshot_df
 

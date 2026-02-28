@@ -1037,6 +1037,9 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
 
                 chain_diag = getattr(self, '_last_entry_diag', {})
                 expected_return = self._estimate_expected_return_from_chain(chain_diag)
+                intent_edge_bps_raw = float(expected_return) * 10000.0
+                intent_uncertainty_multiplier = 1.0
+                intent_edge_bps_penalized = intent_edge_bps_raw * intent_uncertainty_multiplier
                 base_tw = float(getattr(self.config, "base_position_pct", 0.0) or 0.0)
                 target_weight = self._calculate_regime_adaptive_weight(
                     symbol=symbol,
@@ -1115,6 +1118,13 @@ class EnhancedMomentumStrategy(EnhancedBaseStrategy):
                         # Structural Entry Diagnostics (3-level causal chain)
                         'entry_diag': getattr(self, '_last_entry_diag', {}),
                         'expected_return_bps': float(expected_return) * 10000.0,
+                        # Intent engine contract (Phase A): keep alpha semantics unchanged,
+                        # but emit explicit causal edge fields for downstream risk gating.
+                        'intent_edge_bps_raw': float(intent_edge_bps_raw),
+                        'intent_uncertainty_multiplier': float(intent_uncertainty_multiplier),
+                        'intent_edge_bps_penalized': float(intent_edge_bps_penalized),
+                        'intent_edge_source': 'causal_chain',
+                        'intent_schema_version': 'v1',
                     }
                 )
                 signal.additional_data.update(

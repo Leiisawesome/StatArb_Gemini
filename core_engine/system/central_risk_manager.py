@@ -262,6 +262,16 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
         else:
             raise TypeError(f"Config must be RiskConfig, dict, or None, got {type(config)}")
 
+        # Rollout flags for intent-engine migration (Phase A/B/C).
+        # Keep defaults backward-compatible when flags are not present.
+        _cfg_dict = config if isinstance(config, dict) else {}
+        if not hasattr(self.config, 'intent_engine_rollout_phase'):
+            self.config.intent_engine_rollout_phase = _cfg_dict.get('intent_engine_rollout_phase', 'A')
+        if not hasattr(self.config, 'enable_intent_engine_shadow'):
+            self.config.enable_intent_engine_shadow = _cfg_dict.get('enable_intent_engine_shadow', False)
+        if not hasattr(self.config, 'enable_intent_engine_authoritative'):
+            self.config.enable_intent_engine_authoritative = _cfg_dict.get('enable_intent_engine_authoritative', False)
+
         # Core components under RiskManager control
         self.unified_execution_engine: Optional[UnifiedExecutionEngine] = None
         self.strategy_manager: Optional[Any] = None  # Will be set by orchestrator
@@ -3795,6 +3805,11 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
                     cost_signal_strength,
                     result.get('estimated_fill_price', current_price),
                     cost_expected_return,
+                    intent_edge_bps_raw=signal.get('intent_edge_bps_raw', None),
+                    intent_uncertainty_multiplier=signal.get('intent_uncertainty_multiplier', None),
+                    intent_edge_bps_penalized=signal.get('intent_edge_bps_penalized', None),
+                    intent_edge_source=signal.get('intent_edge_source', None),
+                    intent_schema_version=signal.get('intent_schema_version', None),
                 )
             _record_gate('G6_cost', gate6, gate6.get('adjusted_quantity', candidate_qty), _t0)
             result['gates']['G6_cost'] = gate6
@@ -3897,6 +3912,11 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
                     "authorized": result['authorized'],
                     "sizing_diagnostics": result['sizing_diagnostics'],
                     "g6_cost": (result.get('gates', {}) or {}).get('G6_cost', {}),
+                    "edge_source_selected": ((result.get('gates', {}) or {}).get('G6_cost', {}).get('cost_breakdown', {}).get('selected_edge_source')),
+                    "uncertainty_penalty_applied": bool(
+                        ((result.get('gates', {}) or {}).get('G6_cost', {}).get('cost_breakdown', {}).get('intent_uncertainty_multiplier_used')
+                        not in (None, 1.0)
+                    )),
                     "waterfall": waterfall,
                     "pipeline_elapsed_us": result['_pipeline_elapsed_us'],
                 },
@@ -4403,6 +4423,11 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
         signal_strength: float,
         estimated_fill_price: float,
         expected_return: Optional[float] = None,
+        intent_edge_bps_raw: Optional[float] = None,
+        intent_uncertainty_multiplier: Optional[float] = None,
+        intent_edge_bps_penalized: Optional[float] = None,
+        intent_edge_source: Optional[str] = None,
+        intent_schema_version: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Gate 6: Cost-awareness gate aligned with HistoricalExecutionSimulator.
@@ -4517,6 +4542,24 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
         # ================================================================
         # EXPECTED EDGE vs COST
         # ================================================================
+        rollout_phase = str(getattr(self.config, 'intent_engine_rollout_phase', 'A')).strip().upper()
+        if rollout_phase not in {'A', 'B', 'C'}:
+            rollout_phase = 'A'
+        enable_intent_shadow = bool(
+            getattr(
+                self.config,
+                'enable_intent_engine_shadow',
+                rollout_phase in {'B', 'C'},
+            )
+        )
+        enable_intent_authoritative = bool(
+            getattr(
+                self.config,
+                'enable_intent_engine_authoritative',
+                rollout_phase == 'C',
+            )
+        )
+
         base_edge_bps = float(getattr(self.config, 'base_edge_bps', 20.0))
         strength_weight = float(getattr(self.config, 'edge_strength_weight', 0.6))
         expected_return_weight = float(getattr(self.config, 'edge_expected_return_weight', 0.4))
@@ -4596,12 +4639,66 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
             negative_hint_floor_relaxed = True
 
         expected_edge_bps = max(min_edge_floor, min(max_expected_edge_bps, expected_edge_bps))
+        legacy_expected_edge_bps = expected_edge_bps
+        legacy_expected_edge_model = expected_edge_model
+        legacy_expected_return_source = expected_return_source
 
-        cost_breakdown['expected_edge_model'] = expected_edge_model
+        # ----------------------------------------------------------------
+        # Intent engine candidate (Phase A/B/C)
+        # ----------------------------------------------------------------
+        intent_edge_bps = None
+        intent_edge_input_source = 'none'
+        intent_uncertainty_used = None
+        if isinstance(intent_edge_bps_penalized, (int, float)) and math.isfinite(float(intent_edge_bps_penalized)):
+            _intent_bps = float(intent_edge_bps_penalized)
+            if _intent_bps > 0:
+                intent_edge_bps = _intent_bps
+                intent_edge_input_source = 'intent_penalized_direct'
+        if intent_edge_bps is None and isinstance(intent_edge_bps_raw, (int, float)) and math.isfinite(float(intent_edge_bps_raw)):
+            _intent_raw_bps = float(intent_edge_bps_raw)
+            _intent_mult = 1.0
+            if isinstance(intent_uncertainty_multiplier, (int, float)) and math.isfinite(float(intent_uncertainty_multiplier)):
+                _intent_mult = max(0.0, float(intent_uncertainty_multiplier))
+            intent_uncertainty_used = _intent_mult
+            _intent_bps = _intent_raw_bps * _intent_mult
+            if _intent_bps > 0:
+                intent_edge_bps = _intent_bps
+                intent_edge_input_source = 'intent_raw_times_uncertainty'
+
+        if intent_edge_bps is not None:
+            intent_edge_bps = max(0.0, min(max_expected_edge_bps, float(intent_edge_bps)))
+
+        selected_expected_edge_bps = legacy_expected_edge_bps
+        selected_expected_edge_model = legacy_expected_edge_model
+        selected_expected_return_source = legacy_expected_return_source
+        selected_edge_source = 'legacy'
+
+        if enable_intent_authoritative and intent_edge_bps is not None:
+            selected_expected_edge_bps = intent_edge_bps
+            selected_expected_edge_model = 'intent_causal'
+            selected_expected_return_source = str(intent_edge_source or intent_edge_input_source or 'intent')
+            selected_edge_source = 'intent_authoritative'
+
+        cost_breakdown['rollout_phase'] = rollout_phase
+        cost_breakdown['intent_shadow_enabled'] = enable_intent_shadow
+        cost_breakdown['intent_authoritative_enabled'] = enable_intent_authoritative
+        cost_breakdown['legacy_expected_edge_bps'] = legacy_expected_edge_bps
+        cost_breakdown['legacy_expected_edge_model'] = legacy_expected_edge_model
+        cost_breakdown['legacy_expected_return_source'] = legacy_expected_return_source
+        cost_breakdown['intent_edge_bps_raw_input'] = intent_edge_bps_raw
+        cost_breakdown['intent_uncertainty_multiplier_input'] = intent_uncertainty_multiplier
+        cost_breakdown['intent_edge_bps_penalized_input'] = intent_edge_bps_penalized
+        cost_breakdown['intent_edge_source_input'] = intent_edge_source
+        cost_breakdown['intent_schema_version'] = intent_schema_version
+        cost_breakdown['intent_edge_input_source'] = intent_edge_input_source
+        cost_breakdown['intent_uncertainty_multiplier_used'] = intent_uncertainty_used
+        cost_breakdown['intent_edge_bps'] = intent_edge_bps
+        cost_breakdown['selected_edge_source'] = selected_edge_source
+        cost_breakdown['expected_edge_model'] = selected_expected_edge_model
         cost_breakdown['strength_edge_bps'] = strength_edge_bps
         cost_breakdown['expected_return_bps'] = expected_return_bps
         cost_breakdown['raw_expected_return_bps_hint'] = raw_expected_return_bps_hint
-        cost_breakdown['expected_return_source'] = expected_return_source
+        cost_breakdown['expected_return_source'] = selected_expected_return_source
         cost_breakdown['min_expected_return_bps_hint'] = min_expected_return_bps_hint
         cost_breakdown['negative_hint_detected'] = negative_hint_detected
         cost_breakdown['negative_hint_action'] = negative_hint_action
@@ -4610,25 +4707,52 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
         cost_breakdown['negative_hint_floor_relaxed'] = negative_hint_floor_relaxed
         cost_breakdown['edge_strength_weight'] = strength_weight
         cost_breakdown['edge_expected_return_weight'] = expected_return_weight
-        cost_breakdown['expected_edge_bps'] = expected_edge_bps
+        cost_breakdown['expected_edge_bps'] = selected_expected_edge_bps
 
-        cost_edge_ratio = round_trip_cost_bps / expected_edge_bps if expected_edge_bps > 0 else float('inf')
+        # Phase B: shadow comparison (no decision impact unless authoritative)
+        if enable_intent_shadow and intent_edge_bps is not None:
+            legacy_ratio = (
+                round_trip_cost_bps / legacy_expected_edge_bps
+                if legacy_expected_edge_bps > 0
+                else float('inf')
+            )
+            intent_ratio = (
+                round_trip_cost_bps / intent_edge_bps
+                if intent_edge_bps > 0
+                else float('inf')
+            )
+            max_cost_edge_ratio = float(getattr(self.config, 'max_cost_edge_ratio', 0.80))
+            legacy_reject = legacy_expected_edge_bps > 0 and legacy_ratio > max_cost_edge_ratio and legacy_ratio > 1.0
+            intent_reject = intent_edge_bps > 0 and intent_ratio > max_cost_edge_ratio and intent_ratio > 1.0
+            cost_breakdown['shadow_comparison'] = {
+                'legacy_cost_edge_ratio': legacy_ratio,
+                'legacy_reject': legacy_reject,
+                'intent_cost_edge_ratio': intent_ratio,
+                'intent_reject': intent_reject,
+                'decision_changed_if_intent_authoritative': legacy_reject != intent_reject,
+            }
+
+        cost_edge_ratio = (
+            round_trip_cost_bps / selected_expected_edge_bps
+            if selected_expected_edge_bps > 0
+            else float('inf')
+        )
         max_cost_edge_ratio = float(getattr(self.config, 'max_cost_edge_ratio', 0.80))
 
         adjusted_qty = quantity
 
-        if cost_edge_ratio > max_cost_edge_ratio and expected_edge_bps > 0:
+        if cost_edge_ratio > max_cost_edge_ratio and selected_expected_edge_bps > 0:
             if cost_edge_ratio > 1.0:
                 # Negative expectancy: cost exceeds expected edge
                 return {
                     'passed': False,
                     'reason': (
                         f'Negative expectancy: RT cost {round_trip_cost_bps:.1f}bps > '
-                        f'edge {expected_edge_bps:.1f}bps (ratio={cost_edge_ratio:.2f})'
+                        f'edge {selected_expected_edge_bps:.1f}bps (ratio={cost_edge_ratio:.2f}, source={selected_edge_source})'
                     ),
                     'adjusted_quantity': 0.0,
                     'cost_bps': round_trip_cost_bps,
-                    'expected_edge_bps': expected_edge_bps,
+                    'expected_edge_bps': selected_expected_edge_bps,
                     'cost_edge_ratio': cost_edge_ratio,
                     'cost_dollars': round_trip_cost_dollars,
                     'cost_breakdown': cost_breakdown,
@@ -4642,7 +4766,7 @@ class CentralRiskManager(ISystemComponent, IRegimeAware):
             'passed': True,
             'adjusted_quantity': adjusted_qty,
             'cost_bps': round_trip_cost_bps,
-            'expected_edge_bps': expected_edge_bps,
+            'expected_edge_bps': selected_expected_edge_bps,
             'cost_edge_ratio': cost_edge_ratio,
             'cost_dollars': round_trip_cost_dollars,
             'cost_breakdown': cost_breakdown,

@@ -203,6 +203,15 @@ def _papertest_to_backtest_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     risk_per_trade = risk.get("per_trade_risk_pct")
     if risk_per_trade is not None:
         out["per_trade_risk_pct"] = risk_per_trade
+    risk_rollout_phase = risk.get("intent_engine_rollout_phase")
+    if risk_rollout_phase is not None:
+        out["intent_engine_rollout_phase"] = risk_rollout_phase
+    risk_shadow = risk.get("enable_intent_engine_shadow")
+    if risk_shadow is not None:
+        out["enable_intent_engine_shadow"] = bool(risk_shadow)
+    risk_authoritative = risk.get("enable_intent_engine_authoritative")
+    if risk_authoritative is not None:
+        out["enable_intent_engine_authoritative"] = bool(risk_authoritative)
 
     # Regime fields
     regime_lookback = regime.get("lookback_window")

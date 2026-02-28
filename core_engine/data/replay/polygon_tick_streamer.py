@@ -69,6 +69,11 @@ class PolygonTickStreamerConfig:
     #   False -> include additional replay-enriched convenience fields
     strict_live_parity: bool = True
 
+    # Microstructure fidelity mode:
+    #   False -> use compact snapshot schema only
+    #   True  -> request and propagate richer trade/quote microstructure fields
+    full_fidelity: bool = False
+
     def __post_init__(self) -> None:
         if not self.symbols:
             raise ValueError("symbols cannot be empty")
@@ -218,6 +223,7 @@ class PolygonHistoricalTickStreamer(DataFeedAdapter):
                 forward_fill_trades=self.streamer_config.forward_fill_trades,
                 limit=self.streamer_config.limit_per_page,
                 max_pages=self.streamer_config.max_pages,
+                full_fidelity=self.streamer_config.full_fidelity,
             )
 
             if snapshot_df is None or snapshot_df.empty:
@@ -312,12 +318,23 @@ class PolygonHistoricalTickStreamer(DataFeedAdapter):
         trade_size = self._safe_float(row.get("trade_size"), default=0.0)
         trade_exchange = self._safe_int(row.get("trade_exchange"), default=0)
         trade_count = self._safe_int(row.get("trade_count"), default=0)
+        trade_tape = self._safe_int(row.get("trade_tape"), default=0)
+        trade_sequence_number = self._safe_optional_int(row.get("trade_sequence_number"))
+        trade_conditions = row.get("trade_conditions")
+        if not isinstance(trade_conditions, list):
+            trade_conditions = []
 
         quote_bid = self._safe_float(row.get("quote_bid"), default=None)
         quote_ask = self._safe_float(row.get("quote_ask"), default=None)
         quote_bid_size = self._safe_float(row.get("quote_bid_size"), default=0.0)
         quote_ask_size = self._safe_float(row.get("quote_ask_size"), default=0.0)
         quote_count = self._safe_int(row.get("quote_count"), default=0)
+        quote_bid_exchange = self._safe_int(row.get("quote_bid_exchange"), default=0)
+        quote_ask_exchange = self._safe_int(row.get("quote_ask_exchange"), default=0)
+        quote_conditions = row.get("quote_conditions")
+        if not isinstance(quote_conditions, list):
+            quote_conditions = []
+        quote_age_ms = self._safe_float(row.get("quote_age_ms"), default=None)
         spread_raw = self._safe_float(row.get("spread"), default=None)
 
         has_trade = trade_count > 0 and trade_price is not None
@@ -329,9 +346,9 @@ class PolygonHistoricalTickStreamer(DataFeedAdapter):
             trade_data = {
                 "price": float(trade_price),
                 "size": float(trade_size),
-                "conditions": [],
+                "conditions": trade_conditions,
                 "exchange": int(trade_exchange),
-                "tape": 0,
+                "tape": int(trade_tape),
             }
             if not self.streamer_config.strict_live_parity:
                 trade_data["trade_count"] = trade_count
@@ -343,7 +360,7 @@ class PolygonHistoricalTickStreamer(DataFeedAdapter):
                     message_type="trade",
                     timestamp=event_ts,
                     data=trade_data,
-                    sequence_number=None,
+                    sequence_number=trade_sequence_number,
                     latency_ms=0.0,
                     raw_data=None,
                 )
@@ -355,9 +372,9 @@ class PolygonHistoricalTickStreamer(DataFeedAdapter):
                 "bid_size": float(quote_bid_size),
                 "ask": float(quote_ask),
                 "ask_size": float(quote_ask_size),
-                "bid_exchange": 0,
-                "ask_exchange": 0,
-                "conditions": [],
+                "bid_exchange": int(quote_bid_exchange),
+                "ask_exchange": int(quote_ask_exchange),
+                "conditions": quote_conditions,
             }
             if not self.streamer_config.strict_live_parity:
                 quote_data.update(
@@ -367,6 +384,8 @@ class PolygonHistoricalTickStreamer(DataFeedAdapter):
                         "is_stale": quote_count == 0,
                     }
                 )
+                if quote_age_ms is not None:
+                    quote_data["quote_age_ms"] = float(quote_age_ms)
 
             messages.append(
                 FeedMessage(
@@ -472,6 +491,20 @@ class PolygonHistoricalTickStreamer(DataFeedAdapter):
             return int(float(value))
         except (TypeError, ValueError):
             return default
+
+    @staticmethod
+    def _safe_optional_int(value: object) -> Optional[int]:
+        if value is None:
+            return None
+        try:
+            if pd.isna(value):
+                return None
+        except TypeError:
+            pass
+        try:
+            return int(float(value))
+        except (TypeError, ValueError):
+            return None
 
     def _build_minute_agg_message(self, symbol: str, state: Dict[str, object]) -> Optional[FeedMessage]:
         minute_start = state.get("minute_start")

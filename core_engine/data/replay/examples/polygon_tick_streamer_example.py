@@ -92,6 +92,11 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Include additional replay-only convenience fields",
     )
+    parser.add_argument(
+        "--full-fidelity",
+        action="store_true",
+        help="Request and propagate richer historical microstructure fields",
+    )
     return parser.parse_args()
 
 
@@ -156,6 +161,7 @@ async def run_example() -> None:
         emit_second_agg=True,
         emit_minute_agg=False,
         strict_live_parity=not args.allow_enriched_replay,
+        full_fidelity=args.full_fidelity,
     )
 
     counters = Counter()
@@ -170,12 +176,13 @@ async def run_example() -> None:
 
     logger.info("Starting historical tick stream")
     logger.info(
-        "symbol=%s start=%s end=%s speed=%s strict_live_parity=%s",
+        "symbol=%s start=%s end=%s speed=%s strict_live_parity=%s full_fidelity=%s",
         config.symbols[0],
         start.isoformat(),
         end.isoformat(),
         args.speed,
         config.strict_live_parity,
+        config.full_fidelity,
     )
 
     streamer = await create_polygon_tick_streamer(config)

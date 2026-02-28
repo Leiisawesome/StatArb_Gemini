@@ -1,0 +1,8 @@
+includes:
+  - ../../core_engine/config/catalog/suites/smoke_test_mom.yaml
+
+papertest:
+  risk:
+    intent_engine_rollout_phase: "C"
+    enable_intent_engine_shadow: true
+    enable_intent_engine_authoritative: true

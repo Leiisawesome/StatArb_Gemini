@@ -2387,10 +2387,33 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                             if _entry_mode is None and isinstance(_entry_diag, dict):
                                 _entry_mode = _entry_diag.get('entry_mode')
                             _expected_return_bps = _meta.get('expected_return_bps', _ad.get('expected_return_bps'))
-                            return _entry_diag, _entry_mode, _expected_return_bps
+                            _intent_edge_bps_raw = _meta.get('intent_edge_bps_raw', _ad.get('intent_edge_bps_raw'))
+                            _intent_uncertainty_multiplier = _meta.get('intent_uncertainty_multiplier', _ad.get('intent_uncertainty_multiplier'))
+                            _intent_edge_bps_penalized = _meta.get('intent_edge_bps_penalized', _ad.get('intent_edge_bps_penalized'))
+                            _intent_edge_source = _meta.get('intent_edge_source', _ad.get('intent_edge_source'))
+                            _intent_schema_version = _meta.get('intent_schema_version', _ad.get('intent_schema_version'))
+                            return (
+                                _entry_diag,
+                                _entry_mode,
+                                _expected_return_bps,
+                                _intent_edge_bps_raw,
+                                _intent_uncertainty_multiplier,
+                                _intent_edge_bps_penalized,
+                                _intent_edge_source,
+                                _intent_schema_version,
+                            )
 
                         for _sig in out:
-                            _entry_diag, _entry_mode, _expected_return_bps = _extract_entry_diag(_sig)
+                            (
+                                _entry_diag,
+                                _entry_mode,
+                                _expected_return_bps,
+                                _intent_edge_bps_raw,
+                                _intent_uncertainty_multiplier,
+                                _intent_edge_bps_penalized,
+                                _intent_edge_source,
+                                _intent_schema_version,
+                            ) = _extract_entry_diag(_sig)
                             _cp2t.emit(
                                 trace_id=getattr(_sig, 'signal_id', '') or f"sig_{getattr(_sig, 'symbol', 'UNK')}",
                                 checkpoint=CP2_SIGNAL_GEN,
@@ -2413,6 +2436,11 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                                     "entry_diag": _entry_diag,
                                     "entry_mode": _entry_mode,
                                     "expected_return_bps": _expected_return_bps,
+                                    "intent_edge_bps_raw": _intent_edge_bps_raw,
+                                    "intent_uncertainty_multiplier": _intent_uncertainty_multiplier,
+                                    "intent_edge_bps_penalized": _intent_edge_bps_penalized,
+                                    "intent_edge_source": _intent_edge_source,
+                                    "intent_schema_version": _intent_schema_version,
                                 },
                                 metadata={
                                     "signal_count": len(out),
@@ -2420,6 +2448,11 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                                     "entry_diag": _entry_diag,
                                     "entry_mode": _entry_mode,
                                     "expected_return_bps": _expected_return_bps,
+                                    "intent_edge_bps_raw": _intent_edge_bps_raw,
+                                    "intent_uncertainty_multiplier": _intent_uncertainty_multiplier,
+                                    "intent_edge_bps_penalized": _intent_edge_bps_penalized,
+                                    "intent_edge_source": _intent_edge_source,
+                                    "intent_schema_version": _intent_schema_version,
                                 },
                             )
                 except Exception:
@@ -2468,10 +2501,33 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                         if _entry_mode is None and isinstance(_entry_diag, dict):
                             _entry_mode = _entry_diag.get('entry_mode')
                         _expected_return_bps = _meta.get('expected_return_bps', _ad.get('expected_return_bps'))
-                        return _entry_diag, _entry_mode, _expected_return_bps
+                        _intent_edge_bps_raw = _meta.get('intent_edge_bps_raw', _ad.get('intent_edge_bps_raw'))
+                        _intent_uncertainty_multiplier = _meta.get('intent_uncertainty_multiplier', _ad.get('intent_uncertainty_multiplier'))
+                        _intent_edge_bps_penalized = _meta.get('intent_edge_bps_penalized', _ad.get('intent_edge_bps_penalized'))
+                        _intent_edge_source = _meta.get('intent_edge_source', _ad.get('intent_edge_source'))
+                        _intent_schema_version = _meta.get('intent_schema_version', _ad.get('intent_schema_version'))
+                        return (
+                            _entry_diag,
+                            _entry_mode,
+                            _expected_return_bps,
+                            _intent_edge_bps_raw,
+                            _intent_uncertainty_multiplier,
+                            _intent_edge_bps_penalized,
+                            _intent_edge_source,
+                            _intent_schema_version,
+                        )
 
                     for _sig in aggregated_signals:
-                        _entry_diag, _entry_mode, _expected_return_bps = _extract_entry_diag(_sig)
+                        (
+                            _entry_diag,
+                            _entry_mode,
+                            _expected_return_bps,
+                            _intent_edge_bps_raw,
+                            _intent_uncertainty_multiplier,
+                            _intent_edge_bps_penalized,
+                            _intent_edge_source,
+                            _intent_schema_version,
+                        ) = _extract_entry_diag(_sig)
                         _cp2m.emit(
                             trace_id=getattr(_sig, 'signal_id', '') or f"sig_{getattr(_sig, 'symbol', 'UNK')}",
                             checkpoint=CP2_SIGNAL_GEN,
@@ -2494,6 +2550,11 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                                 "entry_diag": _entry_diag,
                                 "entry_mode": _entry_mode,
                                 "expected_return_bps": _expected_return_bps,
+                                "intent_edge_bps_raw": _intent_edge_bps_raw,
+                                "intent_uncertainty_multiplier": _intent_uncertainty_multiplier,
+                                "intent_edge_bps_penalized": _intent_edge_bps_penalized,
+                                "intent_edge_source": _intent_edge_source,
+                                "intent_schema_version": _intent_schema_version,
                             },
                             metadata={
                                 "raw_signal_count": sum(len(s) for s in strategy_signals.values()) if isinstance(strategy_signals, dict) else len(strategy_signals),
@@ -2502,6 +2563,11 @@ class StrategyManager(ISystemComponent, IRegimeAware):
                                 "entry_diag": _entry_diag,
                                 "entry_mode": _entry_mode,
                                 "expected_return_bps": _expected_return_bps,
+                                "intent_edge_bps_raw": _intent_edge_bps_raw,
+                                "intent_uncertainty_multiplier": _intent_uncertainty_multiplier,
+                                "intent_edge_bps_penalized": _intent_edge_bps_penalized,
+                                "intent_edge_source": _intent_edge_source,
+                                "intent_schema_version": _intent_schema_version,
                             },
                         )
             except Exception:

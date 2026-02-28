@@ -1067,6 +1067,11 @@ class InitializationMixin:
                 'enable_ads_multi_exit': self._get_strategy_param('enable_ads_multi_exit', True),
                 'max_holding_minutes': self._get_strategy_param('max_holding_minutes', 24 * 60),
                 'enable_forward_vol_stops': self._get_strategy_param('enable_forward_vol_stops', True),
+
+                # Intent-engine rollout controls (Phase A/B/C)
+                'intent_engine_rollout_phase': getattr(self.config, 'intent_engine_rollout_phase', 'A'),
+                'enable_intent_engine_shadow': getattr(self.config, 'enable_intent_engine_shadow', False),
+                'enable_intent_engine_authoritative': getattr(self.config, 'enable_intent_engine_authoritative', False),
             }
 
             # Create risk manager instance (it will create RiskManagerConfig internally)

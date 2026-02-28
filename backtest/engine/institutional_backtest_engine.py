@@ -3078,6 +3078,14 @@ class InstitutionalBacktestEngine(InitializationMixin, SessionManagementMixin, R
                                          self.risk_manager.portfolio_value * 0.95)
                         )
                         _signal_available_cash = max(0.0, _real_cash - _bar_cash_committed)
+                        _additional_data = signal_row.get('additional_data', {}) if hasattr(signal_row, 'get') else {}
+                        if not isinstance(_additional_data, dict):
+                            _additional_data = {}
+                        _intent_edge_bps_raw = _additional_data.get('intent_edge_bps_raw', signal_row.get('intent_edge_bps_raw', None))
+                        _intent_uncertainty_multiplier = _additional_data.get('intent_uncertainty_multiplier', signal_row.get('intent_uncertainty_multiplier', None))
+                        _intent_edge_bps_penalized = _additional_data.get('intent_edge_bps_penalized', signal_row.get('intent_edge_bps_penalized', None))
+                        _intent_edge_source = _additional_data.get('intent_edge_source', signal_row.get('intent_edge_source', None))
+                        _intent_schema_version = _additional_data.get('intent_schema_version', signal_row.get('intent_schema_version', None))
 
                         _6gate_signal = {
                             'symbol': symbol,
@@ -3101,7 +3109,18 @@ class InstitutionalBacktestEngine(InitializationMixin, SessionManagementMixin, R
                                 'expected_return': expected_return,
                                 'target_weight': target_weight,
                                 'signal_type': signal_type,
+                                'intent_edge_bps_raw': _intent_edge_bps_raw,
+                                'intent_uncertainty_multiplier': _intent_uncertainty_multiplier,
+                                'intent_edge_bps_penalized': _intent_edge_bps_penalized,
+                                'intent_edge_source': _intent_edge_source,
+                                'intent_schema_version': _intent_schema_version,
                             },
+                            # Intent engine contract (Phase A/B/C)
+                            'intent_edge_bps_raw': _intent_edge_bps_raw,
+                            'intent_uncertainty_multiplier': _intent_uncertainty_multiplier,
+                            'intent_edge_bps_penalized': _intent_edge_bps_penalized,
+                            'intent_edge_source': _intent_edge_source,
+                            'intent_schema_version': _intent_schema_version,
                             # Gate 6 cost model inputs (aligned with execution simulator)
                             'bar_volume': _bar_vol,
                             'bar_volatility': _bar_volatility,
