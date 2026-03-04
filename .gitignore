@@ -254,6 +254,7 @@ tests/strategy_assessment/results/
 # Backtest results (generated output)
 backtest/results/
 utils/plots/
+utils/output/
 
 # Obsolete tests (kept for reference, not run)
 tests/_obsolete/
