@@ -1,5 +1,0 @@
-"""
-Utility helpers for livepapertest.
-"""
-
-
