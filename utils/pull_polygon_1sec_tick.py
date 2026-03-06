@@ -5,7 +5,11 @@ Pull 1-Second Tick (Trade + Quote) Data from Polygon REST API
 
 Fetches historical 1-second trade and quote snapshots for a symbol
 via polygon_rest.py and saves to CSV. RTH (Regular Trading Hours) only:
-09:30–16:00 Eastern.
+09:30–16:00 Eastern. Uses full_fidelity=True for hi-fi Polygon schema
+(conditions, tape, sequence_number, exchange IDs, raw timestamps, etc.).
+
+NaN handling: Inf values are replaced with NaN; CSV writes missing values as
+empty cells (na_rep=''). Readers should use pd.read_csv(..., keep_default_na=True).
 
 Prerequisites:
     - POLYGON_API_KEY environment variable
@@ -28,6 +32,8 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
+
+import numpy as np
 
 # Add project root for imports
 _SCRIPT_DIR = Path(__file__).resolve().parent
@@ -55,7 +61,7 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--date",
-        default="2024-12-20",
+        default="2024-12-23",
         help="Date YYYY-MM-DD (default: 2024-12-20)",
     )
     parser.add_argument(
@@ -117,6 +123,7 @@ async def main() -> int:
             forward_fill_quotes=True,
             forward_fill_trades=False,
             max_pages=args.max_pages,
+            full_fidelity=True,
         )
 
         await service.close()
@@ -129,7 +136,10 @@ async def main() -> int:
         if df.index.tz is not None:
             df = df.copy()
             df.index = df.index.tz_convert(ET)
-        df.to_csv(out_path)
+
+        # NaN handling: replace inf with nan; explicit na_rep for CSV round-trip
+        df = df.replace([np.inf, -np.inf], np.nan)
+        df.to_csv(out_path, na_rep="")
         print(f"Saved {len(df)} rows to {out_path}")
         return 0
 
