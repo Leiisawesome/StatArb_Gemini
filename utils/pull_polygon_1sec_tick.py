@@ -61,8 +61,8 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--date",
-        default="2024-12-23",
-        help="Date YYYY-MM-DD (default: 2024-12-20)",
+        default="2025-11-24",
+        help="Date YYYY-MM-DD (default: 2025-11-24)",
     )
     parser.add_argument(
         "--output",
