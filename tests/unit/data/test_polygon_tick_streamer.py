@@ -105,7 +105,10 @@ async def test_streamer_emits_second_by_second_messages(tick_streamer_config):
         assert captured_messages[2].timestamp == ts_1 + timedelta(seconds=1)
         assert captured_messages[-1].timestamp == ts_2 + timedelta(seconds=1)
         assert captured_messages[0].data["conditions"] == []
+        assert isinstance(captured_messages[0].data["size"], int)
         assert captured_messages[1].data["conditions"] == []
+        assert isinstance(captured_messages[1].data["bid_size"], int)
+        assert isinstance(captured_messages[1].data["ask_size"], int)
         assert captured_messages[2].data["bar_type"] == "second"
         assert "trade_count" not in captured_messages[0].data
         assert "spread" not in captured_messages[1].data
@@ -161,9 +164,12 @@ async def test_streamer_enriched_mode_includes_replay_fields(tick_streamer_confi
         quote_msg = next(msg for msg in captured_messages if msg.message_type == "quote")
 
         assert trade_msg.data["trade_count"] == 3
+        assert isinstance(trade_msg.data["size"], int)
         assert quote_msg.data["spread"] == pytest.approx(0.2)
         assert quote_msg.data["quote_count"] == 7
         assert quote_msg.data["is_stale"] is False
+        assert isinstance(quote_msg.data["bid_size"], int)
+        assert isinstance(quote_msg.data["ask_size"], int)
 
         await streamer.disconnect()
 
@@ -226,10 +232,13 @@ async def test_streamer_full_fidelity_maps_microstructure_fields(tick_streamer_c
         trade_msg = next(msg for msg in captured_messages if msg.message_type == "trade")
         quote_msg = next(msg for msg in captured_messages if msg.message_type == "quote")
 
+        assert isinstance(trade_msg.data["size"], int)
         assert trade_msg.data["conditions"] == [12, 37]
         assert trade_msg.data["tape"] == 2
         assert trade_msg.sequence_number == 4242
 
+        assert isinstance(quote_msg.data["bid_size"], int)
+        assert isinstance(quote_msg.data["ask_size"], int)
         assert quote_msg.data["bid_exchange"] == 8
         assert quote_msg.data["ask_exchange"] == 9
         assert quote_msg.data["conditions"] == [1]

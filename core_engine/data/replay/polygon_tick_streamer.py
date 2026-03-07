@@ -315,25 +315,21 @@ class PolygonHistoricalTickStreamer(DataFeedAdapter):
         messages: List[FeedMessage] = []
 
         trade_price = self._safe_float(row.get("trade_price"), default=None)
-        trade_size = self._safe_float(row.get("trade_size"), default=0.0)
+        trade_size = self._safe_int(row.get("trade_size"), default=0)
         trade_exchange = self._safe_int(row.get("trade_exchange"), default=0)
         trade_count = self._safe_int(row.get("trade_count"), default=0)
         trade_tape = self._safe_int(row.get("trade_tape"), default=0)
         trade_sequence_number = self._safe_optional_int(row.get("trade_sequence_number"))
-        trade_conditions = row.get("trade_conditions")
-        if not isinstance(trade_conditions, list):
-            trade_conditions = []
+        trade_conditions = self._safe_int_list(row.get("trade_conditions"))
 
         quote_bid = self._safe_float(row.get("quote_bid"), default=None)
         quote_ask = self._safe_float(row.get("quote_ask"), default=None)
-        quote_bid_size = self._safe_float(row.get("quote_bid_size"), default=0.0)
-        quote_ask_size = self._safe_float(row.get("quote_ask_size"), default=0.0)
+        quote_bid_size = self._safe_int(row.get("quote_bid_size"), default=0)
+        quote_ask_size = self._safe_int(row.get("quote_ask_size"), default=0)
         quote_count = self._safe_int(row.get("quote_count"), default=0)
         quote_bid_exchange = self._safe_int(row.get("quote_bid_exchange"), default=0)
         quote_ask_exchange = self._safe_int(row.get("quote_ask_exchange"), default=0)
-        quote_conditions = row.get("quote_conditions")
-        if not isinstance(quote_conditions, list):
-            quote_conditions = []
+        quote_conditions = self._safe_int_list(row.get("quote_conditions"))
         quote_age_ms = self._safe_float(row.get("quote_age_ms"), default=None)
         spread_raw = self._safe_float(row.get("spread"), default=None)
 
@@ -345,7 +341,7 @@ class PolygonHistoricalTickStreamer(DataFeedAdapter):
         if self.streamer_config.emit_trade and "trade" in allowed_types and has_trade:
             trade_data = {
                 "price": float(trade_price),
-                "size": float(trade_size),
+                "size": int(trade_size),
                 "conditions": trade_conditions,
                 "exchange": int(trade_exchange),
                 "tape": int(trade_tape),
@@ -369,9 +365,9 @@ class PolygonHistoricalTickStreamer(DataFeedAdapter):
         if self.streamer_config.emit_quote and "quote" in allowed_types and has_quote:
             quote_data = {
                 "bid": float(quote_bid),
-                "bid_size": float(quote_bid_size),
+                "bid_size": int(quote_bid_size),
                 "ask": float(quote_ask),
-                "ask_size": float(quote_ask_size),
+                "ask_size": int(quote_ask_size),
                 "bid_exchange": int(quote_bid_exchange),
                 "ask_exchange": int(quote_ask_exchange),
                 "conditions": quote_conditions,
@@ -505,6 +501,27 @@ class PolygonHistoricalTickStreamer(DataFeedAdapter):
             return int(float(value))
         except (TypeError, ValueError):
             return None
+
+    @staticmethod
+    def _safe_int_list(value: object) -> List[int]:
+        if value is None:
+            return []
+        if not isinstance(value, (list, tuple)):
+            return []
+
+        normalized: List[int] = []
+        for item in value:
+            try:
+                if pd.isna(item):
+                    continue
+            except TypeError:
+                pass
+
+            try:
+                normalized.append(int(item))
+            except (TypeError, ValueError):
+                continue
+        return normalized
 
     def _build_minute_agg_message(self, symbol: str, state: Dict[str, object]) -> Optional[FeedMessage]:
         minute_start = state.get("minute_start")

@@ -1,11 +1,16 @@
 """
-Pytest Configuration and Fixtures for StatArb_Gemini Core Engine Testing
-Comprehensive test configuration with async support and system initialization
+Pytest configuration and fixtures for StatArb_Gemini.
+
+The repository occasionally ships without the optional ``tests.fixtures`` helper
+package. Those helpers should not prevent unrelated test modules from running,
+so plugin registration is resolved dynamically.
 """
 
+import importlib.util
 import pytest
 import asyncio
 import logging
+import warnings
 from datetime import datetime
 from typing import Dict, Any, AsyncGenerator
 from unittest.mock import Mock, AsyncMock
@@ -30,14 +35,33 @@ except ImportError:
     ThroughputBenchmarker = None
     PerformanceTestSuite = None
 
-# Import centralized fixtures
-# Note: Only import fixtures that don't have dependency issues
-pytest_plugins = [
+OPTIONAL_PYTEST_PLUGINS = [
     'tests.fixtures.core_fixtures',
     'tests.fixtures.data_fixtures',
     # 'tests.fixtures.integration_fixtures',  # Has import dependencies
     # 'tests.fixtures.strategy_fixtures',  # Has import dependencies
 ]
+
+
+def _module_exists(module_name: str) -> bool:
+    try:
+        return importlib.util.find_spec(module_name) is not None
+    except ModuleNotFoundError:
+        return False
+
+
+# Import centralized fixtures when present, but do not fail the entire suite if
+# the optional fixture package is absent from the current checkout.
+pytest_plugins = [module_name for module_name in OPTIONAL_PYTEST_PLUGINS if _module_exists(module_name)]
+
+missing_pytest_plugins = [
+    module_name for module_name in OPTIONAL_PYTEST_PLUGINS if module_name not in pytest_plugins
+]
+if missing_pytest_plugins:
+    warnings.warn(
+        "Skipping unavailable pytest plugins: " + ", ".join(missing_pytest_plugins),
+        RuntimeWarning,
+    )
 
 # Configure logging for tests
 logging.basicConfig(level=logging.INFO)
