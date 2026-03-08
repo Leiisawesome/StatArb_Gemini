@@ -48,6 +48,16 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+
+def _normalize_api_key(key: str) -> str:
+    """Strip whitespace and remove inline comments from API key (e.g. from .env)."""
+    if not key:
+        return ""
+    # Remove inline comments (e.g. "key # comment")
+    key = key.split("#")[0].strip()
+    return key.strip()
+
+
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
@@ -57,7 +67,7 @@ class PolygonRestConfig:
     """Configuration for Polygon.io REST API service"""
 
     # API key (required)
-    api_key: str = field(default_factory=lambda: os.getenv("POLYGON_API_KEY", ""))
+    api_key: str = field(default_factory=lambda: _normalize_api_key(os.getenv("POLYGON_API_KEY") or ""))
 
     # Base URL
     base_url: str = "https://api.polygon.io"
@@ -76,6 +86,7 @@ class PolygonRestConfig:
     max_concurrent_symbol_requests: int = 20
 
     def __post_init__(self):
+        self.api_key = _normalize_api_key(self.api_key or "")
         if not self.api_key:
             raise ValueError(
                 "Polygon API key required. Set POLYGON_API_KEY env var or pass api_key."
@@ -131,7 +142,7 @@ class PolygonRestService:
             self.config = config
         else:
             self.config = PolygonRestConfig(
-                api_key=api_key or os.getenv("POLYGON_API_KEY", "")
+                api_key=_normalize_api_key(api_key or os.getenv("POLYGON_API_KEY") or "")
             )
 
         self.logger = logging.getLogger(self.__class__.__name__)
