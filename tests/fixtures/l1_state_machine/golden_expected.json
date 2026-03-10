@@ -1,0 +1,78 @@
+{
+  "event_timestamps": [
+    1710163800000000000,
+    1710163801000000000,
+    1710163802000000000,
+    1710163804000000000,
+    1710163805000000000,
+    1710163807000000000,
+    1710163808000000000,
+    1710163810000000000
+  ],
+  "state_labels": [
+    "wide|neutral|neutral|competitive|quiet",
+    "wide|buy_heavy|neutral|competitive|quiet",
+    "wide|buy_heavy|buy_heavy|competitive|quiet",
+    "wide|buy_heavy|buy_heavy|competitive|quiet",
+    "wide|buy_heavy|buy_heavy|competitive|quiet",
+    "wide|buy_heavy|buy_heavy|competitive|quiet",
+    "wide|buy_heavy|buy_heavy|competitive|quiet",
+    "wide|neutral|buy_heavy|competitive|stressed"
+  ],
+  "transition_rows": [
+    {"timestamp_ns": 1710163801000000000, "from_state": "wide|neutral|neutral|competitive|quiet", "to_state": "wide|buy_heavy|neutral|competitive|quiet", "regime": "liquidity_shock", "horizon_ms": 3000, "realized_drift_bps": 2.551731, "censored": false},
+    {"timestamp_ns": 1710163801000000000, "from_state": "wide|neutral|neutral|competitive|quiet", "to_state": "wide|buy_heavy|neutral|competitive|quiet", "regime": "liquidity_shock", "horizon_ms": 15000, "realized_drift_bps": 8.493796, "censored": true},
+    {"timestamp_ns": 1710163801000000000, "from_state": "wide|neutral|neutral|competitive|quiet", "to_state": "wide|buy_heavy|neutral|competitive|quiet", "regime": "liquidity_shock", "horizon_ms": 60000, "realized_drift_bps": 8.493796, "censored": true},
+    {"timestamp_ns": 1710163802000000000, "from_state": "wide|buy_heavy|neutral|competitive|quiet", "to_state": "wide|buy_heavy|buy_heavy|competitive|quiet", "regime": "liquidity_shock", "horizon_ms": 3000, "realized_drift_bps": 3.081042, "censored": false},
+    {"timestamp_ns": 1710163802000000000, "from_state": "wide|buy_heavy|neutral|competitive|quiet", "to_state": "wide|buy_heavy|buy_heavy|competitive|quiet", "regime": "liquidity_shock", "horizon_ms": 15000, "realized_drift_bps": 8.493796, "censored": true},
+    {"timestamp_ns": 1710163802000000000, "from_state": "wide|buy_heavy|neutral|competitive|quiet", "to_state": "wide|buy_heavy|buy_heavy|competitive|quiet", "regime": "liquidity_shock", "horizon_ms": 60000, "realized_drift_bps": 8.493796, "censored": true},
+    {"timestamp_ns": 1710163804000000000, "from_state": "wide|buy_heavy|buy_heavy|competitive|quiet", "to_state": "wide|buy_heavy|buy_heavy|competitive|quiet", "regime": "liquidity_shock", "horizon_ms": 3000, "realized_drift_bps": 4.277499, "censored": false},
+    {"timestamp_ns": 1710163804000000000, "from_state": "wide|buy_heavy|buy_heavy|competitive|quiet", "to_state": "wide|buy_heavy|buy_heavy|competitive|quiet", "regime": "liquidity_shock", "horizon_ms": 15000, "realized_drift_bps": 5.940549, "censored": true},
+    {"timestamp_ns": 1710163804000000000, "from_state": "wide|buy_heavy|buy_heavy|competitive|quiet", "to_state": "wide|buy_heavy|buy_heavy|competitive|quiet", "regime": "liquidity_shock", "horizon_ms": 60000, "realized_drift_bps": 5.940549, "censored": true},
+    {"timestamp_ns": 1710163805000000000, "from_state": "wide|buy_heavy|buy_heavy|competitive|quiet", "to_state": "wide|buy_heavy|buy_heavy|competitive|quiet", "regime": "liquidity_shock", "horizon_ms": 3000, "realized_drift_bps": 3.527835, "censored": false},
+    {"timestamp_ns": 1710163805000000000, "from_state": "wide|buy_heavy|buy_heavy|competitive|quiet", "to_state": "wide|buy_heavy|buy_heavy|competitive|quiet", "regime": "liquidity_shock", "horizon_ms": 15000, "realized_drift_bps": 5.940549, "censored": true},
+    {"timestamp_ns": 1710163805000000000, "from_state": "wide|buy_heavy|buy_heavy|competitive|quiet", "to_state": "wide|buy_heavy|buy_heavy|competitive|quiet", "regime": "liquidity_shock", "horizon_ms": 60000, "realized_drift_bps": 5.940549, "censored": true},
+    {"timestamp_ns": 1710163807000000000, "from_state": "wide|buy_heavy|buy_heavy|competitive|quiet", "to_state": "wide|buy_heavy|buy_heavy|competitive|quiet", "regime": "liquidity_shock", "horizon_ms": 3000, "realized_drift_bps": 1.662339, "censored": false},
+    {"timestamp_ns": 1710163807000000000, "from_state": "wide|buy_heavy|buy_heavy|competitive|quiet", "to_state": "wide|buy_heavy|buy_heavy|competitive|quiet", "regime": "liquidity_shock", "horizon_ms": 15000, "realized_drift_bps": 1.662339, "censored": true},
+    {"timestamp_ns": 1710163807000000000, "from_state": "wide|buy_heavy|buy_heavy|competitive|quiet", "to_state": "wide|buy_heavy|buy_heavy|competitive|quiet", "regime": "liquidity_shock", "horizon_ms": 60000, "realized_drift_bps": 1.662339, "censored": true},
+    {"timestamp_ns": 1710163808000000000, "from_state": "wide|buy_heavy|buy_heavy|competitive|quiet", "to_state": "wide|buy_heavy|buy_heavy|competitive|quiet", "regime": "liquidity_shock", "horizon_ms": 3000, "realized_drift_bps": 1.662339, "censored": true},
+    {"timestamp_ns": 1710163808000000000, "from_state": "wide|buy_heavy|buy_heavy|competitive|quiet", "to_state": "wide|buy_heavy|buy_heavy|competitive|quiet", "regime": "liquidity_shock", "horizon_ms": 15000, "realized_drift_bps": 1.662339, "censored": true},
+    {"timestamp_ns": 1710163808000000000, "from_state": "wide|buy_heavy|buy_heavy|competitive|quiet", "to_state": "wide|buy_heavy|buy_heavy|competitive|quiet", "regime": "liquidity_shock", "horizon_ms": 60000, "realized_drift_bps": 1.662339, "censored": true},
+    {"timestamp_ns": 1710163810000000000, "from_state": "wide|buy_heavy|buy_heavy|competitive|quiet", "to_state": "wide|neutral|buy_heavy|competitive|stressed", "regime": "liquidity_shock", "horizon_ms": 3000, "realized_drift_bps": 0.0, "censored": true},
+    {"timestamp_ns": 1710163810000000000, "from_state": "wide|buy_heavy|buy_heavy|competitive|quiet", "to_state": "wide|neutral|buy_heavy|competitive|stressed", "regime": "liquidity_shock", "horizon_ms": 15000, "realized_drift_bps": 0.0, "censored": true},
+    {"timestamp_ns": 1710163810000000000, "from_state": "wide|buy_heavy|buy_heavy|competitive|quiet", "to_state": "wide|neutral|buy_heavy|competitive|stressed", "regime": "liquidity_shock", "horizon_ms": 60000, "realized_drift_bps": 0.0, "censored": true}
+  ],
+  "workflow": {
+    "state_panel_rows": 8,
+    "transition_panel_rows": 21,
+    "runtime_transition_rows": 7,
+    "available_horizons_ns": [3000000000, 15000000000, 60000000000],
+    "validation_passed": true,
+    "validation_failures": [],
+    "validation_summary": {
+      "mean_bootstrap_decay_ratio_lower_bound": 0.0,
+      "mean_bootstrap_decay_ratio_mean": 0.0,
+      "mean_bootstrap_decay_ratio_upper_bound": 0.0,
+      "mean_bootstrap_hit_rate_lower_bound": 0.0,
+      "mean_bootstrap_hit_rate_mean": 0.0,
+      "mean_bootstrap_hit_rate_upper_bound": 0.0,
+      "mean_drift_decay_ratio": 0.518592,
+      "mean_execution_drift_tracking_error_bps": 2.635767,
+      "mean_kill_switch_rate": 0.0,
+      "mean_regime_coverage": 1.0,
+      "mean_test_abs_mean_drift_bps": 1.713128,
+      "mean_test_cancel_rate": 0.0,
+      "mean_test_fill_rate": 0.0,
+      "mean_test_hit_rate": 0.75,
+      "mean_test_rows": 4.0,
+      "mean_train_abs_mean_drift_bps": 3.303424,
+      "mean_train_rows": 3.0,
+      "mean_unseen_edge_rate": 0.25
+    },
+    "replay_summary": {
+      "update_count": 8.0,
+      "fill_count": 0.0,
+      "cancel_count": 0.0
+    }
+  }
+}

@@ -48,6 +48,34 @@ Primary references:
 
 This control path is the source of truth for audit/governance and should be updated whenever runtime orchestration changes.
 
+## L1 Microstructure Successor
+
+The repository now includes a standalone successor package for Polygon L1 NBBO research and execution:
+
+`l1_microstructure/`
+
+This package implements a finite partially observed state machine centered on the regularized transition kernel rather than feature-only heuristics. The legacy `core_engine` remains in place while retirement is evaluated. Architecture and migration notes are in `docs/l1_microstructure_state_machine.md`.
+
+Minimal successor-package entrypoints now exist via `python -m l1_microstructure`:
+
+- `workflow` builds datasets, calibrates, trains, validates, reloads artifacts, and runs monitored replay from a JSON or JSONL payload file.
+- `list-runs` inspects persisted workflow run manifests for a symbol, with optional trade-date filtering.
+- `paper-historical` runs the source-backed paper path against a historical request using the latest or specified artifact bundle.
+- `paper-live` runs the same source-backed path against a live-style subscription request using file-backed payload input.
+- `live-routed` runs the external-routing live shell against file-backed live payload input using a router adapter boundary instead of the internal simulator.
+- `ibkr-live-smoke` checks IBKR routed-live connectivity and reports current broker health without submitting an order.
+- `ibkr-live-order-smoke` submits a paper-safe routed IBKR order, polls for broker status, and cancels it if it remains open.
+
+The CLI also supports stricter runtime selection:
+
+- `list-runs --passing-only` shows only runs whose manifest recorded `validation_passed=true`.
+- `paper-historical --require-validation-passed` and `paper-live --require-validation-passed` require the selected bundle to come from a validation-passing run when `run-id` is omitted.
+- `live-routed --router-type` currently supports `immediate-fill`, `latency-buffered`, `rejecting`, and `ibkr-live` adapters.
+- `live-routed --router-poll-delay` controls the simulated acknowledgement-to-fill delay for the `latency-buffered` adapter.
+- `live-routed --broker-env-file` lets the `ibkr-live` adapter load Interactive Brokers connection settings from an explicit env file.
+- Broker-backed routed-live recovery snapshots now preserve open broker order context so a fresh `BrokerBackedOrderRouter` can rehydrate tracked open orders from the broker on restart.
+- `ibkr-live-order-smoke` defaults to a paper-only IBKR router, derives a deterministic L1 request from a payload-backed quote state, and cancels any still-open order before exit.
+
 ## 🎯 **Ultimate System Features**
 
 ### **🚀 Streamlined Architecture**

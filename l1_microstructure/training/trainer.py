@@ -1,0 +1,167 @@
+"""Empirical transition-kernel trainer for successor-package research loops."""
+
+from __future__ import annotations
+
+from collections import defaultdict
+from dataclasses import asdict
+from datetime import datetime, timezone
+from hashlib import sha1
+from typing import Iterable
+
+import pandas as pd
+
+from l1_microstructure.artifacts import ArtifactMetadata, LocalArtifactStore
+
+from .interfaces import TransitionModelArtifact, TransitionTrainingSample
+
+
+class EmpiricalTransitionTrainer:
+    def __init__(self, artifact_store: LocalArtifactStore | None = None, version: str = "v1"):
+        self.artifact_store = artifact_store
+        self.version = version
+        self.last_payload: dict[str, object] | None = None
+
+    def fit(
+        self,
+        samples: Iterable[TransitionTrainingSample],
+        runtime_horizon_ns: int | None = None,
+    ) -> TransitionModelArtifact:
+        sample_list = list(samples)
+        if not sample_list:
+            raise ValueError("transition training requires at least one sample")
+
+        created_at = datetime.now(timezone.utc).isoformat()
+        model_id = self._model_id(sample_list)
+        payload = self._build_payload(
+            sample_list,
+            model_id=model_id,
+            created_at=created_at,
+            runtime_horizon_ns=runtime_horizon_ns,
+        )
+        self.last_payload = payload
+
+        artifact = TransitionModelArtifact(
+            model_id=model_id,
+            created_at=created_at,
+            edge_count=len(payload["edges"]),
+            metadata={
+                "sample_count": len(sample_list),
+                "trainer": "empirical_transition_trainer",
+                "version": self.version,
+            },
+        )
+        if self.artifact_store is not None:
+            self.artifact_store.save(
+                ArtifactMetadata(
+                    artifact_id=model_id,
+                    artifact_type="transition_model",
+                    version=self.version,
+                    created_at=created_at,
+                    tags=("l1_microstructure", "transition_training"),
+                    metadata=artifact.metadata,
+                ),
+                payload,
+            )
+        return artifact
+
+    def samples_from_frame(self, frame: pd.DataFrame) -> list[TransitionTrainingSample]:
+        required = ("symbol", "from_state", "to_state", "regime", "holding_time_ns", "realized_drift_bps")
+        missing = [column for column in required if column not in frame.columns]
+        if missing:
+            raise ValueError(f"transition panel is missing required columns: {missing}")
+
+        samples: list[TransitionTrainingSample] = []
+        for record in frame.to_dict(orient="records"):
+            metadata = {
+                key: value
+                for key, value in record.items()
+                if key not in required
+            }
+            samples.append(
+                TransitionTrainingSample(
+                    symbol=str(record["symbol"]),
+                    from_state=str(record["from_state"]),
+                    to_state=str(record["to_state"]),
+                    regime=str(record["regime"]),
+                    horizon_ns=int(record.get("horizon_ns", 0)),
+                    holding_time_ns=int(record["holding_time_ns"]),
+                    realized_drift_bps=float(record["realized_drift_bps"]),
+                    metadata=metadata,
+                )
+            )
+        return samples
+
+    def _build_payload(
+        self,
+        samples: list[TransitionTrainingSample],
+        model_id: str,
+        created_at: str,
+        runtime_horizon_ns: int | None = None,
+    ) -> dict[str, object]:
+        horizon_buckets: dict[int, list[TransitionTrainingSample]] = defaultdict(list)
+        for sample in samples:
+            horizon_buckets[int(sample.horizon_ns)].append(sample)
+
+        resolved_runtime_horizon_ns = runtime_horizon_ns
+        if resolved_runtime_horizon_ns is None:
+            resolved_runtime_horizon_ns = sorted(horizon_buckets)[0]
+
+        horizon_models: dict[str, dict[str, object]] = {}
+        for horizon_ns, horizon_samples in sorted(horizon_buckets.items()):
+            horizon_models[str(horizon_ns)] = self._build_horizon_payload(horizon_samples)
+
+        runtime_key = str(int(resolved_runtime_horizon_ns))
+        runtime_payload = horizon_models.get(runtime_key)
+        if runtime_payload is None:
+            raise ValueError(f"runtime horizon {resolved_runtime_horizon_ns} is not present in the training samples")
+
+        available_horizons_ns = [int(value) for value in sorted(horizon_buckets)]
+        return {
+            "model_id": model_id,
+            "created_at": created_at,
+            "edge_count": int(runtime_payload["edge_count"]),
+            "sample_count": len(samples),
+            "runtime_horizon_ns": int(resolved_runtime_horizon_ns),
+            "available_horizons_ns": available_horizons_ns,
+            "horizon_models": horizon_models,
+            "edges": runtime_payload["edges"],
+        }
+
+    def _build_horizon_payload(self, samples: list[TransitionTrainingSample]) -> dict[str, object]:
+        grouped: dict[tuple[str, str, str], list[TransitionTrainingSample]] = defaultdict(list)
+        outgoing: dict[tuple[str, str], int] = defaultdict(int)
+        for sample in samples:
+            grouped[(sample.from_state, sample.to_state, sample.regime)].append(sample)
+            outgoing[(sample.from_state, sample.regime)] += 1
+
+        edges: dict[str, dict[str, object]] = {}
+        for (from_state, to_state, regime), edge_samples in sorted(grouped.items()):
+            holding_times = [sample.holding_time_ns for sample in edge_samples]
+            drifts = [sample.realized_drift_bps for sample in edge_samples]
+            total_outgoing = outgoing[(from_state, regime)]
+            edge_key = f"{from_state}::{to_state}::{regime}"
+            edges[edge_key] = {
+                "from_state": from_state,
+                "to_state": to_state,
+                "regime": regime,
+                "count": len(edge_samples),
+                "transition_probability": len(edge_samples) / max(total_outgoing, 1),
+                "mean_holding_time_ns": float(sum(holding_times) / max(len(holding_times), 1)),
+                "drift_mean_bps": float(sum(drifts) / max(len(drifts), 1)),
+                "drift_std_bps": float(pd.Series(drifts).std(ddof=1)) if len(drifts) > 1 else 0.0,
+                "holding_times_ns": [int(value) for value in holding_times],
+                "drift_samples_bps": [float(value) for value in drifts],
+            }
+
+        return {
+            "edge_count": len(edges),
+            "sample_count": len(samples),
+            "edges": edges,
+        }
+
+    @staticmethod
+    def _model_id(samples: list[TransitionTrainingSample]) -> str:
+        digest = sha1()
+        for sample in sorted(samples, key=lambda current: (current.symbol, current.from_state, current.to_state, current.regime, current.holding_time_ns, current.realized_drift_bps)):
+            digest.update(repr(asdict(sample)).encode("utf-8"))
+        return digest.hexdigest()

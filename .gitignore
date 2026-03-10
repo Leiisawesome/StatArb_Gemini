@@ -223,6 +223,7 @@ audit_trail.jsonl
 .cursor/plans/
 
 # Generated run artifacts (keep source configs/code, ignore outputs)
+tmp_golden_artifacts/
 symbolpicks/
 papertest/results/
 papertest/**/results/
