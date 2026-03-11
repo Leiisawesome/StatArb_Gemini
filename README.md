@@ -56,6 +56,8 @@ The repository now includes a standalone successor package for Polygon L1 NBBO r
 
 This package implements a finite partially observed state machine centered on the regularized transition kernel rather than feature-only heuristics. The legacy `core_engine` remains in place while retirement is evaluated. Architecture and migration notes are in `docs/l1_microstructure_state_machine.md`.
 
+Concrete operator instructions for this repo are in `docs/l1_microstructure_operator_guide.md`.
+
 Minimal successor-package entrypoints now exist via `python -m l1_microstructure`:
 
 - `workflow` builds datasets, calibrates, trains, validates, reloads artifacts, and runs monitored replay from a JSON or JSONL payload file.
