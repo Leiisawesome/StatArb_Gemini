@@ -4,13 +4,12 @@ from argparse import Namespace
 from datetime import datetime, timezone
 from unittest.mock import patch
 
-from core_engine.type_definitions.orders import Order, OrderSide, OrderStatus, OrderType
-
 from l1_microstructure.cli import _router_from_args
 from l1_microstructure.decision import PosteriorEstimate, TradeAction, TradeIntent
 from l1_microstructure.events import QuoteEvent
 from l1_microstructure.features import FeatureEngine
 from l1_microstructure.live import BrokerBackedOrderRouter, IBKRBrokerOrderRouter
+from l1_microstructure.live.broker_models import BrokerOrder, BrokerOrderSide, BrokerOrderStatus, BrokerOrderType, IBKRConnectionConfig
 from l1_microstructure.regime import MicrostructureRegime
 from l1_microstructure.transitions import EdgeKey
 
@@ -56,7 +55,7 @@ class FakeAsyncBrokerFacade:
     def is_connected(self) -> bool:
         return self.connected
 
-    async def submit_order(self, symbol, quantity, side, order_type=OrderType.MARKET, limit_price=None):
+    async def submit_order(self, symbol, quantity, side, order_type=BrokerOrderType.MARKET, limit_price=None):
         self.last_submission = {
             "symbol": symbol,
             "quantity": quantity,
@@ -64,13 +63,13 @@ class FakeAsyncBrokerFacade:
             "order_type": order_type,
             "limit_price": limit_price,
         }
-        order = Order(
+        order = BrokerOrder(
             symbol=symbol,
             side=side,
             quantity=quantity,
             order_type=order_type,
             price=limit_price,
-            status=OrderStatus.SUBMITTED,
+            status=BrokerOrderStatus.SUBMITTED,
         )
         self.orders[order.order_id] = order
         return order
@@ -84,7 +83,7 @@ class FakeAsyncBrokerFacade:
         return [
             order
             for order in self.orders.values()
-            if order.status not in {OrderStatus.FILLED, OrderStatus.CANCELLED, OrderStatus.REJECTED}
+            if order.status not in {BrokerOrderStatus.FILLED, BrokerOrderStatus.CANCELLED, BrokerOrderStatus.REJECTED}
         ]
 
     async def cancel_order(self, order_id: str) -> bool:
@@ -92,7 +91,7 @@ class FakeAsyncBrokerFacade:
         order = self.orders.get(order_id)
         if order is None:
             return False
-        order.status = OrderStatus.CANCELLED
+        order.status = BrokerOrderStatus.CANCELLED
         return True
 
     def broker_name(self) -> str:
@@ -108,7 +107,7 @@ def test_broker_backed_router_translates_terminal_broker_fill() -> None:
 
     assert acknowledgement.status == "accepted"
     order = broker.orders[acknowledgement.external_order_id]
-    order.status = OrderStatus.FILLED
+    order.status = BrokerOrderStatus.FILLED
     order.filled_quantity = 17
     order.average_price = 100.03
     order.timestamp = datetime.now(timezone.utc)
@@ -129,8 +128,8 @@ def test_broker_backed_router_can_submit_limit_orders_at_touch() -> None:
 
     assert acknowledgement.status == "accepted"
     assert broker.last_submission is not None
-    assert broker.last_submission["side"] is OrderSide.BUY
-    assert broker.last_submission["order_type"] is OrderType.LIMIT
+    assert broker.last_submission["side"] is BrokerOrderSide.BUY
+    assert broker.last_submission["order_type"] is BrokerOrderType.LIMIT
     assert broker.last_submission["limit_price"] == 100.02
 
 
@@ -140,7 +139,7 @@ def test_broker_backed_router_emits_incremental_partial_fill_then_cancel() -> No
 
     acknowledgement = router.submit(_request(quantity=20))
     order = broker.orders[acknowledgement.external_order_id]
-    order.status = OrderStatus.PARTIAL_FILLED
+    order.status = BrokerOrderStatus.PARTIAL_FILLED
     order.filled_quantity = 7
     order.average_price = 100.025
     order.timestamp = datetime.now(timezone.utc)
@@ -151,7 +150,7 @@ def test_broker_backed_router_emits_incremental_partial_fill_then_cancel() -> No
     assert first_reports[0].status == "filled"
     assert first_reports[0].quantity == 7
 
-    order.status = OrderStatus.CANCELLED
+    order.status = BrokerOrderStatus.CANCELLED
     second_reports = router.poll(("AAPL",))
 
     assert len(second_reports) == 1
@@ -183,7 +182,7 @@ def test_broker_backed_router_restores_open_orders_into_fresh_router() -> None:
     assert recovered_router.open_order_ids() == [acknowledgement.external_order_id]
 
     order = broker.orders[acknowledgement.external_order_id]
-    order.status = OrderStatus.PARTIAL_FILLED
+    order.status = BrokerOrderStatus.PARTIAL_FILLED
     order.filled_quantity = 5
     order.average_price = 100.025
     first_reports = recovered_router.poll(("AAPL",))
@@ -192,7 +191,7 @@ def test_broker_backed_router_restores_open_orders_into_fresh_router() -> None:
     assert first_reports[0].status == "filled"
     assert first_reports[0].quantity == 5
 
-    order.status = OrderStatus.FILLED
+    order.status = BrokerOrderStatus.FILLED
     order.filled_quantity = 12
     order.average_price = 100.03
     second_reports = recovered_router.poll(("AAPL",))
@@ -226,34 +225,22 @@ def test_cli_router_factory_supports_ibkr_live_router() -> None:
 
 
 def test_ibkr_broker_order_router_from_env_builds_router() -> None:
-    fake_ibkr_config = type("FakeIBKRConfig", (), {"paper_trading": True})()
-    fake_broker_config = type(
-        "FakeBrokerConfig",
-        (),
-        {"active_broker": __import__("core_engine.config.broker_config", fromlist=["BrokerType"]).BrokerType.INTERACTIVE_BROKERS, "interactive_brokers": fake_ibkr_config},
-    )()
+    fake_ibkr_config = IBKRConnectionConfig(paper_trading=True)
 
-    with patch("core_engine.config.broker_config.BrokerConfigLoader.load_from_env", return_value=fake_broker_config), patch(
-        "core_engine.broker.adapters.ibkr_adapter.IBKRAdapter", return_value="ibkr-adapter"
-    ) as ibkr_cls, patch("core_engine.broker.broker_adapter.BrokerAdapter", return_value="broker-facade") as broker_cls:
+    with patch("l1_microstructure.live.router_adapters._load_ibkr_connection_config", return_value=fake_ibkr_config), patch(
+        "l1_microstructure.live.router_adapters.IBKRBrokerOrderRouter._build_broker", return_value="broker-facade"
+    ) as build_broker:
         router = IBKRBrokerOrderRouter.from_env("broker.env", auto_connect=False)
 
     assert isinstance(router, IBKRBrokerOrderRouter)
     assert router.broker == "broker-facade"
-    ibkr_cls.assert_called_once_with(fake_ibkr_config)
-    broker_cls.assert_called_once_with("ibkr-adapter")
+    build_broker.assert_called_once_with(fake_ibkr_config)
 
 
 def test_ibkr_broker_order_router_from_env_rejects_live_config_by_default() -> None:
-    broker_type = __import__("core_engine.config.broker_config", fromlist=["BrokerType"]).BrokerType
-    fake_live_ibkr_config = type("FakeLiveIBKRConfig", (), {"paper_trading": False})()
-    fake_broker_config = type(
-        "FakeBrokerConfig",
-        (),
-        {"active_broker": broker_type.INTERACTIVE_BROKERS, "interactive_brokers": fake_live_ibkr_config},
-    )()
+    fake_live_ibkr_config = IBKRConnectionConfig(paper_trading=False)
 
-    with patch("core_engine.config.broker_config.BrokerConfigLoader.load_from_env", return_value=fake_broker_config):
+    with patch("l1_microstructure.live.router_adapters._load_ibkr_connection_config", return_value=fake_live_ibkr_config):
         try:
             IBKRBrokerOrderRouter.from_env("broker.env")
         except ValueError as exc:

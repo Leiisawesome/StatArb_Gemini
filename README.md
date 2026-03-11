@@ -20,41 +20,13 @@ StatArb Gemini has been completely transformed through a comprehensive 4-phase a
 | **Phase 3** | 🎯 **Strategy Unification** | ✅ **Complete** | 3 systems → 1 system (67% reduction) |
 | **Phase 4** | 🚀 **Ultimate Integration** | ✅ **Complete** | Single unified system with advanced optimization |
 
-## 🧭 Canonical Runtime Control Path (Backtest + Core Engine)
+## L1 Microstructure
 
-For this repository, the audited and supported backtest execution path is:
-
-1. `backtest/run_suite.py` (`main` / `run_experiment`)
-2. `backtest/utils/config_loader.py` (`load_config`, dual-schema adapter)
-3. `backtest/experiments/base_experiment.py` (`_create_backtest_config`, explicit `BacktestConfig.validate()`)
-4. `backtest/engine/institutional_backtest_engine.py` phase lifecycle:
-   - `_initialize_phase2_data_regime`
-   - `_initialize_phase3_processing_pipeline`
-   - `_initialize_phase4_strategy_risk`
-   - `_initialize_phase5_execution`
-   - `_initialize_phase6_analytics`
-5. Per-bar runtime ordering in `run_backtest` / `_process_single_bar`:
-   - data ingestion + enrichment
-   - strategy signal generation
-   - 6-gate risk authorization (`CentralRiskManager`)
-   - execution/fill simulation
-   - position SSOT update
-   - analytics/reporting reconciliation
-
-Primary references:
-- `docs/audit/core_bt_plumbing_control_path_checklist.md`
-- `docs/audit/core_bt_data_contract_ledger.md`
-- `docs/audit/core_bt_remediation_issue_pack.md`
-
-This control path is the source of truth for audit/governance and should be updated whenever runtime orchestration changes.
-
-## L1 Microstructure Successor
-
-The repository now includes a standalone successor package for Polygon L1 NBBO research and execution:
+This repository now focuses on the standalone successor package for Polygon L1 NBBO research and execution:
 
 `l1_microstructure/`
 
-This package implements a finite partially observed state machine centered on the regularized transition kernel rather than feature-only heuristics. The legacy `core_engine` remains in place while retirement is evaluated. Architecture and migration notes are in `docs/l1_microstructure_state_machine.md`.
+This package implements a finite partially observed state machine centered on the regularized transition kernel rather than feature-only heuristics. Architecture notes are in `docs/l1_microstructure_state_machine.md`.
 
 Concrete operator instructions for this repo are in `docs/l1_microstructure_operator_guide.md`.
 
@@ -77,6 +49,8 @@ The CLI also supports stricter runtime selection:
 - `live-routed --broker-env-file` lets the `ibkr-live` adapter load Interactive Brokers connection settings from an explicit env file.
 - Broker-backed routed-live recovery snapshots now preserve open broker order context so a fresh `BrokerBackedOrderRouter` can rehydrate tracked open orders from the broker on restart.
 - `ibkr-live-order-smoke` defaults to a paper-only IBKR router, derives a deterministic L1 request from a payload-backed quote state, and cancels any still-open order before exit.
+
+Note: the repository cleanup removed the legacy `core_engine` broker bridge. The `ibkr-live` path remains as an integration boundary, but it now requires an external broker adapter implementation to be wired into `l1_microstructure`.
 
 ## 🎯 **Ultimate System Features**
 
@@ -115,7 +89,6 @@ The CLI also supports stricter runtime selection:
 ### **🏗️ Simplified Deployment**
 - **Single Command Setup**: `python -c "from core_structure.system import create_production_trading_system; create_production_trading_system().start_system()"`
 - **Automatic Optimization**: Self-tuning system with intelligent resource management
-- **Backward Compatibility**: All existing backtests work without modification
 - **Enterprise Ready**: Production-grade monitoring and alerting
 
 ## 🏗️ **Streamlined Architecture**
@@ -213,7 +186,6 @@ StatArb_Gemini/
 │   ├── 🔍 components/           # System components (regime, portfolio, risk, execution)
 │   └── 🏭 infrastructure/       # Phase 4: Production infrastructure
 ├── 📈 paper_trading/            # Paper trading and dashboard
-├── 🧪 backtest/                 # Backtesting engines
 └── ⚙️ configs/                  # Configuration files
 ```
 

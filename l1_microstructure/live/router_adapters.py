@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from dataclasses import dataclass, field
 from datetime import datetime
+from dotenv import dotenv_values
 from threading import Thread
 from typing import Any
 
@@ -12,7 +14,41 @@ from l1_microstructure.config import ExecutionConfig
 from l1_microstructure.decision import TradeAction
 from l1_microstructure.execution import ExecutionReport, ExecutionRequest, ExecutionSimulator
 
+from .broker_models import BrokerOrderSide, BrokerOrderType, IBKRConnectionConfig
 from .interfaces import RouteAcknowledgement
+
+
+def _parse_bool(value: Any, *, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "yes", "y", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "n", "off"}:
+        return False
+    return default
+
+
+def _load_ibkr_connection_config(env_file: str | None) -> IBKRConnectionConfig:
+    loaded: dict[str, str] = {}
+    if env_file is not None:
+        loaded.update({key: str(value) for key, value in dotenv_values(env_file).items() if value is not None})
+    for key, value in os.environ.items():
+        loaded.setdefault(key, value)
+
+    active_broker = str(loaded.get("ACTIVE_BROKER", loaded.get("BROKER_TYPE", "interactive_brokers"))).strip().lower()
+    if active_broker not in {"interactive_brokers", "ibkr"}:
+        raise ValueError("broker configuration does not select interactive_brokers as the active broker")
+
+    return IBKRConnectionConfig(
+        host=str(loaded.get("IBKR_HOST", "127.0.0.1")),
+        port=int(loaded.get("IBKR_PORT", 7497)),
+        client_id=int(loaded.get("IBKR_CLIENT_ID", 1)),
+        account_id=loaded.get("IBKR_ACCOUNT_ID") or loaded.get("IBKR_ACCOUNT"),
+        paper_trading=_parse_bool(loaded.get("IBKR_PAPER_TRADING"), default=True),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -299,11 +335,9 @@ class BrokerBackedOrderRouter:
         self._connected = True
 
     def _submit_order(self, request: ExecutionRequest) -> Any:
-        from core_engine.type_definitions.broker_types import OrderSide, OrderType
-
-        side = OrderSide.BUY if request.action is TradeAction.BUY else OrderSide.SELL
-        order_type = OrderType.LIMIT if self.prefer_limit_orders else OrderType.MARKET
-        limit_price = self._limit_price(request) if order_type is OrderType.LIMIT else None
+        side = BrokerOrderSide.BUY if request.action is TradeAction.BUY else BrokerOrderSide.SELL
+        order_type = BrokerOrderType.LIMIT if self.prefer_limit_orders else BrokerOrderType.MARKET
+        limit_price = self._limit_price(request) if order_type is BrokerOrderType.LIMIT else None
         return self._run_async(
             self.broker.submit_order(
                 request.symbol,
@@ -449,24 +483,31 @@ class BrokerBackedOrderRouter:
 class IBKRBrokerOrderRouter(BrokerBackedOrderRouter):
     def __init__(
         self,
-        ibkr_config: Any,
+        ibkr_config: IBKRConnectionConfig,
         *,
+        broker: Any | None = None,
         prefer_limit_orders: bool = False,
         limit_price_offset_bps: float = 0.0,
         auto_connect: bool = True,
         disconnect_on_stop: bool = True,
         cancel_open_orders_on_stop: bool = True,
     ):
-        from core_engine.broker.adapters.ibkr_adapter import IBKRAdapter
-        from core_engine.broker.broker_adapter import BrokerAdapter
+        self.ibkr_config = ibkr_config
 
         super().__init__(
-            broker=BrokerAdapter(IBKRAdapter(ibkr_config)),
+            broker=broker if broker is not None else self._build_broker(ibkr_config),
             prefer_limit_orders=prefer_limit_orders,
             limit_price_offset_bps=limit_price_offset_bps,
             auto_connect=auto_connect,
             disconnect_on_stop=disconnect_on_stop,
             cancel_open_orders_on_stop=cancel_open_orders_on_stop,
+        )
+
+    @staticmethod
+    def _build_broker(ibkr_config: IBKRConnectionConfig) -> Any:
+        raise ImportError(
+            "ibkr-live routing now requires an external broker adapter implementation to be supplied "
+            "to l1_microstructure after the core_engine cleanup"
         )
 
     @classmethod
@@ -481,17 +522,11 @@ class IBKRBrokerOrderRouter(BrokerBackedOrderRouter):
         cancel_open_orders_on_stop: bool = True,
         require_paper: bool = True,
     ) -> "IBKRBrokerOrderRouter":
-        from core_engine.config.broker_config import BrokerConfigLoader, BrokerType
-
-        broker_config = BrokerConfigLoader.load_from_env(env_file)
-        if broker_config.active_broker is not BrokerType.INTERACTIVE_BROKERS:
-            raise ValueError("broker configuration does not select interactive_brokers as the active broker")
-        if broker_config.interactive_brokers is None:
-            raise ValueError("interactive_brokers configuration is required for ibkr-live router")
-        if require_paper and not bool(getattr(broker_config.interactive_brokers, "paper_trading", False)):
+        ibkr_config = _load_ibkr_connection_config(env_file)
+        if require_paper and not ibkr_config.paper_trading:
             raise ValueError("ibkr-live router requires paper trading configuration unless explicitly overridden")
         return cls(
-            broker_config.interactive_brokers,
+            ibkr_config,
             prefer_limit_orders=prefer_limit_orders,
             limit_price_offset_bps=limit_price_offset_bps,
             auto_connect=auto_connect,

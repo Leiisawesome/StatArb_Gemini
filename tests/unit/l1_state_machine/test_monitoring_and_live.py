@@ -10,6 +10,8 @@ from l1_microstructure.datasets import PipelineTransitionDatasetBuilder
 from l1_microstructure.ingest import InMemoryPolygonDataSource, LiveSubscriptionRequest
 from l1_microstructure.live import (
     BrokerBackedOrderRouter,
+    BrokerOrder,
+    BrokerOrderStatus,
     ImmediateFillOrderRouter,
     LatencyBufferedOrderRouter,
     RejectingOrderRouter,
@@ -320,23 +322,19 @@ def test_routed_live_runner_reconciles_broker_backed_partial_fill_and_cancel() -
             return self.connected
 
         async def submit_order(self, symbol, quantity, side, order_type, limit_price=None):
-            from core_engine.type_definitions.orders import Order, OrderStatus
-
-            order = Order(symbol=symbol, side=side, quantity=quantity, order_type=order_type, price=limit_price, status=OrderStatus.SUBMITTED)
+            order = BrokerOrder(symbol=symbol, side=side, quantity=quantity, order_type=order_type, price=limit_price, status=BrokerOrderStatus.SUBMITTED)
             self.orders[order.order_id] = order
             return order
 
         async def get_order(self, order_id: str):
-            from core_engine.type_definitions.orders import OrderStatus
-
             self.poll_count += 1
             order = self.orders[order_id]
             if self.poll_count == 1:
-                order.status = OrderStatus.PARTIAL_FILLED
+                order.status = BrokerOrderStatus.PARTIAL_FILLED
                 order.filled_quantity = max(float(order.quantity) / 2.0, 1.0)
                 order.average_price = 100.03
             else:
-                order.status = OrderStatus.CANCELLED
+                order.status = BrokerOrderStatus.CANCELLED
             return order
 
         async def cancel_order(self, order_id: str) -> bool:
@@ -405,39 +403,33 @@ def test_routed_live_runner_can_resume_with_open_broker_backed_order() -> None:
             return self.connected
 
         async def submit_order(self, symbol, quantity, side, order_type, limit_price=None):
-            from core_engine.type_definitions.orders import Order, OrderStatus
-
-            order = Order(symbol=symbol, side=side, quantity=quantity, order_type=order_type, price=limit_price, status=OrderStatus.SUBMITTED)
+            order = BrokerOrder(symbol=symbol, side=side, quantity=quantity, order_type=order_type, price=limit_price, status=BrokerOrderStatus.SUBMITTED)
             self.orders[order.order_id] = order
             return order
 
         async def get_order(self, order_id: str):
-            from core_engine.type_definitions.orders import OrderStatus
-
             poll_count = self.order_poll_counts.get(order_id, 0) + 1
             self.order_poll_counts[order_id] = poll_count
             order = self.orders[order_id]
             if poll_count <= 2:
-                order.status = OrderStatus.SUBMITTED
+                order.status = BrokerOrderStatus.SUBMITTED
             elif poll_count <= 4:
-                order.status = OrderStatus.PARTIAL_FILLED
+                order.status = BrokerOrderStatus.PARTIAL_FILLED
                 order.filled_quantity = max(float(order.quantity) / 2.0, 1.0)
                 order.average_price = 100.03
             elif poll_count >= 5:
-                order.status = OrderStatus.FILLED
+                order.status = BrokerOrderStatus.FILLED
                 order.filled_quantity = float(order.quantity)
                 order.average_price = 100.04
             return order
 
         async def get_orders(self, status: str = "open"):
-            from core_engine.type_definitions.orders import OrderStatus
-
             if status != "open":
                 return list(self.orders.values())
             return [
                 order
                 for order in self.orders.values()
-                if order.status not in {OrderStatus.FILLED, OrderStatus.CANCELLED, OrderStatus.REJECTED}
+                if order.status not in {BrokerOrderStatus.FILLED, BrokerOrderStatus.CANCELLED, BrokerOrderStatus.REJECTED}
             ]
 
         async def cancel_order(self, order_id: str) -> bool:

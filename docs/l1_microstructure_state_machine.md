@@ -46,7 +46,7 @@ Defines successor-package internal contracts for ingestion, replay, calibration,
 
 ## Migration Boundary
 
-The legacy core_engine remains in place and untouched for now. The new framework is standalone by design.
+The repository now retains only the successor-package path. The framework is standalone by design.
 
 Immediate implication:
 No core_engine behavior changes are required to evaluate the new model.

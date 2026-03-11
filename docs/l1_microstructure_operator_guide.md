@@ -20,6 +20,8 @@ Use this guide when you want to:
 
 This guide does **not** replace the architectural notes in `docs/l1_microstructure_state_machine.md`; it is the practical operator layer.
 
+Note: after the repository cleanup removed `core_engine`, the `ibkr-live` boundary now requires an external broker adapter implementation to be supplied to `l1_microstructure`. The CLI surface remains the same, but IBKR smoke commands will only succeed when that integration hook is present.
+
 ## 2. Known-good files already in this repo
 
 Use these files for first runs:
