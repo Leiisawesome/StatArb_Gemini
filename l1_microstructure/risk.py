@@ -43,6 +43,11 @@ class RiskEngine:
         target_fraction: float | None = None,
         current_position: OpenPosition | None = None,
         current_gross_exposure: float = 0.0,
+        current_net_exposure: float = 0.0,
+        current_symbol_exposure: float = 0.0,
+        current_beta_exposure: float | None = None,
+        current_symbol_beta_exposure: float | None = None,
+        proposed_symbol_beta: float | None = None,
     ) -> RiskDecision:
         if self.halted:
             return RiskDecision(False, 0, "kill switch active")
@@ -55,6 +60,8 @@ class RiskEngine:
         target_fraction_limit = min(self.config.max_position_fraction, self.config.volatility_target / volatility)
         if target_fraction is not None:
             target_fraction_limit = min(target_fraction_limit, max(float(target_fraction), 0.0))
+        confidence_scale = min(max(intent.observation_confidence, self.config.confidence_size_floor), 1.0)
+        target_fraction_limit *= confidence_scale
 
         target_notional = equity * target_fraction_limit
         target_quantity = int(max(target_notional / price, 0.0))
@@ -63,7 +70,7 @@ class RiskEngine:
 
         incremental_quantity = target_quantity
         if current_position is not None:
-            if current_position.side is intent.action:
+            if current_position.side == intent.action:
                 incremental_quantity = max(target_quantity - current_position.quantity, 0)
             else:
                 incremental_quantity = target_quantity + current_position.quantity
@@ -74,6 +81,25 @@ class RiskEngine:
         gross_after = current_gross_exposure + incremental_quantity * price / max(equity, 1e-6)
         if gross_after > self.config.max_gross_exposure:
             return RiskDecision(False, 0, "gross exposure limit breached")
+
+        direction = 1.0 if intent.action == TradeAction.BUY else -1.0
+        proposed_symbol_exposure = direction * target_quantity * price / max(equity, 1e-6)
+        if current_beta_exposure is None:
+            current_beta_exposure = current_net_exposure
+        if current_symbol_beta_exposure is None:
+            current_symbol_beta_exposure = current_symbol_exposure
+        if proposed_symbol_beta is None:
+            proposed_symbol_beta = 1.0
+        projected_beta_exposure = (
+            current_beta_exposure
+            - current_symbol_beta_exposure
+            + proposed_symbol_beta * proposed_symbol_exposure
+        )
+        if (
+            abs(projected_beta_exposure) > self.config.beta_hedge_threshold
+            and abs(projected_beta_exposure) > abs(current_beta_exposure)
+        ):
+            return RiskDecision(False, 0, "beta hedge threshold breached")
         return RiskDecision(True, incremental_quantity, "approved")
 
     def process_fill(self, report: ExecutionReport) -> None:

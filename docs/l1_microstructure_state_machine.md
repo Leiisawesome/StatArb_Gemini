@@ -24,16 +24,16 @@ Infers slower contextual regimes from fast states using separated time scales. R
 Centers the framework on the regularized semi-Markov transition kernel. State changes are registered only when Mahalanobis distance exceeds threshold. Outgoing transition probabilities are Dirichlet-smoothed, and entropy plus edge-conditioned drift signal-to-noise form the alpha diagnostic.
 
 `l1_microstructure/decision.py`
-Converts edge-conditioned drift samples into posterior trade decisions with minimum-observation safeguards and transaction-cost-aware thresholds.
+Converts edge-conditioned drift samples into posterior trade decisions with minimum-observation safeguards, transaction-cost-aware thresholds, and observation-confidence controls that can downweight uncertain states before sizing and execution.
 
 `l1_microstructure/execution.py`
-Forward-shifts signals by latency, performs a state-alignment check, and penalizes fills for adverse selection and queue uncertainty.
+Forward-shifts signals by latency, performs a state-alignment check, and models fill risk with adverse-selection penalties plus queue-survival dynamics under touch-depth, same-side pressure, and latency uncertainty.
 
 `l1_microstructure/risk.py`
-Imposes volatility-scaled sizing and intraday drawdown kill-switch logic.
+Imposes volatility-scaled sizing, observation-confidence-aware throttling, beta-aware exposure containment, and intraday drawdown kill-switch logic.
 
 `l1_microstructure/portfolio.py`
-Provides a cross-sectional allocator with diagonal shrinkage and sector caps.
+Provides a cross-sectional allocator with diagonal shrinkage and sector caps, and runtime sizing now applies those caps when sector metadata is available.
 
 `l1_microstructure/pipeline.py`
 Orchestrates replay or live event flow: feature update, regime inference, transition registration, delayed drift resolution, Bayesian entry, portfolio-aware incremental sizing, latency-shifted execution, and hazard-based exit invalidation.

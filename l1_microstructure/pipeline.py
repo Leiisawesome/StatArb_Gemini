@@ -17,7 +17,7 @@ from .events import MarketEvent
 from .execution import ExecutionReport, ExecutionRequest, ExecutionSimulator
 from .features import FeatureEngine, ObservedState
 from .portfolio import PortfolioAllocator
-from .regime import RegimeInferencer, RegimePosterior
+from .regime import MicrostructureRegime, RegimeInferencer, RegimePosterior
 from .risk import OpenPosition, RiskDecision, RiskEngine
 from .transitions import EdgeKey, TransitionDiagnostic, TransitionKernel
 
@@ -37,6 +37,9 @@ class StateMachineRecoverySnapshot:
     open_positions: dict[str, OpenPosition]
     execution_history: list[ExecutionReport]
     signal_expectations: dict[str, float]
+    last_midpoints: dict[str, float]
+    return_history: dict[str, list[float]]
+    realized_volatility_by_symbol: dict[str, float]
     risk_state: dict[str, float | int | bool]
     feature_state: dict[str, object]
     regime_state: dict[str, object]
@@ -89,6 +92,9 @@ class L1MicrostructureStateMachine:
         self.open_positions: dict[str, OpenPosition] = {}
         self.execution_history: list[ExecutionReport] = []
         self.signal_expectations: dict[str, float] = {}
+        self.last_midpoints: dict[str, float] = {}
+        self.return_history: dict[str, Deque[float]] = {}
+        self.realized_volatility_by_symbol: dict[str, float] = {}
 
     def snapshot_state(self) -> StateMachineRecoverySnapshot:
         return StateMachineRecoverySnapshot(
@@ -98,6 +104,9 @@ class L1MicrostructureStateMachine:
             open_positions=deepcopy(self.open_positions),
             execution_history=deepcopy(self.execution_history),
             signal_expectations=deepcopy(self.signal_expectations),
+            last_midpoints=deepcopy(self.last_midpoints),
+            return_history={symbol: list(history) for symbol, history in self.return_history.items()},
+            realized_volatility_by_symbol=deepcopy(self.realized_volatility_by_symbol),
             risk_state={
                 "starting_equity": float(self.risk_engine.starting_equity),
                 "peak_equity": float(self.risk_engine.peak_equity),
@@ -119,6 +128,12 @@ class L1MicrostructureStateMachine:
             },
             regime_state={
                 "state_window": deepcopy(list(self.regime_inferencer.state_window)),
+                "previous_probabilities": (
+                    {regime.value: probability for regime, probability in self.regime_inferencer.previous_probabilities.items()}
+                    if self.regime_inferencer.previous_probabilities is not None
+                    else None
+                ),
+                "previous_timestamp_ns": self.regime_inferencer.previous_timestamp_ns,
             },
             transition_state={
                 "edge_stats": deepcopy(self.transition_kernel.edge_stats),
@@ -135,6 +150,12 @@ class L1MicrostructureStateMachine:
         self.open_positions = deepcopy(snapshot.open_positions)
         self.execution_history = deepcopy(snapshot.execution_history)
         self.signal_expectations = deepcopy(snapshot.signal_expectations)
+        self.last_midpoints = deepcopy(snapshot.last_midpoints)
+        self.return_history = {
+            symbol: deque(history, maxlen=self.config.transition.covariance_history)
+            for symbol, history in deepcopy(snapshot.return_history).items()
+        }
+        self.realized_volatility_by_symbol = deepcopy(snapshot.realized_volatility_by_symbol)
 
         self.risk_engine.starting_equity = float(snapshot.risk_state["starting_equity"])
         self.risk_engine.peak_equity = float(snapshot.risk_state["peak_equity"])
@@ -160,6 +181,16 @@ class L1MicrostructureStateMachine:
         self.feature_engine.active_regime_hint = snapshot.feature_state["active_regime_hint"]
 
         self.regime_inferencer.state_window = deque(deepcopy(snapshot.regime_state["state_window"]))
+        previous_probabilities = snapshot.regime_state.get("previous_probabilities")
+        self.regime_inferencer.previous_probabilities = (
+            {
+                MicrostructureRegime(key): float(value)
+                for key, value in previous_probabilities.items()
+            }
+            if previous_probabilities is not None
+            else None
+        )
+        self.regime_inferencer.previous_timestamp_ns = snapshot.regime_state.get("previous_timestamp_ns")
 
         self.transition_kernel.edge_stats = deepcopy(snapshot.transition_state["edge_stats"])
         self.transition_kernel.outgoing_counts.clear()
@@ -176,6 +207,7 @@ class L1MicrostructureStateMachine:
         if state is None:
             return None
 
+        self._record_symbol_return(state)
         regime = self.regime_inferencer.update(state)
         self.feature_engine.set_regime_hint(regime.dominant_regime.value)
         resolved_outcomes = self._resolve_pending_outcomes(state)
@@ -272,22 +304,138 @@ class L1MicrostructureStateMachine:
             target_fraction=target_fraction,
             current_position=self.open_positions.get(state.symbol),
             current_gross_exposure=self._gross_exposure_fraction(state),
+            current_net_exposure=self._net_exposure_fraction(state),
+            current_symbol_exposure=self._symbol_exposure_fraction(state.symbol, state.book.midpoint),
+            current_beta_exposure=self._beta_exposure_fraction(state),
+            current_symbol_beta_exposure=self._symbol_beta_exposure_fraction(state.symbol, state.book.midpoint),
+            proposed_symbol_beta=self._estimate_symbol_beta(state.symbol),
         )
 
     def _portfolio_target_fraction(self, symbol: str) -> float | None:
         if not self.signal_expectations:
             return None
         symbols = list(self.signal_expectations)
-        covariance = pd.DataFrame(np.eye(len(symbols)), index=symbols, columns=symbols)
-        weights = self.portfolio_allocator.allocate(self.signal_expectations, covariance)
+        covariance = self._estimate_signal_covariance(symbols)
+        weights = self.portfolio_allocator.allocate(
+            self.signal_expectations,
+            covariance,
+            sector_map=self._sector_map_for_symbols(symbols),
+        )
         return abs(float(weights.get(symbol, 0.0)))
+
+    def _estimate_signal_covariance(self, symbols: list[str]) -> pd.DataFrame:
+        aligned_returns: dict[str, pd.Series[float]] = {}
+        for symbol in symbols:
+            history = list(self.return_history.get(symbol, ()))
+            if not history:
+                continue
+            tail = history[-self.config.transition.covariance_history :]
+            aligned_returns[symbol] = pd.Series(tail, index=range(-len(tail), 0), dtype=float)
+
+        if len(aligned_returns) >= 2:
+            covariance = pd.DataFrame(aligned_returns).cov(min_periods=2)
+        elif len(aligned_returns) == 1:
+            only_symbol = next(iter(aligned_returns))
+            variance = float(aligned_returns[only_symbol].var(ddof=1)) if len(aligned_returns[only_symbol]) >= 2 else 0.0
+            covariance = pd.DataFrame([[variance]], index=[only_symbol], columns=[only_symbol])
+        else:
+            covariance = pd.DataFrame(dtype=float)
+
+        covariance = covariance.reindex(index=symbols, columns=symbols, fill_value=0.0).astype(float)
+        for current_symbol in symbols:
+            fallback_variance = self._fallback_variance(current_symbol)
+            current_variance = float(covariance.at[current_symbol, current_symbol]) if current_symbol in covariance.index else 0.0
+            covariance.at[current_symbol, current_symbol] = max(current_variance, fallback_variance)
+        return covariance
+
+    def _fallback_variance(self, symbol: str) -> float:
+        realized_volatility = max(
+            float(self.realized_volatility_by_symbol.get(symbol, self.config.feature.minimum_sigma)),
+            self.config.feature.minimum_sigma,
+        )
+        return float(realized_volatility**2)
 
     def _gross_exposure_fraction(self, state: ObservedState) -> float:
         equity = max(self.risk_engine.equity, 1e-6)
         total_notional = 0.0
         for position in self.open_positions.values():
-            total_notional += abs(position.quantity * state.book.midpoint)
+            total_notional += abs(position.quantity * self._mark_price(position.symbol, state.book.midpoint))
         return total_notional / equity
+
+    def _net_exposure_fraction(self, state: ObservedState) -> float:
+        equity = max(self.risk_engine.equity, 1e-6)
+        total_signed_notional = 0.0
+        for position in self.open_positions.values():
+            direction = 1.0 if position.side == TradeAction.BUY else -1.0
+            total_signed_notional += direction * position.quantity * self._mark_price(position.symbol, state.book.midpoint)
+        return total_signed_notional / equity
+
+    def _symbol_exposure_fraction(self, symbol: str, fallback_midpoint: float) -> float:
+        position = self.open_positions.get(symbol)
+        if position is None:
+            return 0.0
+        equity = max(self.risk_engine.equity, 1e-6)
+        direction = 1.0 if position.side == TradeAction.BUY else -1.0
+        return direction * position.quantity * self._mark_price(symbol, fallback_midpoint) / equity
+
+    def _mark_price(self, symbol: str, fallback_midpoint: float) -> float:
+        return max(float(self.last_midpoints.get(symbol, fallback_midpoint)), self.config.feature.minimum_sigma)
+
+    def _sector_map_for_symbols(self, symbols: list[str]) -> dict[str, str]:
+        raw_sector_map = self.runtime_artifacts.metadata.get("sector_map", {})
+        if not isinstance(raw_sector_map, dict):
+            return {}
+        return {
+            symbol: str(raw_sector_map[symbol])
+            for symbol in symbols
+            if symbol in raw_sector_map and raw_sector_map[symbol] is not None
+        }
+
+    def _beta_exposure_fraction(self, state: ObservedState) -> float:
+        equity = max(self.risk_engine.equity, 1e-6)
+        total_beta_notional = 0.0
+        for symbol, position in self.open_positions.items():
+            direction = 1.0 if position.side == TradeAction.BUY else -1.0
+            price = self._mark_price(symbol, state.book.midpoint)
+            total_beta_notional += direction * position.quantity * price * self._estimate_symbol_beta(symbol)
+        return total_beta_notional / equity
+
+    def _symbol_beta_exposure_fraction(self, symbol: str, fallback_midpoint: float) -> float:
+        position = self.open_positions.get(symbol)
+        if position is None:
+            return 0.0
+        equity = max(self.risk_engine.equity, 1e-6)
+        direction = 1.0 if position.side == TradeAction.BUY else -1.0
+        return (
+            direction
+            * position.quantity
+            * self._mark_price(symbol, fallback_midpoint)
+            * self._estimate_symbol_beta(symbol)
+            / equity
+        )
+
+    def _estimate_symbol_beta(self, symbol: str) -> float:
+        raw_beta_map = self.runtime_artifacts.metadata.get("symbol_betas", {})
+        if isinstance(raw_beta_map, dict) and symbol in raw_beta_map:
+            return float(raw_beta_map[symbol])
+
+        aligned_returns: dict[str, pd.Series[float]] = {}
+        for current_symbol, history in self.return_history.items():
+            if not history:
+                continue
+            aligned_returns[current_symbol] = pd.Series(list(history), index=range(-len(history), 0), dtype=float)
+        if symbol not in aligned_returns:
+            return 1.0
+
+        aligned_frame = pd.DataFrame(aligned_returns).dropna(how="any")
+        if aligned_frame.empty:
+            aligned_frame = pd.DataFrame({symbol: aligned_returns[symbol]}).dropna(how="any")
+        market_proxy = aligned_frame.mean(axis=1)
+        market_variance = float(market_proxy.var(ddof=1)) if len(market_proxy) >= 2 else 0.0
+        if market_variance <= 0.0:
+            return 1.0
+        beta = float(aligned_frame[symbol].cov(market_proxy) / market_variance)
+        return float(np.clip(beta, -3.0, 3.0))
 
     @staticmethod
     def _signal_strength(intent: TradeIntent) -> float:
@@ -297,7 +445,23 @@ class L1MicrostructureStateMachine:
             intent.posterior.probability_down,
             0.5,
         )
-        return signal if intent.action is TradeAction.BUY else -signal
+        return signal if intent.action == TradeAction.BUY else -signal
+
+    def _record_symbol_return(self, state: ObservedState) -> None:
+        midpoint = max(state.book.midpoint, self.config.feature.minimum_sigma)
+        previous_midpoint = self.last_midpoints.get(state.symbol)
+        self.last_midpoints[state.symbol] = midpoint
+        self.realized_volatility_by_symbol[state.symbol] = float(
+            max(state.realized_volatility, self.config.feature.minimum_sigma)
+        )
+        if previous_midpoint is None or previous_midpoint <= 0:
+            return
+
+        history = self.return_history.setdefault(
+            state.symbol,
+            deque(maxlen=self.config.transition.covariance_history),
+        )
+        history.append(float(np.log(midpoint / previous_midpoint)))
 
     def _resolve_pending_outcomes(self, state: ObservedState) -> list[tuple[EdgeKey, float]]:
         resolved: list[tuple[EdgeKey, float]] = []
@@ -329,17 +493,17 @@ class L1MicrostructureStateMachine:
         if position is None:
             return []
 
-        hazard = self.decision_engine.exit_hazard(position.side, state, regime)
-        if hazard < self.config.decision.exit_hazard_threshold:
+        hazard = self.decision_engine.exit_hazard_diagnostics(position.side, state, regime)
+        if hazard.total_hazard < self.config.decision.exit_hazard_threshold:
             return []
 
-        action = TradeAction.SELL if position.side is TradeAction.BUY else TradeAction.BUY
+        action = TradeAction.SELL if position.side == TradeAction.BUY else TradeAction.BUY
         exit_intent = TradeIntent(
             action=action,
             edge=EdgeKey(state.label, state.label, regime.dominant_regime),
             posterior=self.decision_engine.estimate_posterior([], 0.0),
             expected_holding_time_ns=0,
-            reason="hazard-based invalidation",
+            reason=hazard.reason,
         )
         request = self.execution_simulator.build_request(exit_intent, state, position.quantity)
         request = ExecutionRequest(
@@ -367,7 +531,7 @@ class L1MicrostructureStateMachine:
             )
             return
 
-        if existing.side is report.action:
+        if existing.side == report.action:
             total_quantity = existing.quantity + report.quantity
             weighted_entry = (
                 existing.entry_price * existing.quantity + float(report.fill_price) * report.quantity
@@ -382,7 +546,7 @@ class L1MicrostructureStateMachine:
             return
 
         closing_quantity = min(existing.quantity, report.quantity)
-        direction = 1.0 if existing.side is TradeAction.BUY else -1.0
+        direction = 1.0 if existing.side == TradeAction.BUY else -1.0
         pnl = direction * (float(report.fill_price) - existing.entry_price) * closing_quantity
         self.risk_engine.register_realized_pnl(pnl)
 

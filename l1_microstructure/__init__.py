@@ -10,7 +10,7 @@ from .config import FrameworkConfig
 from .datasets import PipelineTransitionDatasetBuilder
 from .events import EventKind, QuoteEvent, TradeEvent, TradeSide
 from .features import FeatureEngine, ObservedState
-from .ingest import InMemoryPolygonDataSource, PolygonPayloadNormalizer, RTHSessionFilter
+from .ingest import PolygonPayloadNormalizer, RTHSessionFilter
 from .labeling import ForwardDriftLabeler
 from .live import SimulatorPaperTradingRunner, SourceBackedPaperRunner
 from .monitoring import InMemoryMonitoringSink, JsonlMonitoringSink, RuntimeMonitor
@@ -32,7 +32,6 @@ __all__ = [
     "ArtifactBundleLoader",
     "ArtifactBundleSelector",
     "ArtifactDrivenResearchWorkflow",
-    "InMemoryPolygonDataSource",
     "InMemoryMonitoringSink",
     "JsonlMonitoringSink",
     "L1MicrostructureStateMachine",

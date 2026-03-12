@@ -43,7 +43,8 @@ class BrokerOrder:
 @dataclass(frozen=True, slots=True)
 class IBKRConnectionConfig:
     host: str = "127.0.0.1"
-    port: int = 7497
+    port: int = 4002
     client_id: int = 1
     account_id: str | None = None
     paper_trading: bool = True
+    outside_regular_trading_hours: bool = False

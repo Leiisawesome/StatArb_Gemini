@@ -7,14 +7,12 @@ from l1_microstructure.artifacts import RuntimeArtifactBundle
 from l1_microstructure.config import FrameworkConfig
 from l1_microstructure.execution import ExecutionReport
 from l1_microstructure.datasets import PipelineTransitionDatasetBuilder
-from l1_microstructure.ingest import InMemoryPolygonDataSource, LiveSubscriptionRequest
+from l1_microstructure.ingest import LiveSubscriptionRequest
 from l1_microstructure.live import (
-    BrokerBackedOrderRouter,
     BrokerOrder,
     BrokerOrderStatus,
-    ImmediateFillOrderRouter,
-    LatencyBufferedOrderRouter,
-    RejectingOrderRouter,
+    IBKRBrokerOrderRouter,
+    IBKRConnectionConfig,
     RouteAcknowledgement,
     RoutedLiveTradingRunner,
     RunnerConfig,
@@ -22,6 +20,101 @@ from l1_microstructure.live import (
 )
 from l1_microstructure.monitoring import InMemoryMonitoringSink, JsonlMonitoringSink
 from l1_microstructure.training import EmpiricalTransitionTrainer
+from tests.unit.l1_state_machine.support import FixtureMarketDataSource as InMemoryPolygonDataSource
+
+
+class AcceptedFillRouter:
+    def __init__(self) -> None:
+        self.submissions = []
+        self.pending_reports: list[ExecutionReport] = []
+        self.stopped = False
+
+    def submit(self, request):
+        self.submissions.append(request)
+        self.pending_reports.append(
+            ExecutionReport(
+                symbol=request.symbol,
+                action=request.action,
+                status="filled",
+                quantity=request.quantity,
+                fill_price=request.expected_state.book.ask_price,
+                alignment_probability=1.0,
+                fill_probability=1.0,
+                slippage_bps=0.0,
+                reason="accepted fill router",
+                timestamp_ns=request.executable_timestamp_ns,
+            )
+        )
+        return RouteAcknowledgement(external_order_id=f"accepted-{len(self.submissions)}", status="accepted")
+
+    def poll(self, symbols):
+        reports = [report for report in self.pending_reports if report.symbol in symbols]
+        self.pending_reports = [report for report in self.pending_reports if report.symbol not in symbols]
+        return reports
+
+    def stop(self) -> None:
+        self.stopped = True
+
+
+class DelayedFillRouter(AcceptedFillRouter):
+    def __init__(self, delay_cycles: int = 1) -> None:
+        super().__init__()
+        self.delay_cycles = max(int(delay_cycles), 0)
+        self.pending_reports: list[tuple[int, ExecutionReport]] = []
+
+    def submit(self, request):
+        self.submissions.append(request)
+        self.pending_reports.append(
+            (
+                self.delay_cycles,
+                ExecutionReport(
+                    symbol=request.symbol,
+                    action=request.action,
+                    status="filled",
+                    quantity=request.quantity,
+                    fill_price=request.expected_state.book.ask_price,
+                    alignment_probability=1.0,
+                    fill_probability=1.0,
+                    slippage_bps=0.0,
+                    reason="delayed fill router",
+                    timestamp_ns=request.executable_timestamp_ns,
+                ),
+            )
+        )
+        return RouteAcknowledgement(external_order_id=f"delayed-{len(self.submissions)}", status="accepted")
+
+    def poll(self, symbols):
+        ready = []
+        remaining = []
+        for polls_remaining, report in self.pending_reports:
+            if report.symbol not in symbols:
+                remaining.append((polls_remaining, report))
+            elif polls_remaining > 0:
+                remaining.append((polls_remaining - 1, report))
+            else:
+                ready.append(report)
+        self.pending_reports = remaining
+        return ready
+
+
+class CancelingRouter(AcceptedFillRouter):
+    def submit(self, request):
+        self.submissions.append(request)
+        self.pending_reports.append(
+            ExecutionReport(
+                symbol=request.symbol,
+                action=request.action,
+                status="cancelled",
+                quantity=0,
+                fill_price=None,
+                alignment_probability=0.0,
+                fill_probability=0.0,
+                slippage_bps=0.0,
+                reason="router rejected",
+                timestamp_ns=request.executable_timestamp_ns,
+            )
+        )
+        return RouteAcknowledgement(external_order_id=f"cancelled-{len(self.submissions)}", status="rejected", reason="router rejected")
 
 
 def test_in_memory_monitoring_sink_collects_runtime_snapshots() -> None:
@@ -199,7 +292,7 @@ def test_routed_live_runner_can_resume_from_recovery_snapshot() -> None:
 
     first_runner = RoutedLiveTradingRunner(
         source=InMemoryPolygonDataSource(payloads[:4]),
-        router=ImmediateFillOrderRouter(),
+        router=AcceptedFillRouter(),
         framework_config=config,
         runtime_artifacts=runtime_artifacts,
     )
@@ -211,7 +304,7 @@ def test_routed_live_runner_can_resume_from_recovery_snapshot() -> None:
 
     resumed_runner = RoutedLiveTradingRunner(
         source=InMemoryPolygonDataSource(payloads[4:]),
-        router=ImmediateFillOrderRouter(),
+        router=AcceptedFillRouter(),
         framework_config=config,
     )
     resumed_runner.run_live(
@@ -251,7 +344,7 @@ def test_routed_live_runner_supports_latency_buffered_router_adapter() -> None:
 
     runner = RoutedLiveTradingRunner(
         source=InMemoryPolygonDataSource(payloads),
-        router=LatencyBufferedOrderRouter(poll_delay_cycles=1),
+        router=DelayedFillRouter(delay_cycles=1),
         framework_config=config,
         runtime_artifacts=RuntimeArtifactBundle(transition_model=trainer.last_payload),
     )
@@ -289,7 +382,7 @@ def test_routed_live_runner_handles_cancelled_router_reports() -> None:
 
     runner = RoutedLiveTradingRunner(
         source=InMemoryPolygonDataSource(payloads),
-        router=RejectingOrderRouter(),
+        router=CancelingRouter(),
         framework_config=config,
         runtime_artifacts=RuntimeArtifactBundle(transition_model=trainer.last_payload),
     )
@@ -368,7 +461,7 @@ def test_routed_live_runner_reconciles_broker_backed_partial_fill_and_cancel() -
 
     runner = RoutedLiveTradingRunner(
         source=InMemoryPolygonDataSource(payloads),
-        router=BrokerBackedOrderRouter(broker=FakeBrokerFacade()),
+        router=IBKRBrokerOrderRouter(ibkr_config=IBKRConnectionConfig(), broker=FakeBrokerFacade()),
         framework_config=config,
         runtime_artifacts=RuntimeArtifactBundle(transition_model=trainer.last_payload),
     )
@@ -463,7 +556,7 @@ def test_routed_live_runner_can_resume_with_open_broker_backed_order() -> None:
         runtime_horizon_ns=config.transition.drift_horizon_ns,
     )
     broker = RecoverableBrokerFacade()
-    router = BrokerBackedOrderRouter(broker=broker)
+    router = IBKRBrokerOrderRouter(ibkr_config=IBKRConnectionConfig(), broker=broker)
     runtime_artifacts = RuntimeArtifactBundle(transition_model=trainer.last_payload)
 
     first_runner = RoutedLiveTradingRunner(
@@ -482,7 +575,7 @@ def test_routed_live_runner_can_resume_with_open_broker_backed_order() -> None:
     assert open_order_ids_before_resume
     assert snapshot.router_recovery_state is not None
 
-    resumed_router = BrokerBackedOrderRouter(broker=broker)
+    resumed_router = IBKRBrokerOrderRouter(ibkr_config=IBKRConnectionConfig(), broker=broker)
     resumed_runner = RoutedLiveTradingRunner(
         source=InMemoryPolygonDataSource(payloads[4:]),
         router=resumed_router,

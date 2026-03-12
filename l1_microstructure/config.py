@@ -59,6 +59,7 @@ class DecisionConfig:
     risk_premium_bps: float = 1.5
     transaction_cost_bps: float = 1.2
     min_alpha_score: float = 0.15
+    min_observation_confidence: float = 0.10
     posterior_prior_mean_bps: float = 0.0
     posterior_prior_strength: float = 1.0
     posterior_prior_alpha: float = 3.0
@@ -76,6 +77,10 @@ class ExecutionConfig:
     queue_penalty_weight: float = 0.0
     queue_reference_size: float = 100.0
     queue_penalty_exponent: float = 1.0
+    queue_pressure_weight: float = 0.20
+    queue_latency_weight: float = 0.10
+    queue_survival_floor: float = 0.05
+    confidence_aggressiveness_floor: float = 0.35
 
     @property
     def latency_ns(self) -> int:
@@ -90,6 +95,7 @@ class RiskConfig:
     volatility_target: float = 0.012
     max_position_fraction: float = 0.05
     beta_hedge_threshold: float = 0.30
+    confidence_size_floor: float = 0.25
 
 
 @dataclass(slots=True)

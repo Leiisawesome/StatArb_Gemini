@@ -5,9 +5,10 @@ from pathlib import Path
 
 from l1_microstructure.config import FrameworkConfig
 from l1_microstructure.datasets import PipelineTransitionDatasetBuilder
-from l1_microstructure.ingest import InMemoryPolygonDataSource, LiveSubscriptionRequest
+from l1_microstructure.ingest import LiveSubscriptionRequest
 from l1_microstructure.replay import DeterministicReplayEngine
 from l1_microstructure.workflow import ArtifactDrivenResearchWorkflow
+from tests.unit.l1_state_machine.support import FixtureMarketDataSource as InMemoryPolygonDataSource
 
 
 _FIXTURE_DIR = Path(__file__).resolve().parents[2] / "fixtures" / "l1_state_machine"

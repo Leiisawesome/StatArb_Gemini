@@ -74,15 +74,16 @@ class TransitionKernel:
 
     def mahalanobis_distance(self, previous_vector: np.ndarray, current_vector: np.ndarray) -> float:
         delta = np.asarray(current_vector, dtype=float) - np.asarray(previous_vector, dtype=float)
-        self.increment_history.append(delta)
         if len(self.increment_history) < 5:
-            return float(np.linalg.norm(delta))
-        history = np.vstack(self.increment_history)
-        covariance = np.cov(history, rowvar=False)
-        covariance = np.atleast_2d(covariance)
-        covariance += np.eye(covariance.shape[0]) * 1e-6
-        inverse = np.linalg.pinv(covariance)
-        distance = float(delta.T @ inverse @ delta)
+            distance = float(np.linalg.norm(delta))
+        else:
+            history = np.vstack(self.increment_history)
+            covariance = np.cov(history, rowvar=False)
+            covariance = np.atleast_2d(covariance)
+            covariance += np.eye(covariance.shape[0]) * 1e-6
+            inverse = np.linalg.pinv(covariance)
+            distance = float(delta.T @ inverse @ delta)
+        self.increment_history.append(delta)
         return distance
 
     def is_transition(self, previous_vector: np.ndarray, current_vector: np.ndarray) -> bool:

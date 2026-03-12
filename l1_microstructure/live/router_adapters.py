@@ -1,8 +1,9 @@
-"""Built-in order-router adapters for successor-package live shells."""
+"""Native IBKR order-router adapter for successor-package live shells."""
 
 from __future__ import annotations
 
 import asyncio
+import math
 import os
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -10,10 +11,10 @@ from dotenv import dotenv_values
 from threading import Thread
 from typing import Any
 
-from l1_microstructure.config import ExecutionConfig
 from l1_microstructure.decision import TradeAction
-from l1_microstructure.execution import ExecutionReport, ExecutionRequest, ExecutionSimulator
+from l1_microstructure.execution import ExecutionReport, ExecutionRequest
 
+from ._ibkr_native import IBKRNativeBrokerSession
 from .broker_models import BrokerOrderSide, BrokerOrderType, IBKRConnectionConfig
 from .interfaces import RouteAcknowledgement
 
@@ -44,10 +45,11 @@ def _load_ibkr_connection_config(env_file: str | None) -> IBKRConnectionConfig:
 
     return IBKRConnectionConfig(
         host=str(loaded.get("IBKR_HOST", "127.0.0.1")),
-        port=int(loaded.get("IBKR_PORT", 7497)),
+        port=int(loaded.get("IBKR_PORT", 4002)),
         client_id=int(loaded.get("IBKR_CLIENT_ID", 1)),
         account_id=loaded.get("IBKR_ACCOUNT_ID") or loaded.get("IBKR_ACCOUNT"),
         paper_trading=_parse_bool(loaded.get("IBKR_PAPER_TRADING"), default=True),
+        outside_regular_trading_hours=_parse_bool(loaded.get("IBKR_OUTSIDE_RTH"), default=False),
     )
 
 
@@ -64,115 +66,9 @@ class BrokerRouterRecoveryState:
 
 
 @dataclass(slots=True)
-class ImmediateFillOrderRouter:
-    execution_config: ExecutionConfig | None = None
-    simulator: ExecutionSimulator = field(init=False)
-    _pending_reports: list[ExecutionReport] = field(default_factory=list, init=False)
-    _submission_count: int = field(default=0, init=False)
-
-    def __post_init__(self) -> None:
-        self.simulator = ExecutionSimulator(self.execution_config or ExecutionConfig())
-
-    def submit(self, request: ExecutionRequest) -> RouteAcknowledgement:
-        self._submission_count += 1
-        report = self.simulator.execute(request, request.expected_state)
-        self._pending_reports.append(report)
-        return RouteAcknowledgement(
-            external_order_id=f"immediate-fill-{self._submission_count}",
-            status="accepted",
-            metadata={"adapter": "immediate-fill"},
-        )
-
-    def poll(self, symbols: tuple[str, ...]) -> list[ExecutionReport]:
-        ready = [report for report in self._pending_reports if report.symbol in symbols]
-        self._pending_reports = [report for report in self._pending_reports if report.symbol not in symbols]
-        return ready
-
-    def stop(self) -> None:
-        self._pending_reports = []
-
-
-@dataclass(slots=True)
-class LatencyBufferedOrderRouter:
-    poll_delay_cycles: int = 1
-    execution_config: ExecutionConfig | None = None
-    simulator: ExecutionSimulator = field(init=False)
-    _pending_reports: list[tuple[int, ExecutionReport]] = field(default_factory=list, init=False)
-    _submission_count: int = field(default=0, init=False)
-
-    def __post_init__(self) -> None:
-        self.simulator = ExecutionSimulator(self.execution_config or ExecutionConfig())
-
-    def submit(self, request: ExecutionRequest) -> RouteAcknowledgement:
-        self._submission_count += 1
-        report = self.simulator.execute(request, request.expected_state)
-        self._pending_reports.append((max(int(self.poll_delay_cycles), 0), report))
-        return RouteAcknowledgement(
-            external_order_id=f"latency-buffered-{self._submission_count}",
-            status="accepted",
-            metadata={"adapter": "latency-buffered", "poll_delay_cycles": max(int(self.poll_delay_cycles), 0)},
-        )
-
-    def poll(self, symbols: tuple[str, ...]) -> list[ExecutionReport]:
-        ready: list[ExecutionReport] = []
-        remaining: list[tuple[int, ExecutionReport]] = []
-        for polls_remaining, report in self._pending_reports:
-            if report.symbol not in symbols:
-                remaining.append((polls_remaining, report))
-                continue
-            if polls_remaining > 0:
-                remaining.append((polls_remaining - 1, report))
-                continue
-            ready.append(report)
-        self._pending_reports = remaining
-        return ready
-
-    def stop(self) -> None:
-        self._pending_reports = []
-
-
-@dataclass(slots=True)
-class RejectingOrderRouter:
-    reason: str = "router rejected"
-    acknowledgement_status: str = "rejected"
-    _pending_reports: list[ExecutionReport] = field(default_factory=list, init=False)
-    _submission_count: int = field(default=0, init=False)
-
-    def submit(self, request: ExecutionRequest) -> RouteAcknowledgement:
-        self._submission_count += 1
-        self._pending_reports.append(
-            ExecutionReport(
-                symbol=request.symbol,
-                action=request.action,
-                status="cancelled",
-                quantity=0,
-                fill_price=None,
-                alignment_probability=0.0,
-                fill_probability=0.0,
-                slippage_bps=0.0,
-                reason=self.reason,
-                timestamp_ns=request.executable_timestamp_ns,
-            )
-        )
-        return RouteAcknowledgement(
-            external_order_id=f"rejecting-{self._submission_count}",
-            status=self.acknowledgement_status,
-            reason=self.reason,
-            metadata={"adapter": "rejecting"},
-        )
-
-    def poll(self, symbols: tuple[str, ...]) -> list[ExecutionReport]:
-        ready = [report for report in self._pending_reports if report.symbol in symbols]
-        self._pending_reports = [report for report in self._pending_reports if report.symbol not in symbols]
-        return ready
-
-    def stop(self) -> None:
-        self._pending_reports = []
-
-
-@dataclass(slots=True)
-class BrokerBackedOrderRouter:
-    broker: Any
+class IBKRBrokerOrderRouter:
+    ibkr_config: IBKRConnectionConfig
+    broker: Any | None = None
     prefer_limit_orders: bool = False
     limit_price_offset_bps: float = 0.0
     auto_connect: bool = True
@@ -183,6 +79,9 @@ class BrokerBackedOrderRouter:
     _open_requests: dict[str, ExecutionRequest] = field(default_factory=dict, init=False)
     _filled_quantities: dict[str, float] = field(default_factory=dict, init=False)
     _pending_terminal_reports: list[ExecutionReport] = field(default_factory=list, init=False)
+
+    def __post_init__(self) -> None:
+        self.broker = self.broker if self.broker is not None else self._build_broker(self.ibkr_config)
 
     def submit(self, request: ExecutionRequest) -> RouteAcknowledgement:
         self._submission_count += 1
@@ -201,7 +100,7 @@ class BrokerBackedOrderRouter:
             return RouteAcknowledgement(
                 external_order_id=order_id,
                 status="accepted",
-                metadata={"adapter": "broker-backed", "broker": self._broker_name()},
+                metadata={"adapter": "ibkr-native", "broker": self._broker_name()},
             )
         except Exception as exc:
             self._pending_terminal_reports.append(self._error_report(request, str(exc)))
@@ -209,7 +108,7 @@ class BrokerBackedOrderRouter:
                 external_order_id=f"broker-error-{self._submission_count}",
                 status="rejected",
                 reason=str(exc),
-                metadata={"adapter": "broker-backed", "broker": self._broker_name()},
+                metadata={"adapter": "ibkr-native", "broker": self._broker_name()},
             )
 
     def poll(self, symbols: tuple[str, ...]) -> list[ExecutionReport]:
@@ -288,7 +187,16 @@ class BrokerBackedOrderRouter:
             self._open_requests[order_id] = recovered.request
 
     def health_check(self) -> dict[str, Any]:
-        self._ensure_connected()
+        try:
+            self._ensure_connected()
+        except Exception as exc:
+            return {
+                "connected": False,
+                "status": "disconnected",
+                "broker": self._broker_name(),
+                "open_order_count": len(self._open_requests),
+                "error": str(exc),
+            }
         check_health = getattr(self.broker, "check_health", None)
         if callable(check_health):
             health = self._run_async(check_health())
@@ -335,7 +243,7 @@ class BrokerBackedOrderRouter:
         self._connected = True
 
     def _submit_order(self, request: ExecutionRequest) -> Any:
-        side = BrokerOrderSide.BUY if request.action is TradeAction.BUY else BrokerOrderSide.SELL
+        side = BrokerOrderSide.BUY if request.action == TradeAction.BUY else BrokerOrderSide.SELL
         order_type = BrokerOrderType.LIMIT if self.prefer_limit_orders else BrokerOrderType.MARKET
         limit_price = self._limit_price(request) if order_type is BrokerOrderType.LIMIT else None
         return self._run_async(
@@ -415,12 +323,15 @@ class BrokerBackedOrderRouter:
     def _limit_price(self, request: ExecutionRequest) -> float:
         touch = self._touch_price(request)
         offset_multiplier = self.limit_price_offset_bps / 10_000.0
-        if request.action is TradeAction.BUY:
-            return float(touch * (1.0 + offset_multiplier))
-        return float(touch * (1.0 - offset_multiplier))
+        tick_size = 0.01 if touch >= 1.0 else 0.0001
+        if request.action == TradeAction.BUY:
+            raw_price = float(touch * (1.0 + offset_multiplier))
+            return float(math.floor(raw_price / tick_size) * tick_size)
+        raw_price = float(touch * (1.0 - offset_multiplier))
+        return float(math.ceil(raw_price / tick_size) * tick_size)
 
     def _touch_price(self, request: ExecutionRequest) -> float:
-        if request.action is TradeAction.BUY:
+        if request.action == TradeAction.BUY:
             return float(request.expected_state.book.ask_price)
         return float(request.expected_state.book.bid_price)
 
@@ -448,7 +359,7 @@ class BrokerBackedOrderRouter:
         touch = self._touch_price(request)
         if touch <= 0:
             return 0.0
-        direction = 1.0 if request.action is TradeAction.BUY else -1.0
+        direction = 1.0 if request.action == TradeAction.BUY else -1.0
         return float(direction * ((fill_price - touch) / touch) * 10_000.0)
 
     @staticmethod
@@ -479,36 +390,9 @@ class BrokerBackedOrderRouter:
             raise error["value"]
         return result.get("value")
 
-
-class IBKRBrokerOrderRouter(BrokerBackedOrderRouter):
-    def __init__(
-        self,
-        ibkr_config: IBKRConnectionConfig,
-        *,
-        broker: Any | None = None,
-        prefer_limit_orders: bool = False,
-        limit_price_offset_bps: float = 0.0,
-        auto_connect: bool = True,
-        disconnect_on_stop: bool = True,
-        cancel_open_orders_on_stop: bool = True,
-    ):
-        self.ibkr_config = ibkr_config
-
-        super().__init__(
-            broker=broker if broker is not None else self._build_broker(ibkr_config),
-            prefer_limit_orders=prefer_limit_orders,
-            limit_price_offset_bps=limit_price_offset_bps,
-            auto_connect=auto_connect,
-            disconnect_on_stop=disconnect_on_stop,
-            cancel_open_orders_on_stop=cancel_open_orders_on_stop,
-        )
-
     @staticmethod
     def _build_broker(ibkr_config: IBKRConnectionConfig) -> Any:
-        raise ImportError(
-            "ibkr-live routing now requires an external broker adapter implementation to be supplied "
-            "to l1_microstructure after the core_engine cleanup"
-        )
+        return IBKRNativeBrokerSession(ibkr_config)
 
     @classmethod
     def from_env(
@@ -526,7 +410,7 @@ class IBKRBrokerOrderRouter(BrokerBackedOrderRouter):
         if require_paper and not ibkr_config.paper_trading:
             raise ValueError("ibkr-live router requires paper trading configuration unless explicitly overridden")
         return cls(
-            ibkr_config,
+            ibkr_config=ibkr_config,
             prefer_limit_orders=prefer_limit_orders,
             limit_price_offset_bps=limit_price_offset_bps,
             auto_connect=auto_connect,

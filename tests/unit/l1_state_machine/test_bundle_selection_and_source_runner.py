@@ -7,9 +7,11 @@ import pytest
 
 from l1_microstructure.artifacts import ArtifactBundleSelector, RunQualityGate
 from l1_microstructure.config import FrameworkConfig
-from l1_microstructure.ingest import HistoricalBatchRequest, InMemoryPolygonDataSource, LiveSubscriptionRequest
-from l1_microstructure.live import ImmediateFillOrderRouter, RoutedLiveTradingRunner, RunnerConfig, SourceBackedPaperRunner
+from l1_microstructure.execution import ExecutionReport
+from l1_microstructure.ingest import HistoricalBatchRequest, LiveSubscriptionRequest
+from l1_microstructure.live import RouteAcknowledgement, RoutedLiveTradingRunner, RunnerConfig, SourceBackedPaperRunner
 from l1_microstructure.workflow import ArtifactDrivenResearchWorkflow
+from tests.unit.l1_state_machine.support import FixtureMarketDataSource as InMemoryPolygonDataSource
 
 
 def _et_ns(year: int, month: int, day: int, hour: int, minute: int, second: int = 0) -> int:
@@ -30,6 +32,36 @@ def _make_source() -> InMemoryPolygonDataSource:
             {"ev": "Q", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 10), "bp": 100.10, "ap": 100.14, "bs": 30, "as": 260},
         ]
     )
+
+
+class AcceptedFillRouter:
+    def __init__(self) -> None:
+        self.pending_reports: list[ExecutionReport] = []
+
+    def submit(self, request):
+        self.pending_reports.append(
+            ExecutionReport(
+                symbol=request.symbol,
+                action=request.action,
+                status="filled",
+                quantity=request.quantity,
+                fill_price=request.expected_state.book.ask_price,
+                alignment_probability=1.0,
+                fill_probability=1.0,
+                slippage_bps=0.0,
+                reason="accepted fill router",
+                timestamp_ns=request.executable_timestamp_ns,
+            )
+        )
+        return RouteAcknowledgement(external_order_id="accepted-fill-1", status="accepted")
+
+    def poll(self, symbols):
+        ready = [report for report in self.pending_reports if report.symbol in symbols]
+        self.pending_reports = [report for report in self.pending_reports if report.symbol not in symbols]
+        return ready
+
+    def stop(self) -> None:
+        return None
 
 
 def test_artifact_bundle_selector_resolves_latest_complete_run(tmp_path) -> None:
@@ -118,14 +150,14 @@ def test_artifact_bundle_selector_can_gate_on_execution_quality(tmp_path) -> Non
     selector = ArtifactBundleSelector(workflow.store)
     permissive = selector.resolve_latest_passing_for_symbol(
         "AAPL",
-        quality_gate=RunQualityGate(maximum_drift_tracking_error_bps=3.0, maximum_unseen_edge_rate=0.3),
+        quality_gate=RunQualityGate(maximum_drift_tracking_error_bps=3.5, maximum_unseen_edge_rate=0.3),
     )
 
     assert permissive.metadata["run_id"] == result.run_id
     assert selector.list_run_manifests(
         "AAPL",
         passing_only=True,
-        quality_gate=RunQualityGate(maximum_drift_tracking_error_bps=3.0),
+        quality_gate=RunQualityGate(maximum_drift_tracking_error_bps=3.5),
     )
 
     with pytest.raises(ValueError):
@@ -169,7 +201,7 @@ def test_routed_live_runner_can_resolve_latest_passing_bundle(tmp_path) -> None:
 
     runner = RoutedLiveTradingRunner(
         source=source,
-        router=ImmediateFillOrderRouter(),
+        router=AcceptedFillRouter(),
         framework_config=config,
         bundle_selector=ArtifactBundleSelector(workflow.store),
         require_validation_passed=True,

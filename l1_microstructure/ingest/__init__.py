@@ -7,15 +7,18 @@ from .interfaces import (
     MarketDataSource,
     SessionFilter,
 )
-from .polygon import (
+from ._polygon_support import (
     ExtendedHoursSessionFilter,
     ExclusionWindow,
-    InMemoryPolygonDataSource,
     PolygonFilterConfig,
     PolygonPayloadNormalizer,
+    RTHSessionFilter,
+)
+from .polygon import (
+    PolygonRESTConfig,
+    PolygonRESTDataSource,
     PolygonWebSocketConfig,
     PolygonWebSocketDataSource,
-    RTHSessionFilter,
 )
 
 __all__ = [
@@ -23,11 +26,12 @@ __all__ = [
     "ExtendedHoursSessionFilter",
     "ExclusionWindow",
     "HistoricalBatchRequest",
-    "InMemoryPolygonDataSource",
     "LiveSubscriptionRequest",
     "MarketDataSource",
     "PolygonFilterConfig",
     "PolygonPayloadNormalizer",
+    "PolygonRESTConfig",
+    "PolygonRESTDataSource",
     "PolygonWebSocketConfig",
     "PolygonWebSocketDataSource",
     "RTHSessionFilter",

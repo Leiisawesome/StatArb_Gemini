@@ -3,13 +3,15 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from datetime import date
+from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 from l1_microstructure.config import FrameworkConfig
 from l1_microstructure.datasets import PipelineTransitionDatasetBuilder
-from l1_microstructure.ingest import ExtendedHoursSessionFilter, ExclusionWindow, HistoricalBatchRequest, InMemoryPolygonDataSource, LiveSubscriptionRequest, PolygonFilterConfig, PolygonPayloadNormalizer, PolygonWebSocketConfig, PolygonWebSocketDataSource
+from l1_microstructure.ingest import ExtendedHoursSessionFilter, ExclusionWindow, HistoricalBatchRequest, LiveSubscriptionRequest, PolygonFilterConfig, PolygonPayloadNormalizer, PolygonRESTConfig, PolygonRESTDataSource, PolygonWebSocketConfig, PolygonWebSocketDataSource
 from l1_microstructure.labeling import ForwardDriftLabeler, HorizonLabelRequest
 from l1_microstructure.replay import DeterministicReplayEngine
+from tests.unit.l1_state_machine.support import FixtureMarketDataSource as InMemoryPolygonDataSource
 
 
 def _et_ns(year: int, month: int, day: int, hour: int, minute: int, second: int = 0) -> int:
@@ -306,44 +308,37 @@ def test_in_memory_polygon_source_filters_active_auction_periods_and_post_auctio
 
 
 def test_polygon_websocket_data_source_streams_and_filters_messages() -> None:
-    class FakeConnection:
+    class FakeWebSocketClient:
         def __init__(self) -> None:
-            self.sent_messages: list[str] = []
-            self.messages = iter(
-                [
-                    json.dumps([{"ev": "status", "message": "connected"}]),
-                    json.dumps(
-                        [
-                            {"ev": "Q", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 0), "bp": 100.0, "ap": 100.02, "bs": 100, "as": 100},
-                            {"ev": "status", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 1), "status": "trading halted"},
-                            {"ev": "T", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 2), "p": 100.01, "s": 100, "conditions": ["late"]},
-                            {"ev": "T", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 3), "p": 100.02, "s": 100},
-                            {"ev": "status", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 4), "status": "trading resumed"},
-                            {"ev": "Q", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 5), "bp": 100.01, "ap": 100.03, "bs": 100, "as": 100},
-                            {"ev": "T", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 7), "p": 100.03, "s": 100},
-                        ]
-                    ),
-                ]
-            )
+            self.connect_kwargs: dict[str, object] | None = None
             self.closed = False
 
-        def send(self, message: str) -> None:
-            self.sent_messages.append(message)
+        def run(self, handle_msg, **kwargs) -> None:
+            self.connect_kwargs = kwargs
+            handle_msg(json.dumps([{"ev": "status", "message": "connected"}]))
+            handle_msg(
+                json.dumps(
+                    [
+                        {"ev": "Q", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 0), "bp": 100.0, "ap": 100.02, "bs": 100, "as": 100},
+                        {"ev": "status", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 1), "status": "trading halted"},
+                        {"ev": "T", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 2), "p": 100.01, "s": 100, "conditions": ["late"]},
+                        {"ev": "T", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 3), "p": 100.02, "s": 100},
+                        {"ev": "status", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 4), "status": "trading resumed"},
+                        {"ev": "Q", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 5), "bp": 100.01, "ap": 100.03, "bs": 100, "as": 100},
+                        {"ev": "T", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 7), "p": 100.03, "s": 100},
+                    ]
+                )
+            )
 
-        def __iter__(self):
-            return self
-
-        def __next__(self):
-            return next(self.messages)
-
-        def close(self) -> None:
+        async def close(self) -> None:
+            self.closed = False
             self.closed = True
 
-    fake_connection = FakeConnection()
+    fake_client = FakeWebSocketClient()
     source = PolygonWebSocketDataSource(
         PolygonWebSocketConfig(endpoint="wss://example.invalid", api_key="secret"),
         filter_config=PolygonFilterConfig(post_halt_resume_exclusion_seconds=2),
-        connection_factory=lambda endpoint: fake_connection,
+        client_factory=lambda config, request: fake_client,
     )
 
     events = list(source.subscribe_live(LiveSubscriptionRequest(symbols=("AAPL",))))
@@ -351,48 +346,103 @@ def test_polygon_websocket_data_source_streams_and_filters_messages() -> None:
     assert len(events) == 2
     assert events[0].timestamp_ns == _et_ns(2024, 3, 11, 9, 30, 0)
     assert events[1].timestamp_ns == _et_ns(2024, 3, 11, 9, 30, 7)
-    assert any('"action": "auth"' in message for message in fake_connection.sent_messages)
-    assert any('"action": "subscribe"' in message for message in fake_connection.sent_messages)
-    assert fake_connection.closed is True
+    assert fake_client.closed is True
 
 
 def test_polygon_websocket_data_source_filters_active_auction_status_messages() -> None:
-    class FakeConnection:
+    class FakeWebSocketClient:
         def __init__(self) -> None:
-            self.sent_messages: list[str] = []
-            self.messages = iter(
-                [
-                    json.dumps(
-                        [
-                            {"ev": "Q", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 0), "bp": 99.98, "ap": 100.00, "bs": 100, "as": 100},
-                            {"ev": "status", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 0), "status": "opening auction imbalance"},
-                            {"ev": "Q", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 1), "bp": 100.0, "ap": 100.02, "bs": 100, "as": 100},
-                            {"ev": "status", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 3), "status": "auction complete"},
-                            {"ev": "Q", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 5), "bp": 100.02, "ap": 100.04, "bs": 100, "as": 100},
-                        ]
-                    )
-                ]
-            )
             self.closed = False
 
-        def send(self, message: str) -> None:
-            self.sent_messages.append(message)
+        def run(self, handle_msg, **kwargs) -> None:
+            handle_msg(
+                json.dumps(
+                    [
+                        {"ev": "Q", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 0), "bp": 99.98, "ap": 100.00, "bs": 100, "as": 100},
+                        {"ev": "status", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 0), "status": "opening auction imbalance"},
+                        {"ev": "Q", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 1), "bp": 100.0, "ap": 100.02, "bs": 100, "as": 100},
+                        {"ev": "status", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 3), "status": "auction complete"},
+                        {"ev": "Q", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 5), "bp": 100.02, "ap": 100.04, "bs": 100, "as": 100},
+                    ]
+                )
+            )
 
-        def __iter__(self):
-            return self
-
-        def __next__(self):
-            return next(self.messages)
-
-        def close(self) -> None:
+        async def close(self) -> None:
             self.closed = True
 
     source = PolygonWebSocketDataSource(
         PolygonWebSocketConfig(endpoint="wss://example.invalid", api_key="secret"),
         filter_config=PolygonFilterConfig(post_auction_resume_exclusion_seconds=1),
-        connection_factory=lambda endpoint: FakeConnection(),
+        client_factory=lambda config, request: FakeWebSocketClient(),
     )
 
     events = list(source.subscribe_live(LiveSubscriptionRequest(symbols=("AAPL",))))
 
     assert [event.timestamp_ns for event in events] == [_et_ns(2024, 3, 11, 9, 30, 0), _et_ns(2024, 3, 11, 9, 30, 5)]
+
+
+def test_polygon_rest_data_source_merges_quotes_and_trades() -> None:
+    class FakeRestClient:
+        def list_quotes(self, symbol: str, **kwargs):
+            assert symbol == "AAPL"
+            return [
+                SimpleNamespace(
+                    sip_timestamp=_et_ns(2024, 3, 11, 9, 30, 0),
+                    participant_timestamp=None,
+                    bid_price=100.0,
+                    ask_price=100.02,
+                    bid_size=100,
+                    ask_size=120,
+                    bid_exchange=11,
+                    ask_exchange=12,
+                    sequence_number=1,
+                    conditions=None,
+                    indicators=None,
+                    trf_timestamp=None,
+                ),
+                SimpleNamespace(
+                    sip_timestamp=_et_ns(2024, 3, 11, 9, 30, 2),
+                    participant_timestamp=None,
+                    bid_price=100.01,
+                    ask_price=100.03,
+                    bid_size=90,
+                    ask_size=110,
+                    bid_exchange=11,
+                    ask_exchange=12,
+                    sequence_number=3,
+                    conditions=None,
+                    indicators=None,
+                    trf_timestamp=None,
+                ),
+            ]
+
+        def list_trades(self, symbol: str, **kwargs):
+            assert symbol == "AAPL"
+            return [
+                SimpleNamespace(
+                    sip_timestamp=_et_ns(2024, 3, 11, 9, 30, 1),
+                    participant_timestamp=None,
+                    price=100.02,
+                    size=200,
+                    exchange=11,
+                    sequence_number=2,
+                    conditions=None,
+                    id="trade-1",
+                    trf_id=None,
+                    trf_timestamp=None,
+                    correction=None,
+                )
+            ]
+
+    source = PolygonRESTDataSource(
+        PolygonRESTConfig(api_key="secret"),
+        client_factory=lambda config: FakeRestClient(),
+    )
+
+    events = list(source.load_historical(HistoricalBatchRequest(symbols=("AAPL",), trade_date=date(2024, 3, 11))))
+
+    assert [event.timestamp_ns for event in events] == [
+        _et_ns(2024, 3, 11, 9, 30, 0),
+        _et_ns(2024, 3, 11, 9, 30, 1),
+        _et_ns(2024, 3, 11, 9, 30, 2),
+    ]

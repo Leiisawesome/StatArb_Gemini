@@ -7,7 +7,6 @@ import json
 import time
 from dataclasses import asdict
 from datetime import date
-from pathlib import Path
 from typing import Any, Sequence
 
 from l1_microstructure.config import FrameworkConfig
@@ -15,12 +14,17 @@ from l1_microstructure.decision import PosteriorEstimate, TradeAction, TradeInte
 from l1_microstructure.events import MarketEvent
 from l1_microstructure.execution import ExecutionReport, ExecutionRequest, ExecutionSimulator
 from l1_microstructure.features import FeatureEngine, ObservedState
-from l1_microstructure.ingest import HistoricalBatchRequest, InMemoryPolygonDataSource, LiveSubscriptionRequest
+from l1_microstructure.ingest import (
+    HistoricalBatchRequest,
+    LiveSubscriptionRequest,
+    PolygonPayloadNormalizer,
+    PolygonRESTDataSource,
+    PolygonWebSocketConfig,
+    PolygonWebSocketDataSource,
+)
+from l1_microstructure.ingest.polygon import _resolve_polygon_api_key
 from l1_microstructure.live import (
     IBKRBrokerOrderRouter,
-    ImmediateFillOrderRouter,
-    LatencyBufferedOrderRouter,
-    RejectingOrderRouter,
     RoutedLiveTradingRunner,
     RunnerConfig,
     SourceBackedPaperRunner,
@@ -62,9 +66,9 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command")
 
     workflow_parser = subparsers.add_parser("workflow")
-    _add_common_data_arguments(workflow_parser)
     workflow_parser.add_argument("--artifact-root", required=True)
     workflow_parser.add_argument("--symbol", required=True)
+    workflow_parser.add_argument("--trade-date", required=True)
     workflow_parser.add_argument("--transition-threshold", type=float, default=None)
 
     list_runs_parser = subparsers.add_parser("list-runs")
@@ -75,7 +79,6 @@ def build_parser() -> argparse.ArgumentParser:
     _add_quality_gate_arguments(list_runs_parser)
 
     historical_parser = subparsers.add_parser("paper-historical")
-    _add_common_data_arguments(historical_parser)
     historical_parser.add_argument("--artifact-root", required=True)
     historical_parser.add_argument("--symbol", required=True)
     historical_parser.add_argument("--trade-date", required=True)
@@ -87,7 +90,6 @@ def build_parser() -> argparse.ArgumentParser:
     _add_quality_gate_arguments(historical_parser)
 
     live_parser = subparsers.add_parser("paper-live")
-    _add_common_data_arguments(live_parser)
     live_parser.add_argument("--artifact-root", required=True)
     live_parser.add_argument("--symbol", required=True)
     live_parser.add_argument("--run-id", default=None)
@@ -98,7 +100,6 @@ def build_parser() -> argparse.ArgumentParser:
     _add_quality_gate_arguments(live_parser)
 
     routed_live_parser = subparsers.add_parser("live-routed")
-    _add_common_data_arguments(routed_live_parser)
     routed_live_parser.add_argument("--artifact-root", required=True)
     routed_live_parser.add_argument("--symbol", required=True)
     routed_live_parser.add_argument("--run-id", default=None)
@@ -106,12 +107,6 @@ def build_parser() -> argparse.ArgumentParser:
     routed_live_parser.add_argument("--latency-ms", type=int, default=100)
     routed_live_parser.add_argument("--transition-threshold", type=float, default=None)
     routed_live_parser.add_argument("--require-validation-passed", action="store_true")
-    routed_live_parser.add_argument(
-        "--router-type",
-        choices=("immediate-fill", "latency-buffered", "rejecting", "ibkr-live"),
-        default="immediate-fill",
-    )
-    routed_live_parser.add_argument("--router-poll-delay", type=int, default=1)
     routed_live_parser.add_argument("--broker-env-file", default=None)
     routed_live_parser.add_argument("--broker-order-mode", choices=("market", "limit"), default="market")
     routed_live_parser.add_argument("--broker-limit-offset-bps", type=float, default=0.0)
@@ -123,7 +118,6 @@ def build_parser() -> argparse.ArgumentParser:
     ibkr_smoke_parser.add_argument("--allow-live-broker-routing", action="store_true")
 
     ibkr_order_smoke_parser = subparsers.add_parser("ibkr-live-order-smoke")
-    _add_common_data_arguments(ibkr_order_smoke_parser)
     ibkr_order_smoke_parser.add_argument("--symbol", required=True)
     ibkr_order_smoke_parser.add_argument("--quantity", type=int, default=1)
     ibkr_order_smoke_parser.add_argument("--action", choices=("buy", "sell"), default="buy")
@@ -135,11 +129,6 @@ def build_parser() -> argparse.ArgumentParser:
     ibkr_order_smoke_parser.add_argument("--allow-live-broker-routing", action="store_true")
 
     return parser
-
-
-def _add_common_data_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--payload-file", required=True)
-
 
 def _add_quality_gate_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--min-fill-rate", type=float, default=None)
@@ -155,26 +144,21 @@ def _framework_config(transition_threshold: float | None) -> FrameworkConfig:
     return config
 
 
-def _data_source(payload_file: str) -> InMemoryPolygonDataSource:
-    payloads = _load_payloads(Path(payload_file))
-    return InMemoryPolygonDataSource(payloads)
+def _historical_source() -> PolygonRESTDataSource:
+    return PolygonRESTDataSource()
 
 
-def _load_payloads(path: Path) -> list[dict[str, Any]]:
-    text = path.read_text(encoding="utf-8").strip()
-    if not text:
-        return []
-    if text.startswith("["):
-        payload = json.loads(text)
-        if not isinstance(payload, list):
-            raise ValueError("JSON payload file must contain a list of vendor payloads")
-        return [dict(item) for item in payload]
-    return [json.loads(line) for line in text.splitlines() if line.strip()]
+def _live_source() -> PolygonWebSocketDataSource:
+    return PolygonWebSocketDataSource(PolygonWebSocketConfig())
 
 
 def _run_workflow_command(args: argparse.Namespace) -> int:
-    source = _data_source(args.payload_file)
-    events = list(source.subscribe_live(LiveSubscriptionRequest(symbols=(args.symbol,))))
+    source = _historical_source()
+    events = list(
+        source.load_historical(
+            HistoricalBatchRequest(symbols=(args.symbol,), trade_date=date.fromisoformat(args.trade_date))
+        )
+    )
     workflow = ArtifactDrivenResearchWorkflow(
         args.artifact_root,
         framework_config=_framework_config(args.transition_threshold),
@@ -218,7 +202,7 @@ def _run_list_runs_command(args: argparse.Namespace) -> int:
 
 
 def _run_historical_command(args: argparse.Namespace) -> int:
-    source = _data_source(args.payload_file)
+    source = _historical_source()
     selector = ArtifactBundleSelector(LocalArtifactStore(args.artifact_root))
     runner = SourceBackedPaperRunner(
         source=source,
@@ -237,7 +221,7 @@ def _run_historical_command(args: argparse.Namespace) -> int:
 
 
 def _run_live_command(args: argparse.Namespace) -> int:
-    source = _data_source(args.payload_file)
+    source = _live_source()
     selector = ArtifactBundleSelector(LocalArtifactStore(args.artifact_root))
     runner = SourceBackedPaperRunner(
         source=source,
@@ -256,7 +240,7 @@ def _run_live_command(args: argparse.Namespace) -> int:
 
 
 def _run_routed_live_command(args: argparse.Namespace) -> int:
-    source = _data_source(args.payload_file)
+    source = _live_source()
     selector = ArtifactBundleSelector(LocalArtifactStore(args.artifact_root))
     router = _router_from_args(args)
     runner = RoutedLiveTradingRunner(
@@ -297,9 +281,8 @@ def _run_ibkr_live_smoke_command(args: argparse.Namespace) -> int:
 
 
 def _run_ibkr_live_order_smoke_command(args: argparse.Namespace) -> int:
-    source = _data_source(args.payload_file)
     request = _build_ibkr_order_smoke_request(
-        source=source,
+        latest_state=_latest_observed_state_from_rest(args.symbol),
         symbol=args.symbol,
         quantity=max(int(args.quantity), 1),
         action_name=args.action,
@@ -380,21 +363,12 @@ def _runner_result_to_json(runner: Any) -> dict[str, Any]:
 
 
 def _router_from_args(args: argparse.Namespace) -> Any:
-    router_type = getattr(args, "router_type", "immediate-fill")
-    if router_type == "immediate-fill":
-        return ImmediateFillOrderRouter()
-    if router_type == "latency-buffered":
-        return LatencyBufferedOrderRouter(poll_delay_cycles=max(int(getattr(args, "router_poll_delay", 1)), 0))
-    if router_type == "rejecting":
-        return RejectingOrderRouter()
-    if router_type == "ibkr-live":
-        return IBKRBrokerOrderRouter.from_env(
-            getattr(args, "broker_env_file", None),
-            prefer_limit_orders=getattr(args, "broker_order_mode", "market") == "limit",
-            limit_price_offset_bps=float(getattr(args, "broker_limit_offset_bps", 0.0)),
-            require_paper=not bool(getattr(args, "allow_live_broker_routing", False)),
-        )
-    raise ValueError(f"unsupported router type: {router_type}")
+    return IBKRBrokerOrderRouter.from_env(
+        getattr(args, "broker_env_file", None),
+        prefer_limit_orders=getattr(args, "broker_order_mode", "market") == "limit",
+        limit_price_offset_bps=float(getattr(args, "broker_limit_offset_bps", 0.0)),
+        require_paper=not bool(getattr(args, "allow_live_broker_routing", False)),
+    )
 
 
 def _quality_gate_from_args(args: argparse.Namespace) -> RunQualityGate | None:
@@ -431,19 +405,18 @@ def _quality_metrics_from_metadata(metadata: dict[str, Any]) -> dict[str, float]
 
 
 def _build_ibkr_order_smoke_request(
-    source: InMemoryPolygonDataSource,
+    latest_state: ObservedState,
     *,
     symbol: str,
     quantity: int,
     action_name: str,
 ) -> ExecutionRequest:
-    latest_state = _latest_observed_state(source, symbol)
     action = TradeAction.BUY if action_name == "buy" else TradeAction.SELL
     posterior = PosteriorEstimate(
-        mean_bps=1.0 if action is TradeAction.BUY else -1.0,
+        mean_bps=1.0 if action == TradeAction.BUY else -1.0,
         std_bps=1.0,
-        probability_up=0.75 if action is TradeAction.BUY else 0.25,
-        probability_down=0.25 if action is TradeAction.BUY else 0.75,
+        probability_up=0.75 if action == TradeAction.BUY else 0.25,
+        probability_down=0.25 if action == TradeAction.BUY else 0.75,
         threshold_bps=0.0,
         sample_count=1,
     )
@@ -457,18 +430,34 @@ def _build_ibkr_order_smoke_request(
     return ExecutionSimulator().build_request(intent, latest_state, quantity)
 
 
-def _latest_observed_state(source: InMemoryPolygonDataSource, symbol: str) -> ObservedState:
-    feature_engine = FeatureEngine()
-    latest_state: ObservedState | None = None
-    for event in source.subscribe_live(LiveSubscriptionRequest(symbols=(symbol,))):
-        if not isinstance(event, MarketEvent):
-            continue
-        observed_state = feature_engine.update(event)
-        if observed_state is not None and observed_state.symbol == symbol:
-            latest_state = observed_state
-    if latest_state is None:
-        raise ValueError(f"payload file did not produce any observable state for symbol {symbol}")
-    return latest_state
+def _latest_observed_state_from_rest(symbol: str) -> ObservedState:
+    try:
+        from massive import RESTClient
+    except ImportError as exc:
+        raise RuntimeError("massive client is required for IBKR smoke request construction") from exc
+
+    api_key = _resolve_polygon_api_key(None)
+    if api_key is None:
+        raise RuntimeError("POLYGON_API_KEY or MASSIVE_API_KEY is required for IBKR smoke request construction")
+
+    quote = RESTClient(api_key=api_key, pagination=False).get_last_quote(symbol)
+    payload = {
+        "ev": "Q",
+        "sym": symbol,
+        "t": getattr(quote, "sip_timestamp", None) or getattr(quote, "participant_timestamp", None),
+        "bp": getattr(quote, "bid_price", None),
+        "ap": getattr(quote, "ask_price", None),
+        "bs": getattr(quote, "bid_size", None),
+        "as": getattr(quote, "ask_size", None),
+        "q": getattr(quote, "sequence_number", None),
+    }
+    event = PolygonPayloadNormalizer().normalize(payload)
+    if not isinstance(event, MarketEvent):
+        raise ValueError(f"could not normalize last quote for symbol {symbol}")
+    observed_state = FeatureEngine().update(event)
+    if observed_state is None:
+        raise ValueError(f"last quote did not produce any observable state for symbol {symbol}")
+    return observed_state
 
 
 def _execution_request_to_json(request: ExecutionRequest) -> dict[str, Any]:
