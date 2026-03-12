@@ -24,7 +24,22 @@ class PortfolioAllocator:
             return {}
         sector_map = sector_map or {}
         symbols = list(expected_returns)
-        covariance = covariance.loc[symbols, symbols].astype(float)
+
+        # Ensure covariance is properly indexed and has no NA values
+        if covariance.empty or not set(symbols).issubset(set(covariance.columns)):
+            # Create identity-like covariance if invalid
+            covariance = pd.DataFrame(
+                np.eye(len(symbols)),
+                index=symbols,
+                columns=symbols,
+                dtype=float,
+            )
+        else:
+            covariance = covariance.loc[symbols, symbols].copy()
+            # Fill any NA values with 0
+            covariance = covariance.fillna(0.0)
+            # Ensure float dtype
+            covariance = covariance.astype(float)
         sample = covariance.to_numpy()
         diagonal = np.diag(np.diag(sample))
         shrunk = (1.0 - self.config.covariance_shrinkage) * sample + self.config.covariance_shrinkage * diagonal

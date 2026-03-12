@@ -78,8 +78,13 @@ class ArtifactDrivenResearchWorkflow:
         trade_date = self._trade_date(normalized_events)
         full_state_panel, full_transition_panel = self._build_panels(symbol=symbol, events=normalized_events)
 
-        runtime_transition_frame = full_transition_panel.frame[
-            full_transition_panel.frame["horizon_ns"] == self.framework_config.transition.drift_horizon_ns
+        # Ensure horizon_ns is properly typed before filtering
+        transition_frame = full_transition_panel.frame.copy()
+        transition_frame["horizon_ns"] = pd.to_numeric(transition_frame["horizon_ns"], errors="coerce").fillna(0).astype(int)
+        target_horizon = int(self.framework_config.transition.drift_horizon_ns)
+
+        runtime_transition_frame = transition_frame[
+            transition_frame["horizon_ns"] == target_horizon
         ].copy()
         if runtime_transition_frame.empty:
             raise ValueError(f"no transition rows found for runtime horizon {self.framework_config.transition.drift_horizon_ns}")
@@ -127,8 +132,13 @@ class ArtifactDrivenResearchWorkflow:
             metadata={"symbol": symbol, "run_id": run_id},
         )
 
-        runtime_training_transition_frame = transition_panel.frame[
-            transition_panel.frame["horizon_ns"] == self.framework_config.transition.drift_horizon_ns
+        # Ensure horizon_ns is properly typed before filtering
+        training_transition_frame = transition_panel.frame.copy()
+        training_transition_frame["horizon_ns"] = pd.to_numeric(training_transition_frame["horizon_ns"], errors="coerce").fillna(0).astype(int)
+        target_horizon = int(self.framework_config.transition.drift_horizon_ns)
+
+        runtime_training_transition_frame = training_transition_frame[
+            training_transition_frame["horizon_ns"] == target_horizon
         ].copy()
         transition_model_id = self._save_artifact(
             artifact_id=f"{run_id}-{symbol}-transition-model",

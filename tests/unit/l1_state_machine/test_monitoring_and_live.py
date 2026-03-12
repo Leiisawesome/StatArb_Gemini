@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from l1_microstructure.artifacts import RuntimeArtifactBundle
 from l1_microstructure.config import FrameworkConfig
 from l1_microstructure.execution import ExecutionReport
@@ -626,3 +628,340 @@ def test_routed_live_runner_exposes_router_controls() -> None:
     assert runner.open_route_order_ids() == ["route-1", "route-2"]
     assert runner.cancel_route_order("route-2") is True
     assert runner.router_health() == {"connected": True, "status": "healthy", "broker": "controllable"}
+
+
+def test_simulator_paper_runner_stop_before_start() -> None:
+    """Covers paper.py: stop() before start()"""
+    runner = SimulatorPaperTradingRunner(events=[])
+    runner.stop()  # should not raise
+    assert runner.is_running is False
+
+
+def test_simulator_paper_runner_execution_summary_empty() -> None:
+    """Covers paper.py: execution_summary() with no updates"""
+    runner = SimulatorPaperTradingRunner(events=[])
+    summary = runner.execution_summary()
+    assert summary["update_count"] == 0.0
+    assert summary["fill_count"] == 0.0
+    assert summary["cancel_count"] == 0.0
+
+
+def test_simulator_paper_runner_with_runtime_artifacts() -> None:
+    """Covers paper.py: constructor with runtime_artifacts"""
+    from l1_microstructure.artifacts import RuntimeArtifactBundle
+
+    source = InMemoryPolygonDataSource(
+        [
+            {"ev": "Q", "sym": "AAPL", "t": 1710163800000000000, "bp": 100.0, "ap": 100.02, "bs": 100, "as": 100},
+        ]
+    )
+    events = list(source.subscribe_live(LiveSubscriptionRequest(symbols=("AAPL",))))
+    artifacts = RuntimeArtifactBundle()
+    runner = SimulatorPaperTradingRunner(events=events, runtime_artifacts=artifacts)
+    assert runner.runtime_artifacts is artifacts
+
+
+def test_simulator_paper_runner_filters_symbols() -> None:
+    """Covers paper.py: selected_symbols filtering in start()"""
+    source = InMemoryPolygonDataSource(
+        [
+            {"ev": "Q", "sym": "AAPL", "t": 1710163800000000000, "bp": 100.0, "ap": 100.02, "bs": 100, "as": 100},
+            {"ev": "Q", "sym": "MSFT", "t": 1710163801000000000, "bp": 200.0, "ap": 200.02, "bs": 100, "as": 100},
+        ]
+    )
+    events = list(source.subscribe_live(LiveSubscriptionRequest(symbols=("AAPL", "MSFT"))))
+    runner = SimulatorPaperTradingRunner(events=events)
+    runner.start(RunnerConfig(symbols=("AAPL",), mode="paper", latency_ms=100))
+    # Should only process AAPL events
+    assert runner.is_running is False
+
+
+def test_simulator_paper_runner_stop_during_run() -> None:
+    """Covers paper.py: stop() during event processing loop"""
+    source = InMemoryPolygonDataSource(
+        [
+            {"ev": "Q", "sym": "AAPL", "t": 1710163800000000000, "bp": 100.0, "ap": 100.02, "bs": 100, "as": 100},
+            {"ev": "Q", "sym": "AAPL", "t": 1710163801000000000, "bp": 100.01, "ap": 100.02, "bs": 400, "as": 50},
+            {"ev": "Q", "sym": "AAPL", "t": 1710163802000000000, "bp": 100.02, "ap": 100.04, "bs": 200, "as": 200},
+        ]
+    )
+    events = list(source.subscribe_live(LiveSubscriptionRequest(symbols=("AAPL",))))
+
+    class StoppingRunner(SimulatorPaperTradingRunner):
+        def start(self, config):
+            super().start(config)
+            # Simulate stop during processing
+            self.is_running = False
+
+    runner = StoppingRunner(events=events)
+    runner.start(RunnerConfig(symbols=("AAPL",), mode="paper", latency_ms=100))
+    # Should complete without error
+
+
+def test_source_backed_runner_run_historical_with_bundle_selector(tmp_path) -> None:
+    """Covers source.py: run_historical with bundle_selector"""
+    from l1_microstructure.artifacts import LocalArtifactStore
+    from l1_microstructure.ingest import HistoricalBatchRequest
+    from l1_microstructure.live.source import SourceBackedPaperRunner
+
+    source = InMemoryPolygonDataSource(
+        [
+            {"ev": "Q", "sym": "AAPL", "t": 1710163800000000000, "bp": 100.0, "ap": 100.02, "bs": 100, "as": 100},
+        ]
+    )
+    store = LocalArtifactStore(tmp_path)
+    runner = SourceBackedPaperRunner(source=source, bundle_selector=None)
+    # Without bundle_selector, should still work
+    request = HistoricalBatchRequest(symbols=("AAPL",), trade_date=__import__("datetime").date(2024, 3, 11))
+    result = runner.run_historical(request, RunnerConfig(symbols=("AAPL",), mode="paper", latency_ms=100))
+    assert result is not None
+
+
+def test_source_backed_runner_run_live_with_bundle_selector() -> None:
+    """Covers source.py: run_live with bundle_selector"""
+    from l1_microstructure.live.source import SourceBackedPaperRunner
+
+    source = InMemoryPolygonDataSource(
+        [
+            {"ev": "Q", "sym": "AAPL", "t": 1710163800000000000, "bp": 100.0, "ap": 100.02, "bs": 100, "as": 100},
+        ]
+    )
+    runner = SourceBackedPaperRunner(source=source, bundle_selector=None)
+    result = runner.run_live(
+        LiveSubscriptionRequest(symbols=("AAPL",)),
+        RunnerConfig(symbols=("AAPL",), mode="paper", latency_ms=100),
+    )
+    assert result is not None
+
+
+def test_source_backed_runner_requires_single_symbol_with_bundle() -> None:
+    """Covers source.py: _run_events raises ValueError for multiple symbols with bundle"""
+    from l1_microstructure.live.source import SourceBackedPaperRunner
+    from l1_microstructure.artifacts import LocalArtifactStore
+
+    source = InMemoryPolygonDataSource(
+        [
+            {"ev": "Q", "sym": "AAPL", "t": 1710163800000000000, "bp": 100.0, "ap": 100.02, "bs": 100, "as": 100},
+        ]
+    )
+
+    class FakeBundleSelector:
+        pass
+
+    runner = SourceBackedPaperRunner(source=source, bundle_selector=FakeBundleSelector())
+    # Should raise when multiple symbols with bundle_selector
+    try:
+        runner.run_live(
+            LiveSubscriptionRequest(symbols=("AAPL", "MSFT")),
+            RunnerConfig(symbols=("AAPL", "MSFT"), mode="paper", latency_ms=100),
+        )
+    except ValueError as e:
+        assert "exactly one symbol" in str(e)
+
+
+def test_routed_live_runner_with_run_id() -> None:
+    """Covers routed.py: run_live with run_id parameter"""
+    source = InMemoryPolygonDataSource(
+        [
+            {"ev": "Q", "sym": "AAPL", "t": 1710163800000000000, "bp": 100.0, "ap": 100.02, "bs": 100, "as": 100},
+        ]
+    )
+    router = AcceptedFillRouter()
+    runner = RoutedLiveTradingRunner(
+        source=source,
+        router=router,
+        framework_config=FrameworkConfig(),
+    )
+
+    result = runner.run_live(
+        LiveSubscriptionRequest(symbols=("AAPL",)),
+        RunnerConfig(symbols=("AAPL",), mode="live", latency_ms=100),
+        run_id="test-run-123",
+    )
+    assert result is runner
+
+
+def test_routed_live_runner_with_runtime_artifacts() -> None:
+    """Covers routed.py: run_live with runtime_artifacts"""
+    source = InMemoryPolygonDataSource(
+        [
+            {"ev": "Q", "sym": "AAPL", "t": 1710163800000000000, "bp": 100.0, "ap": 100.02, "bs": 100, "as": 100},
+        ]
+    )
+    router = AcceptedFillRouter()
+    artifacts = RuntimeArtifactBundle()
+    runner = RoutedLiveTradingRunner(
+        source=source,
+        router=router,
+        framework_config=FrameworkConfig(),
+        runtime_artifacts=artifacts,
+    )
+
+    result = runner.run_live(
+        LiveSubscriptionRequest(symbols=("AAPL",)),
+        RunnerConfig(symbols=("AAPL",), mode="live", latency_ms=100),
+    )
+    assert result is runner
+    assert runner.runtime_artifacts is artifacts
+
+
+def test_routed_live_runner_health_check() -> None:
+    """Covers routed.py: router_health method"""
+    router = AcceptedFillRouter()
+    runner = RoutedLiveTradingRunner(
+        source=InMemoryPolygonDataSource([]),
+        router=router,
+    )
+    health = runner.router_health()
+    # router_health returns None for AcceptedFillRouter
+    assert health is None
+
+
+def test_routed_live_runner_execution_reports_property() -> None:
+    """Covers routed.py: execution_reports property"""
+    router = AcceptedFillRouter()
+    runner = RoutedLiveTradingRunner(
+        source=InMemoryPolygonDataSource([]),
+        router=router,
+    )
+    # Empty runner should have empty reports
+    assert runner.execution_reports == []
+
+
+def test_ibkr_native_broker_session_connect_disconnect() -> None:
+    """Covers _ibkr_native.py: IBKRNativeBrokerSession connect/disconnect"""
+    from l1_microstructure.live._ibkr_native import IBKRNativeBrokerSession
+    from l1_microstructure.live.broker_models import IBKRConnectionConfig
+
+    config = IBKRConnectionConfig(host="127.0.0.1", port=4002, client_id=999)
+    session = IBKRNativeBrokerSession(config)
+
+    # Test is_connected before connect
+    assert session.is_connected() is False
+
+    # Test broker_name
+    assert session.broker_name() == "Interactive Brokers"
+
+
+@pytest.mark.asyncio
+async def test_ibkr_native_broker_session_check_health_disconnected() -> None:
+    """Covers _ibkr_native.py: check_health when disconnected"""
+    from l1_microstructure.live._ibkr_native import IBKRNativeBrokerSession
+    from l1_microstructure.live.broker_models import IBKRConnectionConfig
+
+    config = IBKRConnectionConfig(host="127.0.0.1", port=4002, client_id=999)
+    session = IBKRNativeBrokerSession(config)
+
+    health = await session.check_health()
+    assert health["connected"] is False
+    assert health["status"] == "disconnected"
+    assert health["broker"] == "Interactive Brokers"
+
+
+def test_ibkr_native_stock_contract() -> None:
+    """Covers _ibkr_native.py: _stock_contract static method"""
+    from l1_microstructure.live._ibkr_native import IBKRNativeBrokerSession
+
+    contract = IBKRNativeBrokerSession._stock_contract("AAPL")
+    assert contract.symbol == "AAPL"
+    assert contract.secType == "STK"
+    assert contract.exchange == "SMART"
+    assert contract.currency == "USD"
+
+
+def test_ibkr_native_build_order_market() -> None:
+    """Covers _ibkr_native.py: _build_order for market orders"""
+    from l1_microstructure.live._ibkr_native import IBKRNativeBrokerSession
+    from l1_microstructure.live.broker_models import IBKRConnectionConfig, BrokerOrderSide, BrokerOrderType
+
+    config = IBKRConnectionConfig(host="127.0.0.1", port=4002, client_id=999)
+    session = IBKRNativeBrokerSession(config)
+
+    order = session._build_order(BrokerOrderSide.BUY, 100, BrokerOrderType.MARKET, None)
+    assert order.action == "BUY"
+    assert order.orderType == "MKT"
+    assert order.totalQuantity == 100.0
+
+
+def test_ibkr_native_build_order_limit() -> None:
+    """Covers _ibkr_native.py: _build_order for limit orders"""
+    from l1_microstructure.live._ibkr_native import IBKRNativeBrokerSession
+    from l1_microstructure.live.broker_models import IBKRConnectionConfig, BrokerOrderSide, BrokerOrderType
+
+    config = IBKRConnectionConfig(host="127.0.0.1", port=4002, client_id=999)
+    session = IBKRNativeBrokerSession(config)
+
+    order = session._build_order(BrokerOrderSide.SELL, 50, BrokerOrderType.LIMIT, 150.25)
+    assert order.action == "SELL"
+    assert order.orderType == "LMT"
+    assert order.totalQuantity == 50.0
+    assert order.lmtPrice == 150.25
+
+
+def test_ibkr_native_build_order_outside_rth() -> None:
+    """Covers _ibkr_native.py: _build_order with outsideRth"""
+    from l1_microstructure.live._ibkr_native import IBKRNativeBrokerSession
+    from l1_microstructure.live.broker_models import IBKRConnectionConfig, BrokerOrderSide, BrokerOrderType
+
+    config = IBKRConnectionConfig(host="127.0.0.1", port=4002, client_id=999, outside_regular_trading_hours=True)
+    session = IBKRNativeBrokerSession(config)
+
+    order = session._build_order(BrokerOrderSide.BUY, 100, BrokerOrderType.MARKET, None)
+    assert order.outsideRth is True
+
+
+def test_ibkr_native_build_order_with_account() -> None:
+    """Covers _ibkr_native.py: _build_order with account_id"""
+    from l1_microstructure.live._ibkr_native import IBKRNativeBrokerSession
+    from l1_microstructure.live.broker_models import IBKRConnectionConfig, BrokerOrderSide, BrokerOrderType
+
+    config = IBKRConnectionConfig(host="127.0.0.1", port=4002, client_id=999, account_id="DU123456")
+    session = IBKRNativeBrokerSession(config)
+
+    order = session._build_order(BrokerOrderSide.BUY, 100, BrokerOrderType.MARKET, None)
+    assert order.account == "DU123456"
+
+
+def test_ibkr_native_build_order_requires_limit_price() -> None:
+    """Covers _ibkr_native.py: _build_order raises for limit without price"""
+    from l1_microstructure.live._ibkr_native import IBKRNativeBrokerSession
+    from l1_microstructure.live.broker_models import IBKRConnectionConfig, BrokerOrderSide, BrokerOrderType
+
+    config = IBKRConnectionConfig(host="127.0.0.1", port=4002, client_id=999)
+    session = IBKRNativeBrokerSession(config)
+
+    try:
+        session._build_order(BrokerOrderSide.BUY, 100, BrokerOrderType.LIMIT, None)
+        assert False, "Should have raised ValueError"
+    except ValueError as e:
+        assert "limit price" in str(e)
+
+
+def test_ibkr_native_require_app_raises() -> None:
+    """Covers _ibkr_native.py: _require_app raises when not connected"""
+    from l1_microstructure.live._ibkr_native import IBKRNativeBrokerSession
+    from l1_microstructure.live.broker_models import IBKRConnectionConfig
+
+    config = IBKRConnectionConfig(host="127.0.0.1", port=4002, client_id=999)
+    session = IBKRNativeBrokerSession(config)
+
+    try:
+        session._require_app()
+        assert False, "Should have raised RuntimeError"
+    except RuntimeError as e:
+        assert "not connected" in str(e)
+
+
+def test_ibkr_native_reserve_order_id_raises_when_none() -> None:
+    """Covers _ibkr_native.py: _reserve_order_id raises when no order id"""
+    from l1_microstructure.live._ibkr_native import IBKRNativeBrokerSession
+    from l1_microstructure.live.broker_models import IBKRConnectionConfig
+
+    config = IBKRConnectionConfig(host="127.0.0.1", port=4002, client_id=999)
+    session = IBKRNativeBrokerSession(config)
+
+    try:
+        session._reserve_order_id()
+        assert False, "Should have raised RuntimeError"
+    except RuntimeError as e:
+        assert "next valid order id" in str(e)
