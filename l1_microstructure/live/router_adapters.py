@@ -201,7 +201,12 @@ class IBKRBrokerOrderRouter:
         if callable(check_health):
             health = self._run_async(check_health())
             if isinstance(health, dict):
-                return health
+                normalized_health = dict(health)
+                broker_open_order_count = normalized_health.get("open_order_count")
+                normalized_health["open_order_count"] = len(self._open_requests)
+                if broker_open_order_count != normalized_health["open_order_count"]:
+                    normalized_health["broker_open_order_count"] = broker_open_order_count
+                return normalized_health
         is_connected = getattr(self.broker, "is_connected", None)
         connected = bool(is_connected()) if callable(is_connected) else self._connected
         return {

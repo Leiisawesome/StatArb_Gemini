@@ -24,6 +24,8 @@ _TERMINAL_STATUSES = {
 }
 
 _NON_FATAL_INFO_CODES = {
+    399,
+    10349,
     2103,
     2104,
     2105,
@@ -251,11 +253,12 @@ class IBKRNativeBrokerSession:
         if advanced_order_reject_json:
             message = f"{message} | reject={advanced_order_reject_json}"
         with self._lock:
-            self._last_error = message
             order = self._orders.get(str(req_id))
             if order is not None:
                 order.status = BrokerOrderStatus.CANCELLED if error_code in _CANCELLED_ERROR_CODES else BrokerOrderStatus.REJECTED
                 order.timestamp = _utc_now()
+            if error_code not in _CANCELLED_ERROR_CODES:
+                self._last_error = message
             connected = self._connected
         if not connected:
             self._ready_event.set()

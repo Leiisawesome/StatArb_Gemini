@@ -1,243 +1,259 @@
 # L1 Microstructure Package Plan
 
-This document defines the successor package tree for the standalone L1 microstructure framework. It is intentionally independent of legacy core_engine. The goal is to give the new package enough internal structure to support both research workflows and paper/live execution without importing or adapting legacy components.
+This document describes the current structure of the standalone `l1_microstructure` package and the boundary rules that still govern future work.
+
+It is no longer just a scaffold plan. The package now contains both abstract contracts and concrete implementations for ingestion, replay, calibration, training, artifact persistence, monitoring, validation, paper execution, and routed-live execution.
 
 ## Guardrail
 
-No new component in this plan may depend on core_engine.
+The architectural guardrail is unchanged:
+
+No new component in this package may depend on a legacy engine.
 
 That means:
 
-1. No legacy adapters.
-2. No shared data contracts imported from core_engine.
-3. No execution, regime, risk, replay, or monitoring bridge code from core_engine.
-4. All successor interfaces must be defined inside l1_microstructure.
+1. no legacy adapters imported into `l1_microstructure`
+2. no shared contracts pulled from an older engine
+3. no replay, risk, execution, monitoring, or broker bridge code imported from outside the package boundary
+4. all successor interfaces and implementations live inside `l1_microstructure`
 
-## Package Tree
+## Current package tree
 
 ```text
 l1_microstructure/
   __init__.py
+  __main__.py
+  cli.py
   config.py
-  events.py
-  features.py
-  regime.py
-  transitions.py
   decision.py
+  events.py
   execution.py
-  risk.py
-  portfolio.py
+  features.py
   pipeline.py
-  ingest/
+  portfolio.py
+  regime.py
+  risk.py
+  transitions.py
+  workflow.py
+  artifacts/
     __init__.py
     interfaces.py
-  replay/
-    __init__.py
-    interfaces.py
+    runtime.py
+    store.py
   calibration/
     __init__.py
+    fitters.py
+    interfaces.py
+  datasets/
+    __init__.py
+    builders.py
+    interfaces.py
+  ingest/
+    __init__.py
+    _polygon_support.py
+    interfaces.py
+    polygon.py
+  labeling/
+    __init__.py
+    drift.py
+    interfaces.py
+  live/
+    __init__.py
+    _ibkr_native.py
+    broker_models.py
+    interfaces.py
+    paper.py
+    routed.py
+    router_adapters.py
+    source.py
+  monitoring/
+    __init__.py
+    interfaces.py
+    runtime.py
+  replay/
+    __init__.py
+    engine.py
     interfaces.py
   training/
     __init__.py
     interfaces.py
-  labeling/
-    __init__.py
-    interfaces.py
-  datasets/
-    __init__.py
-    interfaces.py
-  artifacts/
-    __init__.py
-    interfaces.py
+    trainer.py
   validation/
     __init__.py
-    interfaces.py
-  monitoring/
-    __init__.py
-    interfaces.py
-  live/
-    __init__.py
+    harness.py
     interfaces.py
 ```
 
-## Responsibilities
+## What is implemented now
+
+The package has already moved beyond the original scaffold stage.
+
+Concrete implementations now exist for:
+
+1. Polygon historical and live data sources
+2. payload normalization and session filtering
+3. deterministic replay
+4. forward-drift labeling
+5. state and transition dataset building
+6. state, regime, and execution calibration
+7. empirical transition training
+8. local artifact storage and runtime bundle resolution
+9. rolling out-of-sample validation
+10. in-memory and JSONL runtime monitoring
+11. simulator-backed paper execution
+12. source-backed paper execution
+13. routed-live execution through an order-router boundary
+14. Interactive Brokers routing and smoke-command support
+15. artifact-producing research workflow and CLI commands
+
+The remaining roadmap is therefore about refinement, extension, and hardening rather than basic scaffolding.
+
+## Responsibilities by subpackage
 
 `ingest/`
-Defines source-side contracts for historical and live Polygon ingestion, payload normalization, and session filtering.
+Defines source-side interfaces and currently implements Polygon REST and WebSocket sources, event normalization, and session filters.
 
 `replay/`
-Defines deterministic replay control, checkpointing, and event-time cursor semantics.
-
-`calibration/`
-Defines offline state and regime calibration interfaces. This is where symbol-specific quantizers and prior parameters should be fitted.
-
-`training/`
-Defines transition-kernel training interfaces for edge probabilities, holding times, and drift posteriors.
+Defines replay contracts and implements deterministic replay for event-time reconstruction and reproducible sequencing.
 
 `labeling/`
-Defines forward-outcome labeling interfaces for drift horizons and censoring.
+Defines forward-outcome labeling contracts and implements drift labeling used by transition outcomes.
 
 `datasets/`
-Defines builders for state panels and transition panels used in research and validation.
+Defines dataset-builder contracts and implements state-panel and transition-panel construction.
+
+`calibration/`
+Defines calibrator contracts and implements empirical state, regime, and execution calibration.
+
+`training/`
+Defines transition-training contracts and implements the empirical transition trainer.
 
 `artifacts/`
-Defines storage contracts for all calibrated and trained artifacts.
+Defines artifact-store contracts and implements local storage, runtime bundle loading, run-manifest selection, and quality-gate filtering.
 
 `validation/`
-Defines the harness for OOS testing, regime splits, stability checks, and decay monitoring.
+Defines validation contracts and implements the rolling out-of-sample validation harness.
 
 `monitoring/`
-Defines how runtime diagnostics are emitted without coupling monitoring to the trading loop.
+Defines monitoring contracts and implements runtime snapshot publication to in-memory and JSONL sinks.
 
 `live/`
-Defines the standalone paper/live runner shell that should eventually drive the successor package end to end.
+Defines paper and routed-live runner contracts and implements the simulator-backed paper runner, source-backed paper runner, routed-live runner, and IBKR router boundary.
 
-## Implementation Order
+## Stable contract layer
 
-If the goal is research-first, the next concrete implementations should be:
+The package still relies on explicit internal interfaces, and those contracts remain important because they separate research logic from runtime wiring.
 
-1. `ingest` historical Polygon adapters.
-2. `replay` deterministic event runner.
-3. `labeling` forward drift resolver.
-4. `datasets` transition panel builder.
-5. `calibration` offline quantile and prior fitting.
-6. `training` transition-kernel trainer.
-7. `validation` robustness harness.
+Examples of contract surfaces already used in tests and implementations include:
 
-If the goal is paper/live-first, the next concrete implementations should be:
+1. `MarketDataSource` in `ingest/interfaces.py`
+2. `ReplayController` in `replay/interfaces.py`
+3. `StateCalibrator` in `calibration/interfaces.py`
+4. `TransitionTrainer` in `training/interfaces.py`
+5. `TransitionDatasetBuilder` in `datasets/interfaces.py`
+6. `ArtifactStore` in `artifacts/interfaces.py`
+7. `ValidationHarness` in `validation/interfaces.py`
+8. `MonitoringSink` in `monitoring/interfaces.py`
+9. `PaperTradingRunner` and `OrderRouter` in `live/interfaces.py`
 
-1. `ingest` live Polygon stream adapter.
-2. `monitoring` runtime sink.
-3. `live` paper runner.
-4. `artifacts` model loader.
-5. `calibration` and `training` artifact consumers.
-6. `execution` calibration extensions.
+These interfaces are not theoretical placeholders anymore. They are the package’s internal seams for substitution, testing, and operational hardening.
 
-## Pre-Implementation Review Todo List
+## Current execution model
 
-Use this checklist before building deeper implementations behind the successor-package interfaces.
+The execution stack is now split into three distinct layers:
 
-### Architecture Decisions
+1. `pipeline.py` contains the model and decision loop
+2. `live/paper.py` and `live/source.py` run simulator-backed paper execution
+3. `live/routed.py` and `live/router_adapters.py` handle external routing and broker integration boundaries
 
-- [ ] Confirm the hard boundary that all new functionality remains inside `l1_microstructure` with no dependency on `core_engine`.
-- [ ] Confirm that `events.py` is the only canonical L1 event contract for quotes, trades, timestamps, and ordering semantics.
-- [ ] Confirm that replay, research, paper, and live paths will share the same pipeline core in `pipeline.py` rather than separate logic forks.
-- [ ] Confirm that calibration and training artifacts are mandatory runtime inputs once those components exist, rather than optional sidecars.
-- [ ] Confirm whether the first production target is research replay only, paper trading only, or both in parallel.
+This is the intended architecture: the state machine remains independent of the concrete data source and independent of the external router implementation.
 
-### Data and Market-Structure Assumptions
+## Current artifact model
 
-- [ ] Approve the exact Polygon data scope for phase 1: quotes only, trades only, or quotes plus trades together.
-- [ ] Approve the session scope for phase 1: RTH only or RTH plus explicit premarket and after-hours handling.
-- [ ] Approve event ordering policy when quote and trade timestamps collide.
-- [ ] Approve whether SIP corrections, late prints, and trade-condition filtering are handled immediately in ingestion phase 1 or deferred to a later pass.
-- [ ] Approve which structural exclusions are phase-1 requirements: auctions, halts, earnings windows, macro-news windows, or none initially.
+The artifact model is also now concrete rather than aspirational.
 
-### Research Methodology Decisions
+Current artifact-driven flows include:
 
-- [ ] Approve the first drift horizons to support in labeling and training.
-- [ ] Approve the minimum sample thresholds for edge activation, posterior estimation, and validation inclusion.
-- [ ] Approve whether state quantization remains symbol-specific only or symbol-plus-regime specific.
-- [ ] Approve whether regime inference is purely online in phase 1 or whether offline-fitted priors are required before any serious replay study.
-- [ ] Approve the first validation standard: rolling OOS only, rolling plus regime-stratified, or full bootstrap plus decay diagnostics.
+1. fitting calibrations and transition models in `workflow.py`
+2. saving artifacts through `LocalArtifactStore`
+3. selecting bundles with `ArtifactBundleSelector`
+4. loading bundles with `ArtifactBundleLoader`
+5. filtering candidate runs through validation status and quality gates
 
-### Execution and Risk Decisions
+This means runtime components no longer need to reconstruct model state from ad hoc inputs. They can resolve a bundle by symbol, trade date, or run id.
 
-- [ ] Approve the latency model for early replay studies.
-- [ ] Approve the initial fill model complexity: touch-fill proxy, alignment-gated fill probability, or queue-penalized fill surface.
-- [ ] Approve the adverse-selection penalty model for phase 1.
-- [ ] Approve the initial risk posture: single-symbol sizing only or portfolio-aware sizing from the start.
-- [ ] Approve whether paper trading in phase 1 is simulator-only or should include broker-routing abstractions inside `l1_microstructure/live`.
+## Current CLI and operator boundary
 
-### Artifact and Operations Decisions
+The package now has a concrete operator-facing CLI in `cli.py`.
 
-- [ ] Approve the artifact versioning policy for calibrations, kernels, and validation reports.
-- [ ] Approve whether artifacts should be human-readable on disk, binary-serialized, or both.
-- [ ] Approve the minimum runtime monitoring set for the first paper runner.
-- [ ] Approve the first CLI or batch workflows that must exist before implementation is considered usable.
-- [ ] Approve the test standard for each component: unit only, unit plus integration, or unit plus replay-based golden tests.
+Current commands are:
 
-### Sequencing Decisions
+1. `workflow`
+2. `list-runs`
+3. `paper-historical`
+4. `paper-live`
+5. `live-routed`
+6. `ibkr-live-smoke`
+7. `ibkr-live-order-smoke`
 
-- [ ] Confirm that the first concrete implementation wave is `ingest` + `replay` + `labeling` + `datasets`.
-- [ ] Confirm whether `calibration` should start immediately after dataset generation or wait until a minimal replay study is complete.
-- [ ] Confirm whether `validation` should be implemented before the paper runner or after the first artifact-training cycle.
-- [ ] Confirm whether `monitoring` is required before any paper-runner work begins.
-- [ ] Approve the cutoff criterion for moving from scaffold to production-grade implementation in each subpackage.
+Two points matter for future documentation and implementation work:
 
-## Approved Defaults
+1. the current CLI is source-backed rather than payload-file based
+2. deterministic test routers exist in tests and lower-level APIs, but are not currently exposed as CLI router flags
 
-These are the current phase-1 default policies for the successor package. They are intentionally conservative and research-first. If any item is later overridden, the override should be recorded explicitly rather than silently changing implementation behavior.
+## What remains as roadmap
 
-### Architecture Decisions
+The package is functional, but some work remains before the system can be treated as production-grade beyond controlled operation.
 
-- Hard boundary inside `l1_microstructure`: Approved default: All new functionality remains inside `l1_microstructure` with no dependency on `core_engine`.
-- `events.py` as the sole canonical L1 contract: Approved default: `events.py` remains the only canonical contract for quotes, trades, timestamps, and deterministic ordering semantics.
-- Shared pipeline core for replay, research, paper, and live: Approved default: Replay, research, paper, and live paths share the same pipeline core in `pipeline.py`.
-- Calibration and training artifacts as mandatory runtime inputs once available: Approved default: Calibrations and trained artifacts become mandatory runtime inputs as soon as those components exist.
-- First production target: Approved default: Research replay first, then paper trading.
+The main remaining areas are:
 
-### Data and Market-Structure Assumptions
+1. harden external data-source and broker error handling for live operation
+2. improve documentation around required credentials and environment configuration
+3. deepen validation standards and operating thresholds for real symbol universes
+4. expand artifact metadata and auditability where needed
+5. decide whether deterministic router options should become official CLI surfaces or stay test-only
+6. extend execution realism if more detailed market structure or venue-specific assumptions become available
+7. continue tightening tests around recovery, broker state rehydration, and failure cases
 
-- Phase-1 Polygon data scope: Approved default: Quotes plus trades together.
-- Phase-1 session scope: Approved default: RTH only.
-- Ordering policy for timestamp collisions: Approved default: Use stable total ordering by timestamp, then vendor sequence when present, then quotes before trades only as a final deterministic fallback.
-- SIP corrections, late prints, and trade-condition filtering: Approved default: Handle basic trade-condition filtering in phase 1 and defer richer correction handling to phase 2.
-- Structural exclusions in phase 1: Approved default: Exclude open auction, close auction, halts, and known scheduled macro-news windows; defer earnings-window filtering unless the initial symbol universe is highly concentrated.
+## Updated implementation priorities
 
-### Research Methodology Decisions
+If the next goal is research hardening, prioritize:
 
-- First drift horizons: Approved default: Support multiple short horizons immediately, centered on sub-5-second and sub-60-second windows.
-- Minimum sample thresholds: Approved default: Keep edge activation conservative, with research labels allowed at lower counts and trading activation requiring materially higher counts.
-- State quantization scope: Approved default: Use symbol-specific calibration in phase 1, with symbol-plus-regime calibration added after sample depth is demonstrated.
-- Regime inference in phase 1: Approved default: Allow online inference initially, but do not treat replay conclusions as serious until offline-fitted priors exist.
-- First validation standard: Approved default: Use rolling OOS plus regime-stratified evaluation first; add bootstrap and decay diagnostics after the first trained artifact cycle.
+1. validation thresholds and bundle-selection policy
+2. richer artifact metadata and auditability
+3. reproducible dataset and calibration diagnostics
+4. clearer session, exclusion-window, and data-quality policy documentation
 
-### Execution and Risk Decisions
+If the next goal is live-ops hardening, prioritize:
 
-- Early replay latency model: Approved default: Use configurable fixed latency buckets first.
-- Initial fill model complexity: Approved default: Use an alignment-gated fill probability model, not naive touch-fill and not a full queue surface yet.
-- Adverse-selection penalty model: Approved default: Use a simple calibrated penalty surface keyed by spread and volatility regime.
-- Initial risk posture: Approved default: Start with single-symbol sizing and add portfolio-aware sizing after dataset and calibration infrastructure stabilize.
-- Paper-trading phase-1 scope: Approved default: Simulator-only inside `l1_microstructure/live`.
+1. broker-boundary error handling and recovery behavior
+2. runtime monitoring completeness and operator alerts
+3. documentation of broker and market-data environment requirements
+4. stricter smoke and dress-rehearsal procedures around routed-live flows
 
-### Artifact and Operations Decisions
+## Review checklist for future changes
 
-- Artifact versioning policy: Approved default: Version every calibration, kernel, and validation report with immutable IDs and metadata hashes.
-- Artifact storage format: Approved default: Store both human-readable metadata and machine-efficient serialized payloads.
-- Minimum monitoring set for first paper runner: Approved default: Capture state label, dominant regime, edge activation count, cancel rate, fill rate, realized-versus-expected drift, and kill-switch status.
-- First CLI or batch workflows: Approved default: Provide historical ingest/replay, labeling, dataset build, calibration, training, validation, and paper-runner launch workflows.
-- Test standard per component: Approved default: Require unit plus targeted integration tests, with replay-based golden tests for replay, labeling, and artifact-driven flows.
+Use this checklist when extending the package:
 
-### Sequencing Decisions
+1. confirm the change stays inside `l1_microstructure`
+2. confirm it uses existing contracts or introduces a new one deliberately
+3. confirm replay, paper, and live paths still share the same pipeline core
+4. confirm artifacts remain the primary runtime handoff where applicable
+5. confirm new CLI examples match the implemented flags in `cli.py`
+6. confirm tests cover the new behavior at the appropriate unit or integration level
 
-- First implementation wave: Approved default: `ingest` + `replay` + `labeling` + `datasets`.
-- Start `calibration`: Approved default: Begin after the first minimal replay study proves dataset integrity.
-- Start `validation`: Approved default: Begin after the first artifact-training cycle and before serious paper-runner expansion.
-- Is `monitoring` required before paper runner: Approved default: Yes, at least a minimal runtime diagnostics layer is required.
-- Cutoff criterion for production-grade status: Approved default: A subpackage is not production-grade until it has stable interfaces, focused tests, reproducible artifacts where relevant, and at least one end-to-end path exercising it under realistic assumptions.
+## Approved defaults that still hold
 
-## Interface Intent
+The following defaults remain consistent with the current implementation direction:
 
-## Override Log
+1. quotes plus trades are the default phase-1 data scope
+2. the package remains research-first, then paper, then routed-live
+3. replay, research, paper, and live flows share the same pipeline core
+4. artifact-backed runtime execution is preferred over ad hoc runtime fitting
+5. monitoring is a required part of serious paper or routed-live operation
 
-Record any decision that overrides the approved defaults above.
+Some older defaults from the original plan have already evolved in implementation. Most notably, portfolio-aware sizing and routed broker abstractions already exist in the package, so those topics are no longer future-only.
 
-Use one entry per override with this format:
+## See also
 
-```text
-- Date:
-  Section:
-  Default overridden:
-  New decision:
-  Reason:
-  Approved by:
-```
-
-Current overrides:
-
-- None.
-
-These modules currently define contracts, not production implementations. That is deliberate.
-
-The reason is architectural discipline: the successor package should stabilize its internal boundaries before large amounts of code are written behind them. In a partially observed microstructure system, unclear contracts become hidden assumptions, and hidden assumptions are where curve-fit infrastructure starts.
+For document roles and reading order, use the documentation map in `README.md`.

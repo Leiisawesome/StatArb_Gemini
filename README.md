@@ -1,345 +1,387 @@
-# 🚀 StatArb Gemini - Ultimate Unified Trading System
+# StatArb_Gemini
 
-**Institutional-grade statistical arbitrage trading system with streamlined architecture and advanced optimization.**
+StatArb_Gemini is now centered on `l1_microstructure`, a standalone L1 market microstructure research and execution framework for Polygon equity quote and trade data.
 
-[![Python](https://img.shields.io/badge/Python-3.9+-blue.svg)](https://python.org)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Status](https://img.shields.io/badge/Status-Production%20Ready-brightgreen.svg)](README.md)
-[![Architecture](https://img.shields.io/badge/Architecture-95%25%20Simplified-success.svg)](README.md)
+The package replaces an older, more tightly coupled design with a successor architecture built around a finite partially observed state machine. It is intentionally isolated from legacy trading infrastructure so the microstructure model can be calibrated, validated, replayed, and operated on its own terms.
 
-## 🏆 **Ultimate System Overview**
+## Documentation map
 
-StatArb Gemini has been completely transformed through a comprehensive 4-phase architectural simplification, resulting in a streamlined, high-performance trading system that maintains 100% functionality while achieving 95% complexity reduction.
+Use the repository documents by role:
 
-### **🎯 Architectural Transformation Complete**
+1. `README.md` gives the repository-level overview, setup, and main command surface.
+2. `docs/l1_microstructure_operator_guide.md` is the operator runbook for the current CLI.
+3. `docs/l1_microstructure_state_machine.md` explains the model and runtime architecture.
+4. `docs/l1_microstructure_package_plan.md` describes the implemented package structure, contract seams, and remaining roadmap.
 
-| Phase | Achievement | Status | Result |
-|-------|-------------|--------|---------|
-| **Phase 1** | 📁 **Configuration Consolidation** | ✅ **Complete** | 17+ files → 1 file (94% reduction) |
-| **Phase 2** | ⚙️ **Engine Consolidation** | ✅ **Complete** | 26+ engines → 3 processors (88% reduction) |
-| **Phase 3** | 🎯 **Strategy Unification** | ✅ **Complete** | 3 systems → 1 system (67% reduction) |
-| **Phase 4** | 🚀 **Ultimate Integration** | ✅ **Complete** | Single unified system with advanced optimization |
+## What `l1_microstructure` is
 
-## L1 Microstructure
+At a high level, the package turns a stream of L1 quote and trade events into:
 
-This repository now focuses on the standalone successor package for Polygon L1 NBBO research and execution:
+1. an observed microstructure state
+2. a slower latent regime estimate
+3. a regularized transition graph between states
+4. edge-conditioned forward-drift estimates
+5. trade intents, sizing decisions, and execution outcomes
 
-`l1_microstructure/`
+The design thesis is that short-horizon intraday alpha is better expressed through state transitions than through feature thresholds alone. The framework therefore centers on a semi-Markov transition kernel with drift diagnostics, confidence controls, and execution-aware decision rules.
 
-This package implements a finite partially observed state machine centered on the regularized transition kernel rather than feature-only heuristics. Architecture notes are in `docs/l1_microstructure_state_machine.md`.
+## What it does
 
-Concrete operator instructions for this repo are in `docs/l1_microstructure_operator_guide.md`.
+The package supports three main use cases:
 
-Minimal successor-package entrypoints now exist via `python -m l1_microstructure`:
+1. Research workflows that build datasets, calibrate artifacts, train a transition model, run rolling out-of-sample validation, and persist run manifests.
+2. Replay and paper-trading flows that load stored artifact bundles and evaluate the state machine on historical or live-style market data.
+3. Routed-live shells and broker smoke paths that keep broker integration at the outer boundary rather than inside the core model.
 
-- `workflow` builds datasets, calibrates, trains, validates, reloads artifacts, and runs monitored replay from a JSON or JSONL payload file.
-- `list-runs` inspects persisted workflow run manifests for a symbol, with optional trade-date filtering.
-- `paper-historical` runs the source-backed paper path against a historical request using the latest or specified artifact bundle.
-- `paper-live` runs the same source-backed path against a live-style subscription request using file-backed payload input.
-- `live-routed` runs the external-routing live shell against file-backed live payload input using a router adapter boundary instead of the internal simulator.
-- `ibkr-live-smoke` checks IBKR routed-live connectivity and reports current broker health without submitting an order.
-- `ibkr-live-order-smoke` submits a paper-safe routed IBKR order, polls for broker status, and cancels it if it remains open.
+In practical terms, it gives you a reproducible path from raw L1 events to a saved artifact bundle and a monitored execution summary.
 
-The CLI also supports stricter runtime selection:
+## Core model flow
 
-- `list-runs --passing-only` shows only runs whose manifest recorded `validation_passed=true`.
-- `paper-historical --require-validation-passed` and `paper-live --require-validation-passed` require the selected bundle to come from a validation-passing run when `run-id` is omitted.
-- `live-routed --router-type` currently supports `immediate-fill`, `latency-buffered`, `rejecting`, and `ibkr-live` adapters.
-- `live-routed --router-poll-delay` controls the simulated acknowledgement-to-fill delay for the `latency-buffered` adapter.
-- `live-routed --broker-env-file` lets the `ibkr-live` adapter load Interactive Brokers connection settings from an explicit env file.
-- Broker-backed routed-live recovery snapshots now preserve open broker order context so a fresh `BrokerBackedOrderRouter` can rehydrate tracked open orders from the broker on restart.
-- `ibkr-live-order-smoke` defaults to a paper-only IBKR router, derives a deterministic L1 request from a payload-backed quote state, and cancels any still-open order before exit.
+The runtime loop implemented by `L1MicrostructureStateMachine` is:
 
-Note: the repository cleanup removed the legacy `core_engine` broker bridge. The `ibkr-live` path remains as an integration boundary, but it now requires an external broker adapter implementation to be wired into `l1_microstructure`.
+1. Ingest a normalized market event.
+2. Update observable state features.
+3. Infer the current latent regime.
+4. Detect whether the new observation constitutes a state transition.
+5. Register pending forward outcomes for later drift resolution.
+6. Score the transition edge and produce a posterior trade intent.
+7. Apply risk limits and portfolio-aware sizing.
+8. Simulate or route execution.
+9. Track fills, open positions, and monitoring snapshots.
 
-## 🎯 **Ultimate System Features**
+The current state vector is described in the design notes as:
 
-### **🚀 Streamlined Architecture**
-- **Single Entry Point**: `UnifiedTradingSystem` - one system for all trading operations
-- **Consolidated Components**: All functionality integrated into 5 core files
-- **Zero Configuration**: Intelligent defaults with automatic optimization
-- **Production Ready**: Enterprise-grade deployment with comprehensive monitoring
+`X_t = (S_t, Q_t, I_t, F_t, V_t)`
 
-### **⚡ Advanced Performance Optimization**
-- **Intelligent Caching**: Adaptive LRU/LFU/TTL strategies with real-time optimization
-- **Parallel Processing**: Automatic thread/process management based on system resources
-- **Memory Optimization**: DataFrame optimization, garbage collection, weak references
-- **Adaptive Tuning**: Automatic parameter adjustment based on performance metrics
+where the package models spread, quote pressure, trade imbalance, flicker intensity, and realized microprice volatility.
 
-### **🧠 Integrated Trading Intelligence**
-- **Multi-Strategy Support**: Momentum, Mean Reversion, Pairs Trading in unified framework
-- **Regime-Aware Trading**: Advanced market regime detection with GMM/HMM models
-- **Smart Execution**: TWAP, VWAP, Implementation Shortfall with market impact optimization
-- **Real-Time Risk Management**: Dynamic position sizing with correlation limits
-- **MarketCondition Analytics**: ML-powered regime detection with 5 market conditions and dynamic strategy allocation
+## Architecture
 
-### **🔮 MarketCondition Analytics Engine**
-- **5 Market Regimes**: crisis_mode, trending_bull, trending_bear, high_volatility, sideways_range
-- **Dynamic Strategy Allocation**: Regime-specific strategy weighting (crisis: 70% pairs, bull: 70% momentum, etc.)
-- **Multi-Factor Analysis**: Volatility, trend strength, volume profile, VIX analysis, flight-to-quality indicators
-- **Performance Feedback Loop**: Continuous learning from strategy performance across regimes
-- **Real-Time Alerts**: Regime change detection with confidence scoring and transition probabilities
+The package is organized as a set of narrow modules with explicit boundaries.
 
-### **📊 Comprehensive Monitoring**
-- **System Health**: Real-time CPU, memory, thread monitoring with intelligent alerts
-- **Performance Analytics**: Comprehensive metrics with trend analysis and recommendations
-- **Trading Dashboard**: Live P&L, positions, signals, and execution statistics
-- **Optimization Reports**: Automatic performance tuning with actionable insights
+| Module | Responsibility |
+| --- | --- |
+| `l1_microstructure/events.py` | Normalized quote and trade event contracts |
+| `l1_microstructure/features.py` | Event-to-state projection |
+| `l1_microstructure/regime.py` | Regime inference over slower context windows |
+| `l1_microstructure/transitions.py` | Transition detection, Dirichlet smoothing, entropy, drift diagnostics |
+| `l1_microstructure/decision.py` | Posterior trade decision logic |
+| `l1_microstructure/execution.py` | Latency-shifted execution and fill modeling |
+| `l1_microstructure/risk.py` | Sizing constraints, drawdown protection, exposure controls |
+| `l1_microstructure/portfolio.py` | Cross-sectional allocation with shrinkage and sector caps |
+| `l1_microstructure/pipeline.py` | Runtime orchestration of the state machine |
+| `l1_microstructure/workflow.py` | Artifact-producing research workflow |
+| `l1_microstructure/artifacts/` | Persistent artifact storage, bundle loading, run selection |
+| `l1_microstructure/validation/` | Rolling out-of-sample validation harness |
+| `l1_microstructure/live/` | Paper runners, routed-live runner, router adapters |
+| `l1_microstructure/ingest/` | Polygon REST/WebSocket sources and payload normalization |
 
-### **🏗️ Simplified Deployment**
-- **Single Command Setup**: `python -c "from core_structure.system import create_production_trading_system; create_production_trading_system().start_system()"`
-- **Automatic Optimization**: Self-tuning system with intelligent resource management
-- **Enterprise Ready**: Production-grade monitoring and alerting
+## Artifact-driven workflow
 
-## 🏗️ **Streamlined Architecture**
+The research workflow in `l1_microstructure/workflow.py` builds and persists a complete runtime bundle. A typical run does the following:
 
-The system has been completely redesigned with a focus on simplicity and performance:
+1. Build full state and transition panels from normalized market events.
+2. Fit state calibration, regime calibration, and execution calibration artifacts.
+3. Train the empirical transition model at the configured runtime horizon.
+4. Run rolling out-of-sample validation with retraining.
+5. Replay the resulting runtime bundle through the paper runner.
+6. Persist a run manifest and all artifact identifiers.
 
-```
-core_structure/
-├── config.py          # All configuration (Phase 1: 94% reduction)
-├── engines.py          # All engines (Phase 2: 88% reduction)  
-├── strategies.py       # All strategies (Phase 3: 67% reduction)
-├── system.py           # Ultimate integration (Phase 4)
-└── optimization.py     # Advanced optimization (Phase 4)
-```
+Artifacts are stored under the selected artifact root and include:
 
-### **📊 Transformation Results**
-- **95% complexity reduction** while maintaining 100% functionality
-- **10x faster** deployment and development cycles
-- **Zero-configuration** production deployment
-- **Advanced optimization** with intelligent resource management
+1. state calibration
+2. regime calibration
+3. execution calibration
+4. transition model
+5. validation report
+6. monitored replay
+7. run manifest
 
-## 📊 **Performance Highlights**
+CLI commands print JSON to stdout. For the full operational runbook and command interpretation, use `docs/l1_microstructure_operator_guide.md`.
 
-```
-🏆 RECENT PERFORMANCE METRICS:
-   📈 Total Return: 47.00% (Phase 3 Testing)
-   🎯 Best Regime: Volatile (13.86% return, 53.1% win rate)
-   🧠 Strategy Effectiveness:
-      • Momentum: 88.7% consistency, optimal in trending markets
-      • Mean Reversion: 83.1% consistency, optimal in sideways markets  
-      • Pairs Trading: 83.9% consistency, optimal in volatile markets
-   🔮 Prediction Accuracy: 35% regime confidence with 26-minute forecasts
+## Command-line interface
+
+The main entrypoint is:
+
+```powershell
+python -m l1_microstructure <command> [options]
 ```
 
-## 🚀 **Quick Start**
+Current commands implemented by `l1_microstructure/cli.py` are:
 
-### **Prerequisites**
-```bash
-# Python 3.9+ required
-python --version  # Should be 3.9+
+| Command | Purpose |
+| --- | --- |
+| `workflow` | Load historical data, build artifacts, validate, replay, and persist a run manifest |
+| `list-runs` | Inspect saved run manifests and filter by date, pass/fail, or quality gates |
+| `paper-historical` | Load a stored artifact bundle and run the paper path against historical data |
+| `paper-live` | Load a stored artifact bundle and run the paper path against the live subscription flow |
+| `live-routed` | Run the live subscription flow with an external order-routing boundary |
+| `ibkr-live-smoke` | Check broker health and list open order ids |
+| `ibkr-live-order-smoke` | Submit, poll, and cancel a paper-safe routed broker order |
 
-# Install system dependencies (macOS)
-brew install clickhouse redis postgresql
+### Example commands
+
+Build a workflow run for one symbol and one trade date:
+
+```powershell
+python -m l1_microstructure workflow `
+  --artifact-root output/l1_microstructure_artifacts `
+  --symbol AAPL `
+  --trade-date 2024-03-11 `
+  --transition-threshold 0.0
 ```
 
-### **Installation**
-```bash
-# Clone repository
-git clone https://github.com/your-org/StatArb_Gemini.git
-cd StatArb_Gemini
+Inspect saved runs:
 
-# Create virtual environment
-python -m venv ai_integration_env
-source ai_integration_env/bin/activate  # On Windows: ai_integration_env\Scripts\activate
+```powershell
+python -m l1_microstructure list-runs `
+  --artifact-root output/l1_microstructure_artifacts `
+  --symbol AAPL `
+  --trade-date 2024-03-11
+```
 
-# Install dependencies
+Replay the latest eligible historical bundle:
+
+```powershell
+python -m l1_microstructure paper-historical `
+  --artifact-root output/l1_microstructure_artifacts `
+  --symbol AAPL `
+  --trade-date 2024-03-11 `
+  --require-validation-passed `
+  --transition-threshold 0.0
+```
+
+Run the live subscription path in paper mode:
+
+```powershell
+python -m l1_microstructure paper-live `
+  --artifact-root output/l1_microstructure_artifacts `
+  --symbol AAPL `
+  --require-validation-passed
+```
+
+Run the routed-live shell:
+
+```powershell
+python -m l1_microstructure live-routed `
+  --artifact-root output/l1_microstructure_artifacts `
+  --symbol AAPL `
+  --require-validation-passed `
+  --broker-env-file broker.env
+```
+
+Check IBKR connectivity at the routing boundary:
+
+```powershell
+python -m l1_microstructure ibkr-live-smoke --broker-env-file broker.env
+```
+
+Submit a paper-safe broker smoke order:
+
+```powershell
+python -m l1_microstructure ibkr-live-order-smoke `
+  --symbol AAPL `
+  --quantity 1 `
+  --action buy `
+  --broker-env-file broker.env
+```
+
+## Runtime assumptions
+
+The current CLI is source-backed:
+
+1. `workflow` and `paper-historical` use the historical Polygon REST path.
+2. `paper-live` and `live-routed` use the live subscription path.
+3. broker smoke commands operate through the IBKR router boundary.
+
+That means local setup is not complete until market-data credentials and, when needed, broker configuration are present.
+
+For broker-backed commands, a reachable IBKR Gateway or TWS session is also assumed.
+
+## Configuration defaults
+
+The framework control surface is defined in `l1_microstructure/config.py`. Important defaults include:
+
+| Area | Example defaults |
+| --- | --- |
+| Features | 10 second trade window, 600 second micro-vol window, 1800 second slow context window |
+| Regimes | Holding-time priors for calm, execution flow, liquidity shock, and competitive liquidity |
+| Transitions | Mahalanobis threshold `2.75`, Dirichlet alpha `0.25`, runtime drift horizon `3000 ms` |
+| Decisions | Entry probability threshold `0.62`, transaction cost `1.2 bps`, minimum alpha score `0.15` |
+| Execution | Latency `100 ms`, base fill probability `0.7`, adverse selection penalty `0.4` |
+| Risk | Starting equity `1,000,000`, daily drawdown limit `3%`, max position fraction `5%` |
+| Portfolio | Shrinkage `0.20`, max weight `10%`, sector cap `25%` |
+
+For deterministic small-sample tests, the suite commonly sets `--transition-threshold 0.0` to force observable transitions.
+
+## Repository layout
+
+The repository is now primarily a single-package workspace:
+
+```text
+StatArb_Gemini/
+├── l1_microstructure/
+│   ├── artifacts/
+│   ├── calibration/
+│   ├── datasets/
+│   ├── ingest/
+│   ├── labeling/
+│   ├── live/
+│   ├── monitoring/
+│   ├── replay/
+│   ├── training/
+│   ├── validation/
+│   ├── cli.py
+│   ├── config.py
+│   ├── pipeline.py
+│   └── workflow.py
+├── docs/
+├── tests/
+├── requirements.txt
+└── broker.env
+```
+
+## Setup
+
+From the repository root:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
 
-### **Basic Usage**
-```bash
-# Paper trading mode (default)
-python main.py --mode paper --capital 100000
+The runtime dependencies include `pandas`, `numpy`, `scikit-learn`, `statsmodels`, `websockets`, `aiohttp`, `massive`, `ibapi`, and `pytest`.
 
-# Live trading mode (requires IBKR setup)
-python main.py --mode live --capital 50000 --symbols SPY QQQ IWM
+## Required credentials and environment
 
-# MarketCondition Analytics Demo
-python demo_market_condition_analytics.py
+The current package is source-backed, so setup is not complete until market-data and, if needed, broker credentials are available.
 
-# Integration Example (Advanced)
-python examples/market_condition_analytics_integration.py
+### Polygon or Massive API key
 
-# With dashboard on custom port
-python main.py --dashboard-port 8080
+Historical and live market-data paths require a Polygon or Massive API key.
 
-# Debug mode with detailed logging
-python main.py --log-level DEBUG --log-file logs/debug.log
+The runtime resolves the API key in this order:
+
+1. an explicit API key passed into the Polygon config object
+2. `POLYGON_API_KEY` from the process environment
+3. `MASSIVE_API_KEY` from the process environment
+4. `POLYGON_API_KEY` or `MASSIVE_API_KEY` from a repository-root `.env` file
+
+Example PowerShell setup:
+
+```powershell
+$env:POLYGON_API_KEY = "your_api_key"
 ```
 
-### **Dashboard Access**
-Once running, access the regime-aware dashboard at:
-- **URL**: http://localhost:8080
-- **Features**: Real-time regime monitoring, performance attribution, strategy effectiveness
+Or use a repository `.env` file:
 
-## 🏗️ **Architecture**
-
-### **Core Components**
-```
-StatArb_Gemini/
-├── 🧠 core_structure/           # Core trading system
-│   ├── 📊 analytics/            # Phase 3: Analytics & monitoring
-│   ├── 🎼 orchestration/        # Phase 2: Multi-strategy coordination
-│   ├── 🎯 strategies/           # Trading strategies (momentum, mean reversion, pairs)
-│   ├── 🔍 components/           # System components (regime, portfolio, risk, execution)
-│   └── 🏭 infrastructure/       # Phase 4: Production infrastructure
-├── 📈 paper_trading/            # Paper trading and dashboard
-└── ⚙️ configs/                  # Configuration files
+```text
+POLYGON_API_KEY=your_api_key
 ```
 
-### **Data Flow**
-```
-Market Data → Regime Detection → Strategy Signals → Portfolio Allocation → Risk Management → Execution → Analytics
-     ↓              ↓                ↓                    ↓                   ↓             ↓          ↓
-  Real-time     7 Regimes      3 Strategies      Dynamic Sizing        Circuit Breakers  Smart Router  Dashboard
-```
+### IBKR broker configuration
 
-## 📊 **System Capabilities**
+Broker-backed commands such as `live-routed`, `ibkr-live-smoke`, and `ibkr-live-order-smoke` use the Interactive Brokers router boundary.
 
-### **Regime Detection Engine**
-- **Latency**: Sub-second regime identification
-- **Accuracy**: 35-85% prediction confidence depending on market conditions
-- **Coverage**: 7 distinct market regimes with transition analysis
-- **Integration**: Real-time strategy allocation adjustment
+The repository includes [broker.env](broker.env#L1) as the expected environment-file pattern. Current keys include:
 
-### **Portfolio Management**
-- **Strategies**: 3 core strategies with regime-specific optimization
-- **Risk Management**: Dynamic position sizing with regime-aware risk controls
-- **Execution**: Smart order routing with market impact minimization
-- **Monitoring**: Real-time performance attribution and analytics
+1. `ACTIVE_BROKER=interactive_brokers`
+2. `IBKR_HOST=127.0.0.1`
+3. `IBKR_PORT=4002`
+4. `IBKR_CLIENT_ID=1`
+5. `IBKR_PAPER_TRADING=true`
+6. `IBKR_OUTSIDE_RTH=true`
+7. optional `IBKR_ACCOUNT_ID` or `IBKR_ACCOUNT`
 
-### **Production Features**
-- **Scalability**: Docker containerization with auto-scaling
-- **Reliability**: Circuit breakers and production safety controls
-- **Monitoring**: Comprehensive system health and performance tracking
-- **Integration**: IBKR live trading with real market data
+When `--broker-env-file` is used, values from that file are loaded first and process environment variables fill in any missing keys.
 
-## 🧪 **Testing & Validation**
+### Minimal local setup example
 
-### **Run System Tests**
-```bash
-# Phase 3 core analytics test
-python test_phase3_core.py
+For first-time local setup, the simplest arrangement is:
 
-# Full system integration test
-python main.py --mode paper --capital 10000 --log-level DEBUG
+Repository `.env` for market data:
+
+```text
+POLYGON_API_KEY=your_api_key
 ```
 
-### **Expected Results**
-```
-✅ ALL PHASE 3 CORE TESTS PASSED!
-📊 Regime Analytics Core: ✅ PASSED
-🔗 Phase 2 Integration: ✅ PASSED  
-🧠 Advanced Analytics Features: ✅ PASSED
-```
+Repository `broker.env` for broker routing:
 
-## 📈 **Trading Strategies**
-
-### **1. Momentum Strategy**
-- **Optimal Regimes**: Trending, Volatile
-- **Consistency**: 88.7%
-- **Features**: Volume confirmation, regime-aware thresholds
-
-### **2. Mean Reversion Strategy**
-- **Optimal Regimes**: Sideways, Trending
-- **Consistency**: 83.1%
-- **Features**: Bollinger Bands, RSI, adaptive windows
-
-### **3. Pairs Trading Strategy**
-- **Optimal Regimes**: Volatile, Crisis
-- **Consistency**: 83.9%
-- **Features**: Cointegration analysis, Kalman filtering
-
-## 🛡️ **Risk Management**
-
-- **Position Sizing**: Kelly Criterion with regime adjustments
-- **Stop Losses**: Adaptive stops based on regime volatility
-- **Portfolio Limits**: Maximum allocation per strategy/regime
-- **Circuit Breakers**: Automatic trading halt on excessive losses
-- **Correlation Monitoring**: Cross-strategy correlation limits
-
-## 📊 **Monitoring & Analytics**
-
-### **Real-Time Dashboard**
-- **Regime Status**: Current regime with confidence and duration
-- **Performance Attribution**: Returns by regime and strategy
-- **Risk Metrics**: VaR, expected shortfall, drawdown analysis
-- **Predictive Analytics**: Next regime forecasts with confidence
-
-### **Key Metrics Tracked**
-- **Portfolio Value**: Real-time P&L tracking
-- **Regime Performance**: Return attribution by market regime
-- **Strategy Effectiveness**: Performance by strategy and regime
-- **Risk Metrics**: Comprehensive risk analysis and monitoring
-
-## 🔧 **Configuration**
-
-### **Environment Variables**
-```bash
-# Trading configuration
-TRADING_MODE=paper              # paper | live
-INITIAL_CAPITAL=100000         # Starting capital
-SYMBOLS=SPY,QQQ,IWM           # Trading symbols
-
-# Database configuration
-CLICKHOUSE_HOST=localhost      # ClickHouse host
-REDIS_HOST=localhost          # Redis host
-POSTGRES_HOST=localhost       # PostgreSQL host
-
-# API configuration
-IBKR_HOST=localhost           # IBKR Gateway host
-IBKR_PORT=7497               # IBKR Gateway port
+```text
+ACTIVE_BROKER=interactive_brokers
+IBKR_HOST=127.0.0.1
+IBKR_PORT=4002
+IBKR_CLIENT_ID=1
+IBKR_PAPER_TRADING=true
+IBKR_OUTSIDE_RTH=true
 ```
 
-### **Configuration Files**
-- `configs/base_config.yaml`: Base system configuration
-- `configs/production_config.yaml`: Production-specific settings
-- `configs/log_config.yml`: Logging configuration
+Example broker smoke command:
 
-## 🚀 **Deployment**
-
-### **Docker Deployment**
-```bash
-# Build production image
-docker build -f core_structure/infrastructure/deployment/Dockerfile -t statarb-gemini .
-
-# Run with docker-compose
-docker-compose -f configs/docker-compose.production.yml up -d
+```powershell
+python -m l1_microstructure ibkr-live-smoke --broker-env-file broker.env
 ```
 
-### **Production Checklist**
-- [ ] Database connections configured
-- [ ] IBKR credentials and permissions set
-- [ ] Risk limits and circuit breakers configured
-- [ ] Monitoring and alerting systems active
-- [ ] Backup and recovery procedures tested
+`--allow-live-broker-routing` disables the paper-only safeguard and should be treated as a separate operational risk decision.
 
-## 📚 **Documentation**
+## Testing
 
-- **System Architecture**: [Architecture Guide](docs/architecture.md)
-- **Trading Strategies**: [Strategy Documentation](docs/strategies.md)
-- **API Reference**: [API Documentation](docs/api.md)
-- **Deployment Guide**: [Production Deployment](docs/deployment.md)
+The test suite is concentrated in `tests/unit/l1_state_machine/` and covers:
 
-## 🤝 **Contributing**
+1. CLI behavior
+2. panel construction and replay determinism
+3. calibration, training, and artifact persistence
+4. validation harness behavior
+5. monitoring and live runner flows
+6. router adapters and recovery behavior
 
-This is a professional trading system. Contributions should follow institutional standards:
+Run the tests with:
 
-1. **Code Quality**: All code must pass linting and type checking
-2. **Testing**: Comprehensive test coverage required
-3. **Documentation**: Clear documentation for all components
-4. **Risk Management**: Any changes must maintain risk controls
+```powershell
+pytest
+```
 
-## 📄 **License**
+Run the dedicated IBKR functionality slice with:
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+```powershell
+pytest tests/unit/l1_state_machine/test_ibkr_functionality.py -q
+```
 
-## ⚠️ **Disclaimer**
+Run the dedicated workflow and market-data preflight slice with:
 
-This software is for educational and research purposes. Trading involves substantial risk of loss. Past performance does not guarantee future results. Use at your own risk.
+```powershell
+pytest tests/unit/l1_state_machine/test_workflow_preflight.py -q
+```
 
----
+Run the real source-backed Polygon smoke slice with:
 
-**🏆 StatArb Gemini - Where Quantitative Excellence Meets Production Reality**
+```powershell
+pytest tests/integration/l1_state_machine/test_polygon_source_smoke.py -q
+```
+
+Run the bounded real source-backed workflow smoke slice with:
+
+```powershell
+pytest tests/integration/l1_state_machine/test_polygon_workflow_smoke.py -q
+```
+
+Run the bounded broker-backed routed-live smoke slice with:
+
+```powershell
+pytest tests/integration/l1_state_machine/test_ibkr_routed_live_smoke.py -q
+```
+
+## Important docs
+
+Start with these documents if you want the design rationale or operating context:
+
+1. `docs/l1_microstructure_state_machine.md`
+2. `docs/l1_microstructure_package_plan.md`
+3. `docs/l1_microstructure_operator_guide.md`
+
+## Current scope and limitations
+
+This package is a clean successor implementation, not a claim of fully solved microstructure execution. The design deliberately accepts L1-only limitations: hidden liquidity, direct-feed advantages, and explicit cross-venue queue inference are treated as uncertainty rather than directly observed truth.
+
+Broker routing is also kept at the edge of the system. The routed-live shell exists, but real deployment still depends on an external adapter and operator safeguards.

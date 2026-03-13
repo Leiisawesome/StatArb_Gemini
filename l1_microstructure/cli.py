@@ -269,10 +269,12 @@ def _run_ibkr_live_smoke_command(args: argparse.Namespace) -> int:
         require_paper=not bool(getattr(args, "allow_live_broker_routing", False)),
     )
     try:
+        health = router.health_check()
         payload = {
             "router_type": "ibkr-live",
-            "health": router.health_check(),
+            "health": health,
             "open_order_ids": router.open_order_ids(),
+            "diagnostics": _ibkr_diagnostics(health),
         }
         print(json.dumps(payload, sort_keys=True, default=str))
     finally:
@@ -318,21 +320,53 @@ def _run_ibkr_live_order_smoke_command(args: argparse.Namespace) -> int:
                 time.sleep(poll_interval_seconds)
             execution_reports.extend(router.poll((args.symbol,)))
 
+        health = router.health_check()
         payload = {
             "router_type": "ibkr-live",
             "request": _execution_request_to_json(request),
             "acknowledgement": _route_acknowledgement_to_json(acknowledgement),
-            "health": router.health_check(),
+            "health": health,
             "execution_reports": [_execution_report_to_json(report) for report in execution_reports],
             "open_order_ids_before_cancel": open_order_ids_before_cancel,
             "final_open_order_ids": router.open_order_ids(),
             "cancel_attempted": cancel_attempted,
             "cancel_succeeded": cancel_succeeded,
+            "diagnostics": _ibkr_diagnostics(health, execution_reports),
         }
         print(json.dumps(payload, sort_keys=True, default=str))
     finally:
         router.stop()
     return 0
+
+
+def _ibkr_diagnostics(health: dict[str, Any], execution_reports: Sequence[ExecutionReport] = ()) -> dict[str, str] | None:
+    messages: list[str] = []
+    for key in ("last_error", "error"):
+        value = health.get(key)
+        if isinstance(value, str) and value.strip():
+            messages.append(value.strip())
+    messages.extend(
+        str(report.reason).strip()
+        for report in execution_reports
+        if getattr(report, "reason", None)
+    )
+
+    for message in messages:
+        normalized = message.lower()
+        if "read-only mode" in normalized or "read-only api" in normalized:
+            return {
+                "issue": "read_only_api_mode",
+                "message": message,
+                "recommended_action": "Disable 'Read-Only API' in IBKR Gateway or TWS API settings, then rerun ibkr-live-order-smoke.",
+            }
+        if "couldn't connect to tws" in normalized or "failed to connect to ibkr gateway" in normalized:
+            return {
+                "issue": "broker_socket_unreachable",
+                "message": message,
+                "recommended_action": "Start IBKR Gateway or TWS, verify API socket access is enabled, confirm the host and port in broker.env, then rerun ibkr-live-smoke.",
+            }
+
+    return None
 
 
 def _workflow_result_to_json(result: Any) -> dict[str, Any]:

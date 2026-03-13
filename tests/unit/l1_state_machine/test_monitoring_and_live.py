@@ -965,3 +965,69 @@ def test_ibkr_native_reserve_order_id_raises_when_none() -> None:
         assert False, "Should have raised RuntimeError"
     except RuntimeError as e:
         assert "next valid order id" in str(e)
+
+
+def test_ibkr_native_ignores_non_fatal_order_preset_warning() -> None:
+    """Covers _ibkr_native.py: on_error ignores non-fatal IBKR warning 10349"""
+    from l1_microstructure.live._ibkr_native import IBKRNativeBrokerSession
+    from l1_microstructure.live.broker_models import BrokerOrder, BrokerOrderSide, BrokerOrderType, BrokerOrderStatus, IBKRConnectionConfig
+
+    config = IBKRConnectionConfig(host="127.0.0.1", port=4002, client_id=999)
+    session = IBKRNativeBrokerSession(config)
+    session._orders["1"] = BrokerOrder(
+        symbol="AAPL",
+        side=BrokerOrderSide.BUY,
+        quantity=1.0,
+        order_type=BrokerOrderType.LIMIT,
+        status=BrokerOrderStatus.SUBMITTED,
+        order_id="1",
+    )
+
+    session.on_error(1, 10349, "Order TIF was set to DAY based on order preset.")
+
+    assert session._last_error is None
+    assert session._orders["1"].status is BrokerOrderStatus.SUBMITTED
+
+
+def test_ibkr_native_ignores_expected_cancel_error_in_health_state() -> None:
+    """Covers _ibkr_native.py: on_error does not retain cancellation code 202 as last_error"""
+    from l1_microstructure.live._ibkr_native import IBKRNativeBrokerSession
+    from l1_microstructure.live.broker_models import BrokerOrder, BrokerOrderSide, BrokerOrderType, BrokerOrderStatus, IBKRConnectionConfig
+
+    config = IBKRConnectionConfig(host="127.0.0.1", port=4002, client_id=999)
+    session = IBKRNativeBrokerSession(config)
+    session._orders["2"] = BrokerOrder(
+        symbol="AAPL",
+        side=BrokerOrderSide.BUY,
+        quantity=1.0,
+        order_type=BrokerOrderType.LIMIT,
+        status=BrokerOrderStatus.SUBMITTED,
+        order_id="2",
+    )
+
+    session.on_error(2, 202, "Order Canceled - reason:")
+
+    assert session._last_error is None
+    assert session._orders["2"].status is BrokerOrderStatus.CANCELLED
+
+
+def test_ibkr_native_ignores_order_timing_warning() -> None:
+    """Covers _ibkr_native.py: on_error ignores non-fatal IBKR warning 399"""
+    from l1_microstructure.live._ibkr_native import IBKRNativeBrokerSession
+    from l1_microstructure.live.broker_models import BrokerOrder, BrokerOrderSide, BrokerOrderType, BrokerOrderStatus, IBKRConnectionConfig
+
+    config = IBKRConnectionConfig(host="127.0.0.1", port=4002, client_id=999)
+    session = IBKRNativeBrokerSession(config)
+    session._orders["3"] = BrokerOrder(
+        symbol="AAPL",
+        side=BrokerOrderSide.BUY,
+        quantity=1.0,
+        order_type=BrokerOrderType.LIMIT,
+        status=BrokerOrderStatus.SUBMITTED,
+        order_id="3",
+    )
+
+    session.on_error(3, 399, "Order Message: BUY 1 AAPL NASDAQ.NMS Warning: Your order will not be placed at the exchange until 2026-03-13 04:00:00 US/Eastern.")
+
+    assert session._last_error is None
+    assert session._orders["3"].status is BrokerOrderStatus.SUBMITTED

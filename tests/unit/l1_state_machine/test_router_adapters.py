@@ -97,6 +97,15 @@ class FakeAsyncBrokerFacade:
     def broker_name(self) -> str:
         return "fake-broker"
 
+    async def check_health(self):
+        return {
+            "connected": self.connected,
+            "status": "healthy" if self.connected else "disconnected",
+            "broker": self.broker_name(),
+            "open_order_count": len(self.orders),
+            "last_error": None,
+        }
+
 
 def test_broker_backed_router_translates_terminal_broker_fill() -> None:
     broker = FakeAsyncBrokerFacade()
@@ -167,6 +176,24 @@ def test_broker_backed_router_cancels_open_orders_on_stop() -> None:
     router.stop()
 
     assert order_id in broker.cancelled_order_ids
+
+
+def test_broker_backed_router_health_check_uses_tracked_open_orders() -> None:
+    broker = FakeAsyncBrokerFacade()
+    router = IBKRBrokerOrderRouter(IBKRConnectionConfig(), broker=broker)
+
+    acknowledgement = router.submit(_request(quantity=9))
+    health = router.health_check()
+
+    assert health["open_order_count"] == 1
+    assert "broker_open_order_count" not in health
+
+    broker.orders[acknowledgement.external_order_id].status = BrokerOrderStatus.CANCELLED
+    router.poll(("AAPL",))
+    health_after_cancel = router.health_check()
+
+    assert health_after_cancel["open_order_count"] == 0
+    assert health_after_cancel["broker_open_order_count"] == 1
 
 
 def test_broker_backed_router_restores_open_orders_into_fresh_router() -> None:
