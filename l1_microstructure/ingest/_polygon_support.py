@@ -62,12 +62,28 @@ class PolygonFilterConfig:
 
 
 def _coerce_timestamp_ns(payload: dict[str, Any]) -> int:
-    for key in ("sip_timestamp", "participant_timestamp", "timestamp_ns", "timestamp", "t"):
+    explicit_ns_keys = ("sip_timestamp", "participant_timestamp", "timestamp_ns")
+    inferred_unit_keys = ("timestamp", "t")
+    for key in (*explicit_ns_keys, *inferred_unit_keys):
         value = payload.get(key)
         if value is None:
             continue
-        return int(value)
+        timestamp = int(value)
+        if key in explicit_ns_keys:
+            return timestamp
+        return _infer_epoch_timestamp_ns(timestamp)
     raise ValueError("payload is missing a timestamp field")
+
+
+def _infer_epoch_timestamp_ns(timestamp: int) -> int:
+    absolute_timestamp = abs(timestamp)
+    if absolute_timestamp >= 100_000_000_000_000_000:
+        return timestamp
+    if absolute_timestamp >= 100_000_000_000_000:
+        return timestamp * 1_000
+    if absolute_timestamp >= 100_000_000_000:
+        return timestamp * 1_000_000
+    return timestamp * 1_000_000_000
 
 
 def _coerce_symbol(payload: dict[str, Any]) -> str:

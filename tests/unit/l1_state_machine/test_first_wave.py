@@ -34,6 +34,42 @@ def test_polygon_payload_normalizer_handles_quote_and_trade_payloads() -> None:
     assert quote.timestamp_ns < trade.timestamp_ns
 
 
+def test_polygon_payload_normalizer_converts_websocket_millisecond_timestamps_to_nanoseconds() -> None:
+    normalizer = PolygonPayloadNormalizer()
+
+    quote = normalizer.normalize(
+        {"ev": "Q", "sym": "AAPL", "t": 1710163800000, "bp": 100.0, "ap": 100.02, "bs": 200, "as": 100, "q": 7}
+    )
+    trade = normalizer.normalize(
+        {"ev": "T", "sym": "AAPL", "t": 1710163801000, "p": 100.02, "s": 150, "side": "buy", "q": 8}
+    )
+
+    assert quote is not None
+    assert trade is not None
+    assert quote.timestamp_ns == 1710163800000 * 1_000_000
+    assert trade.timestamp_ns == 1710163801000 * 1_000_000
+
+
+def test_polygon_payload_normalizer_preserves_rest_nanosecond_timestamps_on_generic_fields() -> None:
+    normalizer = PolygonPayloadNormalizer()
+
+    quote = normalizer.normalize(
+        {
+            "ev": "Q",
+            "sym": "AAPL",
+            "t": _et_ns(2024, 3, 11, 9, 30, 0),
+            "bp": 100.0,
+            "ap": 100.02,
+            "bs": 200,
+            "as": 100,
+            "q": 7,
+        }
+    )
+
+    assert quote is not None
+    assert quote.timestamp_ns == _et_ns(2024, 3, 11, 9, 30, 0)
+
+
 def test_in_memory_polygon_source_filters_and_orders_rth_events() -> None:
     payloads = [
         {"ev": "T", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 29, 59), "p": 99.9, "s": 100},
