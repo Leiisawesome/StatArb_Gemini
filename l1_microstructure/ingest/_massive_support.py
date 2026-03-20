@@ -46,7 +46,7 @@ class ExclusionWindow:
 
 
 @dataclass(frozen=True, slots=True)
-class PolygonFilterConfig:
+class MassiveFilterConfig:
     exclude_trade_conditions: frozenset[str] = _DEFAULT_EXCLUDED_TRADE_CONDITIONS
     exclude_corrections: bool = True
     exclude_late_prints: bool = True
@@ -151,12 +151,12 @@ def _minute_of_day(timestamp_ns: int) -> int:
     return timestamp.hour * 60 + timestamp.minute
 
 
-class PolygonPayloadNormalizer(EventNormalizer):
+class MassivePayloadNormalizer(EventNormalizer):
     def normalize(self, payload: dict[str, Any] | Any) -> MarketEvent | None:
         if isinstance(payload, (QuoteEvent, TradeEvent)):
             return payload
         if not isinstance(payload, dict):
-            raise TypeError("PolygonPayloadNormalizer expects dict-like payloads or normalized events")
+            raise TypeError("MassivePayloadNormalizer expects dict-like payloads or normalized events")
 
         event_type = str(payload.get("ev") or payload.get("event_type") or payload.get("type") or "").lower()
         if event_type in {"q", "quote"}:
@@ -222,25 +222,25 @@ class PolygonPayloadNormalizer(EventNormalizer):
         return TradeSide.UNKNOWN
 
 
-class PolygonEventFilterMixin:
+class MassiveEventFilterMixin:
     normalizer: EventNormalizer
     session_filter: SessionFilter
-    filter_config: PolygonFilterConfig
+    filter_config: MassiveFilterConfig
     _active_halts: dict[str, int]
     _resume_exclusion_until_ns: dict[str, int]
     _active_auctions: dict[str, int]
     _auction_resume_exclusion_until_ns: dict[str, int]
     _active_trade_indices: dict[str, int]
 
-    def _initialize_polygon_event_filters(
+    def _initialize_massive_event_filters(
         self,
         normalizer: EventNormalizer | None,
         session_filter: SessionFilter | None,
-        filter_config: PolygonFilterConfig | None,
+        filter_config: MassiveFilterConfig | None,
     ) -> None:
-        self.normalizer = normalizer or PolygonPayloadNormalizer()
+        self.normalizer = normalizer or MassivePayloadNormalizer()
         self.session_filter = session_filter or RTHSessionFilter()
-        self.filter_config = filter_config or PolygonFilterConfig()
+        self.filter_config = filter_config or MassiveFilterConfig()
         self._reset_halt_state()
 
     def _normalize_payloads(self, payloads: Iterable[dict[str, Any] | MarketEvent]) -> list[MarketEvent]:
@@ -602,7 +602,7 @@ class PolygonEventFilterMixin:
         for key in ("is_late", "late", "late_report"):
             if payload.get(key) in (True, 1, "1", "true", "True"):
                 return True
-        return "late" in PolygonEventFilterMixin._trade_conditions(payload)
+        return "late" in MassiveEventFilterMixin._trade_conditions(payload)
 
     @staticmethod
     def _trade_conditions(payload: dict[str, Any]) -> set[str]:

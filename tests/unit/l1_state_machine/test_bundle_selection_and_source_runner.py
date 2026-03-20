@@ -11,7 +11,7 @@ from l1_microstructure.execution import ExecutionReport
 from l1_microstructure.ingest import HistoricalBatchRequest, LiveSubscriptionRequest
 from l1_microstructure.live import RouteAcknowledgement, RoutedLiveTradingRunner, RunnerConfig, SourceBackedPaperRunner
 from l1_microstructure.workflow import ArtifactDrivenResearchWorkflow
-from tests.unit.l1_state_machine.support import FixtureMarketDataSource as InMemoryPolygonDataSource
+from tests.unit.l1_state_machine.support import FixtureMarketDataSource as InMemoryMassiveDataSource
 
 
 def _et_ns(year: int, month: int, day: int, hour: int, minute: int, second: int = 0) -> int:
@@ -19,8 +19,8 @@ def _et_ns(year: int, month: int, day: int, hour: int, minute: int, second: int 
     return int(timestamp.timestamp() * 1_000_000_000)
 
 
-def _make_source() -> InMemoryPolygonDataSource:
-    return InMemoryPolygonDataSource(
+def _make_source() -> InMemoryMassiveDataSource:
+    return InMemoryMassiveDataSource(
         [
             {"ev": "Q", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 0), "bp": 100.0, "ap": 100.02, "bs": 100, "as": 100},
             {"ev": "Q", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 1), "bp": 100.01, "ap": 100.02, "bs": 450, "as": 40},

@@ -22,7 +22,7 @@ from l1_microstructure.live import (
 )
 from l1_microstructure.monitoring import InMemoryMonitoringSink, JsonlMonitoringSink
 from l1_microstructure.training import EmpiricalTransitionTrainer
-from tests.unit.l1_state_machine.support import FixtureMarketDataSource as InMemoryPolygonDataSource
+from tests.unit.l1_state_machine.support import FixtureMarketDataSource as InMemoryMassiveDataSource
 
 
 class AcceptedFillRouter:
@@ -120,7 +120,7 @@ class CancelingRouter(AcceptedFillRouter):
 
 
 def test_in_memory_monitoring_sink_collects_runtime_snapshots() -> None:
-    source = InMemoryPolygonDataSource(
+    source = InMemoryMassiveDataSource(
         [
             {"ev": "Q", "sym": "AAPL", "t": 1710163800000000000, "bp": 100.0, "ap": 100.02, "bs": 100, "as": 100},
             {"ev": "Q", "sym": "AAPL", "t": 1710163801000000000, "bp": 100.01, "ap": 100.02, "bs": 400, "as": 50},
@@ -143,7 +143,7 @@ def test_in_memory_monitoring_sink_collects_runtime_snapshots() -> None:
 
 
 def test_jsonl_monitoring_sink_writes_snapshots(tmp_path) -> None:
-    source = InMemoryPolygonDataSource(
+    source = InMemoryMassiveDataSource(
         [
             {"ev": "Q", "sym": "AAPL", "t": 1710163800000000000, "bp": 100.0, "ap": 100.02, "bs": 100, "as": 100},
             {"ev": "Q", "sym": "AAPL", "t": 1710163801000000000, "bp": 100.01, "ap": 100.02, "bs": 400, "as": 50},
@@ -166,7 +166,7 @@ def test_jsonl_monitoring_sink_writes_snapshots(tmp_path) -> None:
 
 
 def test_simulator_paper_runner_produces_update_and_execution_summary() -> None:
-    source = InMemoryPolygonDataSource(
+    source = InMemoryMassiveDataSource(
         [
             {"ev": "Q", "sym": "AAPL", "t": 1710163800000000000, "bp": 100.0, "ap": 100.02, "bs": 100, "as": 100},
             {"ev": "Q", "sym": "AAPL", "t": 1710163801000000000, "bp": 100.01, "ap": 100.02, "bs": 400, "as": 50},
@@ -220,7 +220,7 @@ def test_routed_live_runner_submits_requests_and_ingests_external_reports() -> N
         def stop(self) -> None:
             self.stopped = True
 
-    source = InMemoryPolygonDataSource(
+    source = InMemoryMassiveDataSource(
         [
             {"ev": "Q", "sym": "AAPL", "t": 1710163800000000000, "bp": 100.0, "ap": 100.02, "bs": 100, "as": 100},
             {"ev": "Q", "sym": "AAPL", "t": 1710163801000000000, "bp": 100.01, "ap": 100.02, "bs": 400, "as": 50},
@@ -284,7 +284,7 @@ def test_routed_live_runner_can_resume_from_recovery_snapshot() -> None:
     config.decision.transaction_cost_bps = 0.0
     config.decision.risk_premium_bps = 0.0
 
-    full_source = InMemoryPolygonDataSource(payloads)
+    full_source = InMemoryMassiveDataSource(payloads)
     full_events = list(full_source.subscribe_live(LiveSubscriptionRequest(symbols=("AAPL",))))
     builder = PipelineTransitionDatasetBuilder(full_events, config=config)
     transition_panel = builder.build_transition_panel("AAPL").frame
@@ -293,7 +293,7 @@ def test_routed_live_runner_can_resume_from_recovery_snapshot() -> None:
     runtime_artifacts = RuntimeArtifactBundle(transition_model=trainer.last_payload)
 
     first_runner = RoutedLiveTradingRunner(
-        source=InMemoryPolygonDataSource(payloads[:4]),
+        source=InMemoryMassiveDataSource(payloads[:4]),
         router=AcceptedFillRouter(),
         framework_config=config,
         runtime_artifacts=runtime_artifacts,
@@ -305,7 +305,7 @@ def test_routed_live_runner_can_resume_from_recovery_snapshot() -> None:
     snapshot = first_runner.snapshot_state()
 
     resumed_runner = RoutedLiveTradingRunner(
-        source=InMemoryPolygonDataSource(payloads[4:]),
+        source=InMemoryMassiveDataSource(payloads[4:]),
         router=AcceptedFillRouter(),
         framework_config=config,
     )
@@ -336,7 +336,7 @@ def test_routed_live_runner_supports_latency_buffered_router_adapter() -> None:
     config.decision.entry_probability_threshold = 0.5
     config.decision.transaction_cost_bps = 0.0
     config.decision.risk_premium_bps = 0.0
-    events = list(InMemoryPolygonDataSource(payloads).subscribe_live(LiveSubscriptionRequest(symbols=("AAPL",))))
+    events = list(InMemoryMassiveDataSource(payloads).subscribe_live(LiveSubscriptionRequest(symbols=("AAPL",))))
     builder = PipelineTransitionDatasetBuilder(events, config=config)
     trainer = EmpiricalTransitionTrainer()
     trainer.fit(
@@ -345,7 +345,7 @@ def test_routed_live_runner_supports_latency_buffered_router_adapter() -> None:
     )
 
     runner = RoutedLiveTradingRunner(
-        source=InMemoryPolygonDataSource(payloads),
+        source=InMemoryMassiveDataSource(payloads),
         router=DelayedFillRouter(delay_cycles=1),
         framework_config=config,
         runtime_artifacts=RuntimeArtifactBundle(transition_model=trainer.last_payload),
@@ -374,7 +374,7 @@ def test_routed_live_runner_handles_cancelled_router_reports() -> None:
     config.decision.entry_probability_threshold = 0.5
     config.decision.transaction_cost_bps = 0.0
     config.decision.risk_premium_bps = 0.0
-    events = list(InMemoryPolygonDataSource(payloads).subscribe_live(LiveSubscriptionRequest(symbols=("AAPL",))))
+    events = list(InMemoryMassiveDataSource(payloads).subscribe_live(LiveSubscriptionRequest(symbols=("AAPL",))))
     builder = PipelineTransitionDatasetBuilder(events, config=config)
     trainer = EmpiricalTransitionTrainer()
     trainer.fit(
@@ -383,7 +383,7 @@ def test_routed_live_runner_handles_cancelled_router_reports() -> None:
     )
 
     runner = RoutedLiveTradingRunner(
-        source=InMemoryPolygonDataSource(payloads),
+        source=InMemoryMassiveDataSource(payloads),
         router=CancelingRouter(),
         framework_config=config,
         runtime_artifacts=RuntimeArtifactBundle(transition_model=trainer.last_payload),
@@ -453,7 +453,7 @@ def test_routed_live_runner_reconciles_broker_backed_partial_fill_and_cancel() -
     config.decision.entry_probability_threshold = 0.5
     config.decision.transaction_cost_bps = 0.0
     config.decision.risk_premium_bps = 0.0
-    events = list(InMemoryPolygonDataSource(payloads).subscribe_live(LiveSubscriptionRequest(symbols=("AAPL",))))
+    events = list(InMemoryMassiveDataSource(payloads).subscribe_live(LiveSubscriptionRequest(symbols=("AAPL",))))
     builder = PipelineTransitionDatasetBuilder(events, config=config)
     trainer = EmpiricalTransitionTrainer()
     trainer.fit(
@@ -462,7 +462,7 @@ def test_routed_live_runner_reconciles_broker_backed_partial_fill_and_cancel() -
     )
 
     runner = RoutedLiveTradingRunner(
-        source=InMemoryPolygonDataSource(payloads),
+        source=InMemoryMassiveDataSource(payloads),
         router=IBKRBrokerOrderRouter(ibkr_config=IBKRConnectionConfig(), broker=FakeBrokerFacade()),
         framework_config=config,
         runtime_artifacts=RuntimeArtifactBundle(transition_model=trainer.last_payload),
@@ -550,7 +550,7 @@ def test_routed_live_runner_can_resume_with_open_broker_backed_order() -> None:
     config.decision.entry_probability_threshold = 0.5
     config.decision.transaction_cost_bps = 0.0
     config.decision.risk_premium_bps = 0.0
-    events = list(InMemoryPolygonDataSource(payloads).subscribe_live(LiveSubscriptionRequest(symbols=("AAPL",))))
+    events = list(InMemoryMassiveDataSource(payloads).subscribe_live(LiveSubscriptionRequest(symbols=("AAPL",))))
     builder = PipelineTransitionDatasetBuilder(events, config=config)
     trainer = EmpiricalTransitionTrainer()
     trainer.fit(
@@ -562,7 +562,7 @@ def test_routed_live_runner_can_resume_with_open_broker_backed_order() -> None:
     runtime_artifacts = RuntimeArtifactBundle(transition_model=trainer.last_payload)
 
     first_runner = RoutedLiveTradingRunner(
-        source=InMemoryPolygonDataSource(payloads[:4]),
+        source=InMemoryMassiveDataSource(payloads[:4]),
         router=router,
         framework_config=config,
         runtime_artifacts=runtime_artifacts,
@@ -579,7 +579,7 @@ def test_routed_live_runner_can_resume_with_open_broker_backed_order() -> None:
 
     resumed_router = IBKRBrokerOrderRouter(ibkr_config=IBKRConnectionConfig(), broker=broker)
     resumed_runner = RoutedLiveTradingRunner(
-        source=InMemoryPolygonDataSource(payloads[4:]),
+        source=InMemoryMassiveDataSource(payloads[4:]),
         router=resumed_router,
         framework_config=config,
         runtime_artifacts=runtime_artifacts,
@@ -620,7 +620,7 @@ def test_routed_live_runner_exposes_router_controls() -> None:
             return {"connected": True, "status": "healthy", "broker": "controllable"}
 
     runner = RoutedLiveTradingRunner(
-        source=InMemoryPolygonDataSource([]),
+        source=InMemoryMassiveDataSource([]),
         router=ControllableRouter(),
         runtime_artifacts=RuntimeArtifactBundle(),
     )
@@ -650,7 +650,7 @@ def test_simulator_paper_runner_with_runtime_artifacts() -> None:
     """Covers paper.py: constructor with runtime_artifacts"""
     from l1_microstructure.artifacts import RuntimeArtifactBundle
 
-    source = InMemoryPolygonDataSource(
+    source = InMemoryMassiveDataSource(
         [
             {"ev": "Q", "sym": "AAPL", "t": 1710163800000000000, "bp": 100.0, "ap": 100.02, "bs": 100, "as": 100},
         ]
@@ -663,7 +663,7 @@ def test_simulator_paper_runner_with_runtime_artifacts() -> None:
 
 def test_simulator_paper_runner_filters_symbols() -> None:
     """Covers paper.py: selected_symbols filtering in start()"""
-    source = InMemoryPolygonDataSource(
+    source = InMemoryMassiveDataSource(
         [
             {"ev": "Q", "sym": "AAPL", "t": 1710163800000000000, "bp": 100.0, "ap": 100.02, "bs": 100, "as": 100},
             {"ev": "Q", "sym": "MSFT", "t": 1710163801000000000, "bp": 200.0, "ap": 200.02, "bs": 100, "as": 100},
@@ -678,7 +678,7 @@ def test_simulator_paper_runner_filters_symbols() -> None:
 
 def test_simulator_paper_runner_stop_during_run() -> None:
     """Covers paper.py: stop() during event processing loop"""
-    source = InMemoryPolygonDataSource(
+    source = InMemoryMassiveDataSource(
         [
             {"ev": "Q", "sym": "AAPL", "t": 1710163800000000000, "bp": 100.0, "ap": 100.02, "bs": 100, "as": 100},
             {"ev": "Q", "sym": "AAPL", "t": 1710163801000000000, "bp": 100.01, "ap": 100.02, "bs": 400, "as": 50},
@@ -704,7 +704,7 @@ def test_source_backed_runner_run_historical_with_bundle_selector(tmp_path) -> N
     from l1_microstructure.ingest import HistoricalBatchRequest
     from l1_microstructure.live.source import SourceBackedPaperRunner
 
-    source = InMemoryPolygonDataSource(
+    source = InMemoryMassiveDataSource(
         [
             {"ev": "Q", "sym": "AAPL", "t": 1710163800000000000, "bp": 100.0, "ap": 100.02, "bs": 100, "as": 100},
         ]
@@ -721,7 +721,7 @@ def test_source_backed_runner_run_live_with_bundle_selector() -> None:
     """Covers source.py: run_live with bundle_selector"""
     from l1_microstructure.live.source import SourceBackedPaperRunner
 
-    source = InMemoryPolygonDataSource(
+    source = InMemoryMassiveDataSource(
         [
             {"ev": "Q", "sym": "AAPL", "t": 1710163800000000000, "bp": 100.0, "ap": 100.02, "bs": 100, "as": 100},
         ]
@@ -739,7 +739,7 @@ def test_source_backed_runner_requires_single_symbol_with_bundle() -> None:
     from l1_microstructure.live.source import SourceBackedPaperRunner
     from l1_microstructure.artifacts import LocalArtifactStore
 
-    source = InMemoryPolygonDataSource(
+    source = InMemoryMassiveDataSource(
         [
             {"ev": "Q", "sym": "AAPL", "t": 1710163800000000000, "bp": 100.0, "ap": 100.02, "bs": 100, "as": 100},
         ]
@@ -761,7 +761,7 @@ def test_source_backed_runner_requires_single_symbol_with_bundle() -> None:
 
 def test_routed_live_runner_with_run_id() -> None:
     """Covers routed.py: run_live with run_id parameter"""
-    source = InMemoryPolygonDataSource(
+    source = InMemoryMassiveDataSource(
         [
             {"ev": "Q", "sym": "AAPL", "t": 1710163800000000000, "bp": 100.0, "ap": 100.02, "bs": 100, "as": 100},
         ]
@@ -783,7 +783,7 @@ def test_routed_live_runner_with_run_id() -> None:
 
 def test_routed_live_runner_with_runtime_artifacts() -> None:
     """Covers routed.py: run_live with runtime_artifacts"""
-    source = InMemoryPolygonDataSource(
+    source = InMemoryMassiveDataSource(
         [
             {"ev": "Q", "sym": "AAPL", "t": 1710163800000000000, "bp": 100.0, "ap": 100.02, "bs": 100, "as": 100},
         ]
@@ -809,7 +809,7 @@ def test_routed_live_runner_health_check() -> None:
     """Covers routed.py: router_health method"""
     router = AcceptedFillRouter()
     runner = RoutedLiveTradingRunner(
-        source=InMemoryPolygonDataSource([]),
+        source=InMemoryMassiveDataSource([]),
         router=router,
     )
     health = runner.router_health()
@@ -821,7 +821,7 @@ def test_routed_live_runner_execution_reports_property() -> None:
     """Covers routed.py: execution_reports property"""
     router = AcceptedFillRouter()
     runner = RoutedLiveTradingRunner(
-        source=InMemoryPolygonDataSource([]),
+        source=InMemoryMassiveDataSource([]),
         router=router,
     )
     # Empty runner should have empty reports

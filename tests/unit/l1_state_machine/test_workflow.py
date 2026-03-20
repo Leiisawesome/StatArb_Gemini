@@ -7,7 +7,7 @@ from l1_microstructure.config import FrameworkConfig
 from l1_microstructure.ingest import LiveSubscriptionRequest
 from l1_microstructure.validation import RegimeSplitSpec
 from l1_microstructure.workflow import ArtifactDrivenResearchWorkflow
-from tests.unit.l1_state_machine.support import FixtureMarketDataSource as InMemoryPolygonDataSource
+from tests.unit.l1_state_machine.support import FixtureMarketDataSource as InMemoryMassiveDataSource
 
 
 def _et_ns(year: int, month: int, day: int, hour: int, minute: int, second: int = 0) -> int:
@@ -16,7 +16,7 @@ def _et_ns(year: int, month: int, day: int, hour: int, minute: int, second: int 
 
 
 def test_artifact_driven_research_workflow_runs_end_to_end(tmp_path) -> None:
-    source = InMemoryPolygonDataSource(
+    source = InMemoryMassiveDataSource(
         [
             {"ev": "Q", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 0), "bp": 100.0, "ap": 100.02, "bs": 100, "as": 100},
             {"ev": "Q", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 1), "bp": 100.01, "ap": 100.02, "bs": 450, "as": 40},
@@ -55,7 +55,7 @@ def test_artifact_driven_research_workflow_runs_end_to_end(tmp_path) -> None:
 
 
 def test_artifact_driven_research_workflow_supports_multi_split_oos_validation(tmp_path) -> None:
-    source = InMemoryPolygonDataSource(
+    source = InMemoryMassiveDataSource(
         [
             {"ev": "Q", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 0), "bp": 100.0, "ap": 100.02, "bs": 100, "as": 100},
             {"ev": "Q", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 1), "bp": 100.01, "ap": 100.02, "bs": 450, "as": 40},

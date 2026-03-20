@@ -1,4 +1,4 @@
-"""Ingestion components for Polygon L1 quote and trade sources."""
+"""Ingestion components for Massive L1 quote and trade sources."""
 
 from .interfaces import (
     EventNormalizer,
@@ -7,18 +7,18 @@ from .interfaces import (
     MarketDataSource,
     SessionFilter,
 )
-from ._polygon_support import (
+from ._massive_support import (
     ExtendedHoursSessionFilter,
     ExclusionWindow,
-    PolygonFilterConfig,
-    PolygonPayloadNormalizer,
+    MassiveFilterConfig,
+    MassivePayloadNormalizer,
     RTHSessionFilter,
 )
-from .polygon import (
-    PolygonRESTConfig,
-    PolygonRESTDataSource,
-    PolygonWebSocketConfig,
-    PolygonWebSocketDataSource,
+from .massive import (
+    MassiveRESTConfig,
+    MassiveRESTDataSource,
+    MassiveWebSocketConfig,
+    MassiveWebSocketDataSource,
 )
 
 __all__ = [
@@ -28,12 +28,12 @@ __all__ = [
     "HistoricalBatchRequest",
     "LiveSubscriptionRequest",
     "MarketDataSource",
-    "PolygonFilterConfig",
-    "PolygonPayloadNormalizer",
-    "PolygonRESTConfig",
-    "PolygonRESTDataSource",
-    "PolygonWebSocketConfig",
-    "PolygonWebSocketDataSource",
+    "MassiveFilterConfig",
+    "MassivePayloadNormalizer",
+    "MassiveRESTConfig",
+    "MassiveRESTDataSource",
+    "MassiveWebSocketConfig",
+    "MassiveWebSocketDataSource",
     "RTHSessionFilter",
     "SessionFilter",
 ]

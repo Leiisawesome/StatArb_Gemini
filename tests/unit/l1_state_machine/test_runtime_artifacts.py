@@ -172,8 +172,8 @@ def test_simulator_runner_consumes_runtime_artifacts(tmp_path) -> None:
         {"ev": "Q", "sym": "AAPL", "t": 1710163804000000000, "bp": 100.04, "ap": 100.08, "bs": 40, "as": 300},
     ]
     from l1_microstructure.ingest import LiveSubscriptionRequest
-    from tests.unit.l1_state_machine.support import FixtureMarketDataSource as InMemoryPolygonDataSource
-    source = InMemoryPolygonDataSource(source_events)
+    from tests.unit.l1_state_machine.support import FixtureMarketDataSource as InMemoryMassiveDataSource
+    source = InMemoryMassiveDataSource(source_events)
     normalized_events = list(source.subscribe_live(LiveSubscriptionRequest(symbols=("AAPL",))))
 
     runner = SimulatorPaperTradingRunner(events=normalized_events, runtime_artifacts=bundle)

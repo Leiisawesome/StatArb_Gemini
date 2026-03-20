@@ -1,4 +1,4 @@
-"""Official Massive-backed Polygon ingest sources."""
+"""Official Massive ingest sources."""
 
 from __future__ import annotations
 
@@ -17,11 +17,11 @@ from dotenv import dotenv_values
 
 from l1_microstructure.events import MarketEvent, QuoteEvent, TradeEvent
 
-from ._polygon_support import _EASTERN, PolygonEventFilterMixin, PolygonFilterConfig, event_sort_key
+from ._massive_support import _EASTERN, MassiveEventFilterMixin, MassiveFilterConfig, event_sort_key
 from .interfaces import EventNormalizer, HistoricalBatchRequest, LiveSubscriptionRequest, MarketDataSource, SessionFilter
 
-RestClientFactory = Callable[["PolygonRESTConfig"], Any]
-WebSocketClientFactory = Callable[["PolygonWebSocketConfig", LiveSubscriptionRequest], Any]
+RestClientFactory = Callable[["MassiveRESTConfig"], Any]
+WebSocketClientFactory = Callable[["MassiveWebSocketConfig", LiveSubscriptionRequest], Any]
 
 
 def _normalize_api_key_candidate(candidate: object | None) -> str | None:
@@ -32,19 +32,15 @@ def _normalize_api_key_candidate(candidate: object | None) -> str | None:
         return None
     if any(character.isspace() for character in value):
         return None
-    if "POLYGON_API_KEY=" in value or "MASSIVE_API_KEY=" in value:
+    if "MASSIVE_API_KEY=" in value:
         return None
     return value
 
 
-def _resolve_polygon_api_key(explicit_api_key: str | None) -> str | None:
+def _resolve_massive_api_key(explicit_api_key: str | None) -> str | None:
     explicit_key = _normalize_api_key_candidate(explicit_api_key)
     if explicit_key:
         return explicit_key
-
-    polygon_env_key = _normalize_api_key_candidate(os.environ.get("POLYGON_API_KEY"))
-    if polygon_env_key:
-        return polygon_env_key
 
     massive_env_key = _normalize_api_key_candidate(os.environ.get("MASSIVE_API_KEY"))
     if massive_env_key:
@@ -53,10 +49,6 @@ def _resolve_polygon_api_key(explicit_api_key: str | None) -> str | None:
     repo_env = Path(__file__).resolve().parents[2] / ".env"
     if repo_env.exists():
         values = dotenv_values(repo_env)
-        polygon_repo_key = _normalize_api_key_candidate(values.get("POLYGON_API_KEY"))
-        if polygon_repo_key:
-            return polygon_repo_key
-
         massive_repo_key = _normalize_api_key_candidate(values.get("MASSIVE_API_KEY"))
         if massive_repo_key:
             return massive_repo_key
@@ -64,7 +56,7 @@ def _resolve_polygon_api_key(explicit_api_key: str | None) -> str | None:
 
 
 @dataclass(frozen=True, slots=True)
-class PolygonRESTConfig:
+class MassiveRESTConfig:
     api_key: str | None = None
     base_url: str = "https://api.massive.com"
     connect_timeout: float = 10.0
@@ -77,7 +69,7 @@ class PolygonRESTConfig:
 
 
 @dataclass(frozen=True, slots=True)
-class PolygonWebSocketConfig:
+class MassiveWebSocketConfig:
     endpoint: str = "wss://socket.massive.com/stocks"
     api_key: str | None = None
     raw_subscriptions: tuple[str, ...] = ()
@@ -86,18 +78,18 @@ class PolygonWebSocketConfig:
     connect_kwargs: dict[str, object] = field(default_factory=dict)
 
 
-class PolygonRESTDataSource(PolygonEventFilterMixin, MarketDataSource):
+class MassiveRESTDataSource(MassiveEventFilterMixin, MarketDataSource):
     def __init__(
         self,
-        rest_config: PolygonRESTConfig | None = None,
+        rest_config: MassiveRESTConfig | None = None,
         normalizer: EventNormalizer | None = None,
         session_filter: SessionFilter | None = None,
-        filter_config: PolygonFilterConfig | None = None,
+        filter_config: MassiveFilterConfig | None = None,
         client_factory: RestClientFactory | None = None,
     ):
-        self.rest_config = rest_config or PolygonRESTConfig()
+        self.rest_config = rest_config or MassiveRESTConfig()
         self.client_factory = client_factory or self._default_rest_client_factory
-        self._initialize_polygon_event_filters(normalizer, session_filter, filter_config)
+        self._initialize_massive_event_filters(normalizer, session_filter, filter_config)
 
     def load_historical(self, request: HistoricalBatchRequest) -> Iterable[MarketEvent]:
         self._reset_halt_state()
@@ -148,7 +140,7 @@ class PolygonRESTDataSource(PolygonEventFilterMixin, MarketDataSource):
             yield event
 
     def subscribe_live(self, request: LiveSubscriptionRequest) -> Iterable[MarketEvent]:
-        raise NotImplementedError("PolygonRESTDataSource does not support live subscriptions")
+        raise NotImplementedError("MassiveRESTDataSource does not support live subscriptions")
 
     def _normalize_vendor_payload(self, payload: dict[str, Any]) -> MarketEvent | None:
         if not self._payload_is_eligible(payload):
@@ -205,15 +197,15 @@ class PolygonRESTDataSource(PolygonEventFilterMixin, MarketDataSource):
         return start_ns, end_ns
 
     @staticmethod
-    def _default_rest_client_factory(config: PolygonRESTConfig) -> Any:
+    def _default_rest_client_factory(config: MassiveRESTConfig) -> Any:
         try:
             from massive import RESTClient
         except ImportError as exc:
-            raise RuntimeError("massive client is required for PolygonRESTDataSource") from exc
+            raise RuntimeError("massive client is required for MassiveRESTDataSource") from exc
 
-        api_key = _resolve_polygon_api_key(config.api_key)
+        api_key = _resolve_massive_api_key(config.api_key)
         if api_key is None:
-            raise RuntimeError("POLYGON_API_KEY or MASSIVE_API_KEY is required for PolygonRESTDataSource")
+            raise RuntimeError("MASSIVE_API_KEY is required for MassiveRESTDataSource")
 
         return RESTClient(
             api_key=api_key,
@@ -228,21 +220,21 @@ class PolygonRESTDataSource(PolygonEventFilterMixin, MarketDataSource):
         )
 
 
-class PolygonWebSocketDataSource(PolygonEventFilterMixin, MarketDataSource):
+class MassiveWebSocketDataSource(MassiveEventFilterMixin, MarketDataSource):
     def __init__(
         self,
-        websocket_config: PolygonWebSocketConfig,
+        websocket_config: MassiveWebSocketConfig,
         normalizer: EventNormalizer | None = None,
         session_filter: SessionFilter | None = None,
-        filter_config: PolygonFilterConfig | None = None,
+        filter_config: MassiveFilterConfig | None = None,
         client_factory: WebSocketClientFactory | None = None,
     ):
         self.websocket_config = websocket_config
         self.client_factory = client_factory or self._default_websocket_client_factory
-        self._initialize_polygon_event_filters(normalizer, session_filter, filter_config)
+        self._initialize_massive_event_filters(normalizer, session_filter, filter_config)
 
     def load_historical(self, request: HistoricalBatchRequest) -> Iterable[MarketEvent]:
-        raise NotImplementedError("PolygonWebSocketDataSource does not support historical loading")
+        raise NotImplementedError("MassiveWebSocketDataSource does not support historical loading")
 
     def subscribe_live(self, request: LiveSubscriptionRequest) -> Iterable[MarketEvent]:
         self._reset_halt_state()
@@ -323,18 +315,18 @@ class PolygonWebSocketDataSource(PolygonEventFilterMixin, MarketDataSource):
         return []
 
     @staticmethod
-    def _default_websocket_client_factory(config: PolygonWebSocketConfig, request: LiveSubscriptionRequest) -> Any:
+    def _default_websocket_client_factory(config: MassiveWebSocketConfig, request: LiveSubscriptionRequest) -> Any:
         try:
             from massive import WebSocketClient
         except ImportError as exc:
-            raise RuntimeError("massive client is required for PolygonWebSocketDataSource") from exc
+            raise RuntimeError("massive client is required for MassiveWebSocketDataSource") from exc
 
-        api_key = _resolve_polygon_api_key(config.api_key)
+        api_key = _resolve_massive_api_key(config.api_key)
         if api_key is None:
-            raise RuntimeError("POLYGON_API_KEY or MASSIVE_API_KEY is required for PolygonWebSocketDataSource")
+            raise RuntimeError("MASSIVE_API_KEY is required for MassiveWebSocketDataSource")
 
-        secure, feed, market = PolygonWebSocketDataSource._parse_endpoint(config.endpoint)
-        subscriptions = list(config.raw_subscriptions) or PolygonWebSocketDataSource._subscriptions_for_request(request)
+        secure, feed, market = MassiveWebSocketDataSource._parse_endpoint(config.endpoint)
+        subscriptions = list(config.raw_subscriptions) or MassiveWebSocketDataSource._subscriptions_for_request(request)
         return WebSocketClient(
             api_key=api_key,
             feed=feed,

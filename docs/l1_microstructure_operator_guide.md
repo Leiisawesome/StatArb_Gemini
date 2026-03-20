@@ -53,30 +53,29 @@ For broker routing, this repository includes `broker.env` as the expected enviro
 
 ### Polygon or Massive API key
 
-The historical and live source-backed commands require a Polygon or Massive API key.
+The historical and live source-backed commands require a Massive API key.
 
 The runtime resolves the key in this order:
 
-1. an explicit API key passed into the Polygon config object
-2. `POLYGON_API_KEY` from the process environment
-3. `MASSIVE_API_KEY` from the process environment
-4. `POLYGON_API_KEY` or `MASSIVE_API_KEY` from a repository-root `.env` file
+1. an explicit API key passed into the Massive config object
+2. `MASSIVE_API_KEY` from the process environment
+3. `MASSIVE_API_KEY` from a repository-root `.env` file
 
 Practical recommendation:
 
-1. set `POLYGON_API_KEY` in the active shell for manual operation, or
+1. set `MASSIVE_API_KEY` in the active shell for manual operation, or
 2. place the key in a repository `.env` file for local development
 
 Example PowerShell setup:
 
 ```powershell
-$env:POLYGON_API_KEY = "your_api_key"
+$env:MASSIVE_API_KEY = "your_api_key"
 ```
 
 Minimal repository `.env` example:
 
 ```text
-POLYGON_API_KEY=your_api_key
+MASSIVE_API_KEY=your_api_key
 ```
 
 ### IBKR environment file
@@ -542,7 +541,7 @@ Action:
 1. install dependencies from `requirements.txt`
 2. confirm the active environment is the repository `.venv`
 
-### Error: `POLYGON_API_KEY` or `MASSIVE_API_KEY` is required for IBKR smoke request construction
+### Error: `MASSIVE_API_KEY` is required for IBKR smoke request construction
 
 Cause:
 
@@ -550,7 +549,7 @@ Cause:
 
 Action:
 
-1. export `POLYGON_API_KEY` or `MASSIVE_API_KEY`
+1. export `MASSIVE_API_KEY`
 2. retry the smoke command after verifying the environment is active
 
 ### Error: `IBKR error 502: Couldn't connect to TWS`
@@ -638,13 +637,13 @@ pytest tests/unit/l1_state_machine/test_workflow_preflight.py -q
 When you need a real source-backed Polygon connectivity pre-flight check before a full historical workflow run, run:
 
 ```powershell
-pytest tests/integration/l1_state_machine/test_polygon_source_smoke.py -q
+pytest tests/integration/l1_state_machine/test_massive_source_smoke.py -q
 ```
 
 When you need a bounded real source-backed workflow pre-flight check before the full-day `workflow` command, run:
 
 ```powershell
-pytest tests/integration/l1_state_machine/test_polygon_workflow_smoke.py -q
+pytest tests/integration/l1_state_machine/test_massive_workflow_smoke.py -q
 ```
 
 When you need a bounded broker-backed routed-live pre-flight check after `ibkr-live-order-smoke` is already healthy, run:

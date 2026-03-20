@@ -8,10 +8,10 @@ from zoneinfo import ZoneInfo
 
 from l1_microstructure.config import FrameworkConfig
 from l1_microstructure.datasets import PipelineTransitionDatasetBuilder
-from l1_microstructure.ingest import ExtendedHoursSessionFilter, ExclusionWindow, HistoricalBatchRequest, LiveSubscriptionRequest, PolygonFilterConfig, PolygonPayloadNormalizer, PolygonRESTConfig, PolygonRESTDataSource, PolygonWebSocketConfig, PolygonWebSocketDataSource
+from l1_microstructure.ingest import ExtendedHoursSessionFilter, ExclusionWindow, HistoricalBatchRequest, LiveSubscriptionRequest, MassiveFilterConfig, MassivePayloadNormalizer, MassiveRESTConfig, MassiveRESTDataSource, MassiveWebSocketConfig, MassiveWebSocketDataSource
 from l1_microstructure.labeling import ForwardDriftLabeler, HorizonLabelRequest
 from l1_microstructure.replay import DeterministicReplayEngine
-from tests.unit.l1_state_machine.support import FixtureMarketDataSource as InMemoryPolygonDataSource
+from tests.unit.l1_state_machine.support import FixtureMarketDataSource as InMemoryMassiveDataSource
 
 
 def _et_ns(year: int, month: int, day: int, hour: int, minute: int, second: int = 0) -> int:
@@ -19,8 +19,8 @@ def _et_ns(year: int, month: int, day: int, hour: int, minute: int, second: int 
     return int(timestamp.timestamp() * 1_000_000_000)
 
 
-def test_polygon_payload_normalizer_handles_quote_and_trade_payloads() -> None:
-    normalizer = PolygonPayloadNormalizer()
+def test_massive_payload_normalizer_handles_quote_and_trade_payloads() -> None:
+    normalizer = MassivePayloadNormalizer()
 
     quote = normalizer.normalize(
         {"ev": "Q", "sym": "AAPL", "t": _et_ns(2024, 1, 22, 9, 30, 0), "bp": 100.0, "ap": 100.02, "bs": 200, "as": 100, "q": 7}
@@ -34,8 +34,8 @@ def test_polygon_payload_normalizer_handles_quote_and_trade_payloads() -> None:
     assert quote.timestamp_ns < trade.timestamp_ns
 
 
-def test_polygon_payload_normalizer_converts_websocket_millisecond_timestamps_to_nanoseconds() -> None:
-    normalizer = PolygonPayloadNormalizer()
+def test_massive_payload_normalizer_converts_websocket_millisecond_timestamps_to_nanoseconds() -> None:
+    normalizer = MassivePayloadNormalizer()
 
     quote = normalizer.normalize(
         {"ev": "Q", "sym": "AAPL", "t": 1710163800000, "bp": 100.0, "ap": 100.02, "bs": 200, "as": 100, "q": 7}
@@ -50,8 +50,8 @@ def test_polygon_payload_normalizer_converts_websocket_millisecond_timestamps_to
     assert trade.timestamp_ns == 1710163801000 * 1_000_000
 
 
-def test_polygon_payload_normalizer_preserves_rest_nanosecond_timestamps_on_generic_fields() -> None:
-    normalizer = PolygonPayloadNormalizer()
+def test_massive_payload_normalizer_preserves_rest_nanosecond_timestamps_on_generic_fields() -> None:
+    normalizer = MassivePayloadNormalizer()
 
     quote = normalizer.normalize(
         {
@@ -70,13 +70,13 @@ def test_polygon_payload_normalizer_preserves_rest_nanosecond_timestamps_on_gene
     assert quote.timestamp_ns == _et_ns(2024, 3, 11, 9, 30, 0)
 
 
-def test_in_memory_polygon_source_filters_and_orders_rth_events() -> None:
+def test_in_memory_massive_source_filters_and_orders_rth_events() -> None:
     payloads = [
         {"ev": "T", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 29, 59), "p": 99.9, "s": 100},
         {"ev": "Q", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 0), "bp": 100.0, "ap": 100.01, "bs": 100, "as": 100, "q": 4},
         {"ev": "T", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 0), "p": 100.01, "s": 200, "q": 9},
     ]
-    source = InMemoryPolygonDataSource(payloads)
+    source = InMemoryMassiveDataSource(payloads)
     request = HistoricalBatchRequest(symbols=("AAPL",), trade_date=date(2024, 3, 11))
 
     events = list(source.load_historical(request))
@@ -91,7 +91,7 @@ def test_extended_hours_session_filter_can_include_premarket_and_after_hours() -
         {"ev": "Q", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 0), "bp": 100.0, "ap": 100.02, "bs": 100, "as": 100},
         {"ev": "Q", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 16, 30, 0), "bp": 100.5, "ap": 100.55, "bs": 100, "as": 100},
     ]
-    source = InMemoryPolygonDataSource(
+    source = InMemoryMassiveDataSource(
         payloads,
         session_filter=ExtendedHoursSessionFilter(include_premarket=True, include_after_hours=True),
     )
@@ -111,7 +111,7 @@ def test_extended_hours_session_filter_can_exclude_rth() -> None:
         {"ev": "Q", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 0), "bp": 100.0, "ap": 100.02, "bs": 100, "as": 100},
         {"ev": "Q", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 16, 30, 0), "bp": 100.5, "ap": 100.55, "bs": 100, "as": 100},
     ]
-    source = InMemoryPolygonDataSource(
+    source = InMemoryMassiveDataSource(
         payloads,
         session_filter=ExtendedHoursSessionFilter(include_rth=False, include_premarket=True, include_after_hours=True),
     )
@@ -125,7 +125,7 @@ def test_extended_hours_session_filter_can_exclude_rth() -> None:
 
 
 def test_replay_engine_can_checkpoint_and_resume() -> None:
-    source = InMemoryPolygonDataSource(
+    source = InMemoryMassiveDataSource(
         [
             {"ev": "Q", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 0), "bp": 100.0, "ap": 100.01, "bs": 100, "as": 100, "q": 1},
             {"ev": "Q", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 1), "bp": 100.01, "ap": 100.02, "bs": 100, "as": 100, "q": 2},
@@ -146,7 +146,7 @@ def test_replay_engine_can_checkpoint_and_resume() -> None:
 
 
 def test_forward_drift_labeler_marks_horizon_and_censoring() -> None:
-    source = InMemoryPolygonDataSource(
+    source = InMemoryMassiveDataSource(
         [
             {"ev": "Q", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 0), "bp": 100.0, "ap": 100.02, "bs": 200, "as": 100},
             {"ev": "Q", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 3), "bp": 100.03, "ap": 100.05, "bs": 180, "as": 90},
@@ -165,7 +165,7 @@ def test_forward_drift_labeler_marks_horizon_and_censoring() -> None:
 
 
 def test_dataset_builder_creates_state_and_transition_panels() -> None:
-    source = InMemoryPolygonDataSource(
+    source = InMemoryMassiveDataSource(
         [
             {"ev": "Q", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 0), "bp": 100.0, "ap": 100.02, "bs": 100, "as": 100},
             {"ev": "Q", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 1), "bp": 100.01, "ap": 100.02, "bs": 400, "as": 50},
@@ -190,13 +190,13 @@ def test_dataset_builder_creates_state_and_transition_panels() -> None:
     assert "realized_drift_bps" in transition_panel.frame.columns
 
 
-def test_in_memory_polygon_source_filters_trade_conditions_and_corrections() -> None:
+def test_in_memory_massive_source_filters_trade_conditions_and_corrections() -> None:
     payloads = [
         {"ev": "T", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 0), "p": 100.0, "s": 100, "conditions": ["late"]},
         {"ev": "T", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 1), "p": 100.01, "s": 100, "is_correction": True},
         {"ev": "T", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 2), "p": 100.02, "s": 100},
     ]
-    source = InMemoryPolygonDataSource(payloads)
+    source = InMemoryMassiveDataSource(payloads)
 
     events = list(source.subscribe_live(LiveSubscriptionRequest(symbols=("AAPL",))))
 
@@ -204,7 +204,7 @@ def test_in_memory_polygon_source_filters_trade_conditions_and_corrections() -> 
     assert events[0].timestamp_ns == _et_ns(2024, 3, 11, 9, 30, 2)
 
 
-def test_in_memory_polygon_source_applies_trade_correction_replacement_lifecycle() -> None:
+def test_in_memory_massive_source_applies_trade_correction_replacement_lifecycle() -> None:
     payloads = [
         {"ev": "T", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 0), "p": 100.00, "s": 100, "q": 10},
         {
@@ -219,9 +219,9 @@ def test_in_memory_polygon_source_applies_trade_correction_replacement_lifecycle
             "original_sequence_number": 10,
         },
     ]
-    source = InMemoryPolygonDataSource(
+    source = InMemoryMassiveDataSource(
         payloads,
-        filter_config=PolygonFilterConfig(exclude_corrections=False, apply_trade_correction_lifecycle=True),
+        filter_config=MassiveFilterConfig(exclude_corrections=False, apply_trade_correction_lifecycle=True),
     )
 
     events = list(source.subscribe_live(LiveSubscriptionRequest(symbols=("AAPL",))))
@@ -232,7 +232,7 @@ def test_in_memory_polygon_source_applies_trade_correction_replacement_lifecycle
     assert events[0].size == 150
 
 
-def test_in_memory_polygon_source_applies_trade_correction_cancel_lifecycle() -> None:
+def test_in_memory_massive_source_applies_trade_correction_cancel_lifecycle() -> None:
     payloads = [
         {"ev": "T", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 0), "p": 100.00, "s": 100, "q": 10},
         {
@@ -247,9 +247,9 @@ def test_in_memory_polygon_source_applies_trade_correction_cancel_lifecycle() ->
             "original_sequence_number": 10,
         },
     ]
-    source = InMemoryPolygonDataSource(
+    source = InMemoryMassiveDataSource(
         payloads,
-        filter_config=PolygonFilterConfig(exclude_corrections=False, apply_trade_correction_lifecycle=True),
+        filter_config=MassiveFilterConfig(exclude_corrections=False, apply_trade_correction_lifecycle=True),
     )
 
     events = list(source.subscribe_live(LiveSubscriptionRequest(symbols=("AAPL",))))
@@ -257,20 +257,20 @@ def test_in_memory_polygon_source_applies_trade_correction_cancel_lifecycle() ->
     assert events == []
 
 
-def test_in_memory_polygon_source_applies_macro_and_auction_exclusions() -> None:
+def test_in_memory_massive_source_applies_macro_and_auction_exclusions() -> None:
     exclusion_window = ExclusionWindow(
         start_ns=_et_ns(2024, 3, 11, 10, 0, 0),
         end_ns=_et_ns(2024, 3, 11, 10, 0, 5),
         label="macro-window",
     )
-    source = InMemoryPolygonDataSource(
+    source = InMemoryMassiveDataSource(
         [
             {"ev": "Q", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 0), "bp": 100.0, "ap": 100.02, "bs": 100, "as": 100},
             {"ev": "Q", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 7), "bp": 100.01, "ap": 100.03, "bs": 100, "as": 100},
             {"ev": "Q", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 10, 0, 2), "bp": 100.04, "ap": 100.06, "bs": 100, "as": 100},
             {"ev": "Q", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 10, 1, 0), "bp": 100.05, "ap": 100.07, "bs": 100, "as": 100},
         ],
-        filter_config=PolygonFilterConfig(
+        filter_config=MassiveFilterConfig(
             opening_auction_exclusion_seconds=5,
             macro_exclusion_windows=(exclusion_window,),
         ),
@@ -283,21 +283,21 @@ def test_in_memory_polygon_source_applies_macro_and_auction_exclusions() -> None
     assert events[1].timestamp_ns == _et_ns(2024, 3, 11, 10, 1, 0)
 
 
-def test_in_memory_polygon_source_applies_symbol_specific_earnings_exclusions() -> None:
+def test_in_memory_massive_source_applies_symbol_specific_earnings_exclusions() -> None:
     earnings_window = ExclusionWindow(
         start_ns=_et_ns(2024, 3, 11, 11, 0, 0),
         end_ns=_et_ns(2024, 3, 11, 11, 5, 0),
         label="earnings-window",
         symbols=("AAPL",),
     )
-    source = InMemoryPolygonDataSource(
+    source = InMemoryMassiveDataSource(
         [
             {"ev": "Q", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 10, 59, 59), "bp": 100.0, "ap": 100.02, "bs": 100, "as": 100},
             {"ev": "Q", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 11, 0, 30), "bp": 100.01, "ap": 100.03, "bs": 100, "as": 100},
             {"ev": "Q", "sym": "MSFT", "t": _et_ns(2024, 3, 11, 11, 1, 0), "bp": 200.0, "ap": 200.02, "bs": 100, "as": 100},
             {"ev": "Q", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 11, 6, 0), "bp": 100.02, "ap": 100.04, "bs": 100, "as": 100},
         ],
-        filter_config=PolygonFilterConfig(earnings_exclusion_windows=(earnings_window,)),
+        filter_config=MassiveFilterConfig(earnings_exclusion_windows=(earnings_window,)),
     )
 
     aapl_events = list(source.subscribe_live(LiveSubscriptionRequest(symbols=("AAPL",))))
@@ -307,8 +307,8 @@ def test_in_memory_polygon_source_applies_symbol_specific_earnings_exclusions() 
     assert [event.timestamp_ns for event in msft_events] == [_et_ns(2024, 3, 11, 11, 1, 0)]
 
 
-def test_in_memory_polygon_source_filters_halts_and_post_resume_buffer() -> None:
-    source = InMemoryPolygonDataSource(
+def test_in_memory_massive_source_filters_halts_and_post_resume_buffer() -> None:
+    source = InMemoryMassiveDataSource(
         [
             {"ev": "Q", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 0), "bp": 100.0, "ap": 100.02, "bs": 100, "as": 100},
             {"ev": "status", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 1), "status": "trading halted"},
@@ -317,7 +317,7 @@ def test_in_memory_polygon_source_filters_halts_and_post_resume_buffer() -> None
             {"ev": "Q", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 5), "bp": 100.02, "ap": 100.04, "bs": 100, "as": 100},
             {"ev": "Q", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 7), "bp": 100.03, "ap": 100.05, "bs": 100, "as": 100},
         ],
-        filter_config=PolygonFilterConfig(post_halt_resume_exclusion_seconds=2),
+        filter_config=MassiveFilterConfig(post_halt_resume_exclusion_seconds=2),
     )
 
     events = list(source.subscribe_live(LiveSubscriptionRequest(symbols=("AAPL",))))
@@ -325,8 +325,8 @@ def test_in_memory_polygon_source_filters_halts_and_post_resume_buffer() -> None
     assert [event.timestamp_ns for event in events] == [_et_ns(2024, 3, 11, 9, 30, 0), _et_ns(2024, 3, 11, 9, 30, 7)]
 
 
-def test_in_memory_polygon_source_filters_active_auction_periods_and_post_auction_buffer() -> None:
-    source = InMemoryPolygonDataSource(
+def test_in_memory_massive_source_filters_active_auction_periods_and_post_auction_buffer() -> None:
+    source = InMemoryMassiveDataSource(
         [
             {"ev": "Q", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 0), "bp": 99.98, "ap": 100.00, "bs": 100, "as": 100},
             {"ev": "status", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 0), "status": "opening auction imbalance"},
@@ -335,7 +335,7 @@ def test_in_memory_polygon_source_filters_active_auction_periods_and_post_auctio
             {"ev": "Q", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 4), "bp": 100.01, "ap": 100.03, "bs": 100, "as": 100},
             {"ev": "Q", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 5), "bp": 100.02, "ap": 100.04, "bs": 100, "as": 100},
         ],
-        filter_config=PolygonFilterConfig(post_auction_resume_exclusion_seconds=1),
+        filter_config=MassiveFilterConfig(post_auction_resume_exclusion_seconds=1),
     )
 
     events = list(source.subscribe_live(LiveSubscriptionRequest(symbols=("AAPL",))))
@@ -343,7 +343,7 @@ def test_in_memory_polygon_source_filters_active_auction_periods_and_post_auctio
     assert [event.timestamp_ns for event in events] == [_et_ns(2024, 3, 11, 9, 30, 0), _et_ns(2024, 3, 11, 9, 30, 5)]
 
 
-def test_polygon_websocket_data_source_streams_and_filters_messages() -> None:
+def test_massive_websocket_data_source_streams_and_filters_messages() -> None:
     class FakeWebSocketClient:
         def __init__(self) -> None:
             self.connect_kwargs: dict[str, object] | None = None
@@ -371,9 +371,9 @@ def test_polygon_websocket_data_source_streams_and_filters_messages() -> None:
             self.closed = True
 
     fake_client = FakeWebSocketClient()
-    source = PolygonWebSocketDataSource(
-        PolygonWebSocketConfig(endpoint="wss://example.invalid", api_key="secret"),
-        filter_config=PolygonFilterConfig(post_halt_resume_exclusion_seconds=2),
+    source = MassiveWebSocketDataSource(
+        MassiveWebSocketConfig(endpoint="wss://example.invalid", api_key="secret"),
+        filter_config=MassiveFilterConfig(post_halt_resume_exclusion_seconds=2),
         client_factory=lambda config, request: fake_client,
     )
 
@@ -385,7 +385,7 @@ def test_polygon_websocket_data_source_streams_and_filters_messages() -> None:
     assert fake_client.closed is True
 
 
-def test_polygon_websocket_data_source_filters_active_auction_status_messages() -> None:
+def test_massive_websocket_data_source_filters_active_auction_status_messages() -> None:
     class FakeWebSocketClient:
         def __init__(self) -> None:
             self.closed = False
@@ -406,9 +406,9 @@ def test_polygon_websocket_data_source_filters_active_auction_status_messages() 
         async def close(self) -> None:
             self.closed = True
 
-    source = PolygonWebSocketDataSource(
-        PolygonWebSocketConfig(endpoint="wss://example.invalid", api_key="secret"),
-        filter_config=PolygonFilterConfig(post_auction_resume_exclusion_seconds=1),
+    source = MassiveWebSocketDataSource(
+        MassiveWebSocketConfig(endpoint="wss://example.invalid", api_key="secret"),
+        filter_config=MassiveFilterConfig(post_auction_resume_exclusion_seconds=1),
         client_factory=lambda config, request: FakeWebSocketClient(),
     )
 
@@ -417,7 +417,7 @@ def test_polygon_websocket_data_source_filters_active_auction_status_messages() 
     assert [event.timestamp_ns for event in events] == [_et_ns(2024, 3, 11, 9, 30, 0), _et_ns(2024, 3, 11, 9, 30, 5)]
 
 
-def test_polygon_rest_data_source_merges_quotes_and_trades() -> None:
+def test_massive_rest_data_source_merges_quotes_and_trades() -> None:
     class FakeRestClient:
         def list_quotes(self, symbol: str, **kwargs):
             assert symbol == "AAPL"
@@ -470,8 +470,8 @@ def test_polygon_rest_data_source_merges_quotes_and_trades() -> None:
                 )
             ]
 
-    source = PolygonRESTDataSource(
-        PolygonRESTConfig(api_key="secret"),
+    source = MassiveRESTDataSource(
+        MassiveRESTConfig(api_key="secret"),
         client_factory=lambda config: FakeRestClient(),
     )
 

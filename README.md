@@ -1,6 +1,6 @@
 # StatArb_Gemini
 
-StatArb_Gemini is now centered on `l1_microstructure`, a standalone L1 market microstructure research and execution framework for Polygon equity quote and trade data.
+StatArb_Gemini is now centered on `l1_microstructure`, a standalone L1 market microstructure research and execution framework for Massive equity quote and trade data.
 
 The package replaces an older, more tightly coupled design with a successor architecture built around a finite partially observed state machine. It is intentionally isolated from legacy trading infrastructure so the microstructure model can be calibrated, validated, replayed, and operated on its own terms.
 
@@ -74,7 +74,7 @@ The package is organized as a set of narrow modules with explicit boundaries.
 | `l1_microstructure/artifacts/` | Persistent artifact storage, bundle loading, run selection |
 | `l1_microstructure/validation/` | Rolling out-of-sample validation harness |
 | `l1_microstructure/live/` | Paper runners, routed-live runner, router adapters |
-| `l1_microstructure/ingest/` | Polygon REST/WebSocket sources and payload normalization |
+| `l1_microstructure/ingest/` | Massive REST/WebSocket sources and payload normalization |
 
 ## Artifact-driven workflow
 
@@ -190,7 +190,7 @@ python -m l1_microstructure ibkr-live-order-smoke `
 
 The current CLI is source-backed:
 
-1. `workflow` and `paper-historical` use the historical Polygon REST path.
+1. `workflow` and `paper-historical` use the historical Massive REST path.
 2. `paper-live` and `live-routed` use the live subscription path.
 3. broker smoke commands operate through the IBKR router boundary.
 
@@ -257,27 +257,26 @@ The runtime dependencies include `pandas`, `numpy`, `scikit-learn`, `statsmodels
 
 The current package is source-backed, so setup is not complete until market-data and, if needed, broker credentials are available.
 
-### Polygon or Massive API key
+### Massive API key
 
-Historical and live market-data paths require a Polygon or Massive API key.
+Historical and live market-data paths require a Massive API key.
 
 The runtime resolves the API key in this order:
 
-1. an explicit API key passed into the Polygon config object
-2. `POLYGON_API_KEY` from the process environment
-3. `MASSIVE_API_KEY` from the process environment
-4. `POLYGON_API_KEY` or `MASSIVE_API_KEY` from a repository-root `.env` file
+1. an explicit API key passed into the Massive config object
+2. `MASSIVE_API_KEY` from the process environment
+3. `MASSIVE_API_KEY` from a repository-root `.env` file
 
 Example PowerShell setup:
 
 ```powershell
-$env:POLYGON_API_KEY = "your_api_key"
+$env:MASSIVE_API_KEY = "your_api_key"
 ```
 
 Or use a repository `.env` file:
 
 ```text
-POLYGON_API_KEY=your_api_key
+MASSIVE_API_KEY=your_api_key
 ```
 
 ### IBKR broker configuration
@@ -303,7 +302,7 @@ For first-time local setup, the simplest arrangement is:
 Repository `.env` for market data:
 
 ```text
-POLYGON_API_KEY=your_api_key
+MASSIVE_API_KEY=your_api_key
 ```
 
 Repository `broker.env` for broker routing:
@@ -354,16 +353,16 @@ Run the dedicated workflow and market-data preflight slice with:
 pytest tests/unit/l1_state_machine/test_workflow_preflight.py -q
 ```
 
-Run the real source-backed Polygon smoke slice with:
+Run the real source-backed Massive smoke slice with:
 
 ```powershell
-pytest tests/integration/l1_state_machine/test_polygon_source_smoke.py -q
+pytest tests/integration/l1_state_machine/test_massive_source_smoke.py -q
 ```
 
 Run the bounded real source-backed workflow smoke slice with:
 
 ```powershell
-pytest tests/integration/l1_state_machine/test_polygon_workflow_smoke.py -q
+pytest tests/integration/l1_state_machine/test_massive_workflow_smoke.py -q
 ```
 
 Run the bounded broker-backed routed-live smoke slice with:

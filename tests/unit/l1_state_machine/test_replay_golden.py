@@ -8,7 +8,7 @@ from l1_microstructure.datasets import PipelineTransitionDatasetBuilder
 from l1_microstructure.ingest import LiveSubscriptionRequest
 from l1_microstructure.replay import DeterministicReplayEngine
 from l1_microstructure.workflow import ArtifactDrivenResearchWorkflow
-from tests.unit.l1_state_machine.support import FixtureMarketDataSource as InMemoryPolygonDataSource
+from tests.unit.l1_state_machine.support import FixtureMarketDataSource as InMemoryMassiveDataSource
 
 
 _FIXTURE_DIR = Path(__file__).resolve().parents[2] / "fixtures" / "l1_state_machine"
@@ -26,7 +26,7 @@ def _config() -> FrameworkConfig:
 
 def _load_events():
     payloads = _load_fixture("golden_payloads.json")
-    source = InMemoryPolygonDataSource(payloads)
+    source = InMemoryMassiveDataSource(payloads)
     return list(source.subscribe_live(LiveSubscriptionRequest(symbols=("AAPL",))))
 
 

@@ -6,8 +6,8 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from l1_microstructure.config import FrameworkConfig
-from l1_microstructure.ingest import HistoricalBatchRequest, PolygonRESTDataSource
-from l1_microstructure.ingest.polygon import _resolve_polygon_api_key
+from l1_microstructure.ingest import HistoricalBatchRequest, MassiveRESTDataSource
+from l1_microstructure.ingest.massive import _resolve_massive_api_key
 from l1_microstructure.workflow import ArtifactDrivenResearchWorkflow
 
 
@@ -22,12 +22,12 @@ def _et_ns(year: int, month: int, day: int, hour: int, minute: int, second: int 
 pytestmark = [pytest.mark.integration, pytest.mark.requires_data]
 
 
-def test_polygon_rest_source_can_drive_bounded_workflow(tmp_path) -> None:
-    api_key = _resolve_polygon_api_key(None)
+def test_massive_rest_source_can_drive_bounded_workflow(tmp_path) -> None:
+    api_key = _resolve_massive_api_key(None)
     if not api_key:
-        pytest.skip("POLYGON_API_KEY or MASSIVE_API_KEY is not configured")
+        pytest.skip("MASSIVE_API_KEY is not configured")
 
-    source = PolygonRESTDataSource()
+    source = MassiveRESTDataSource()
     request = HistoricalBatchRequest(
         symbols=("AAPL",),
         trade_date=date(2024, 3, 11),

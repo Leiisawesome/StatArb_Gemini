@@ -17,12 +17,12 @@ from l1_microstructure.features import FeatureEngine, ObservedState
 from l1_microstructure.ingest import (
     HistoricalBatchRequest,
     LiveSubscriptionRequest,
-    PolygonPayloadNormalizer,
-    PolygonRESTDataSource,
-    PolygonWebSocketConfig,
-    PolygonWebSocketDataSource,
+    MassivePayloadNormalizer,
+    MassiveRESTDataSource,
+    MassiveWebSocketConfig,
+    MassiveWebSocketDataSource,
 )
-from l1_microstructure.ingest.polygon import _resolve_polygon_api_key
+from l1_microstructure.ingest.massive import _resolve_massive_api_key
 from l1_microstructure.live import (
     IBKRBrokerOrderRouter,
     RoutedLiveTradingRunner,
@@ -144,12 +144,12 @@ def _framework_config(transition_threshold: float | None) -> FrameworkConfig:
     return config
 
 
-def _historical_source() -> PolygonRESTDataSource:
-    return PolygonRESTDataSource()
+def _historical_source() -> MassiveRESTDataSource:
+    return MassiveRESTDataSource()
 
 
-def _live_source() -> PolygonWebSocketDataSource:
-    return PolygonWebSocketDataSource(PolygonWebSocketConfig())
+def _live_source() -> MassiveWebSocketDataSource:
+    return MassiveWebSocketDataSource(MassiveWebSocketConfig())
 
 
 def _run_workflow_command(args: argparse.Namespace) -> int:
@@ -470,9 +470,9 @@ def _latest_observed_state_from_rest(symbol: str) -> ObservedState:
     except ImportError as exc:
         raise RuntimeError("massive client is required for IBKR smoke request construction") from exc
 
-    api_key = _resolve_polygon_api_key(None)
+    api_key = _resolve_massive_api_key(None)
     if api_key is None:
-        raise RuntimeError("POLYGON_API_KEY or MASSIVE_API_KEY is required for IBKR smoke request construction")
+        raise RuntimeError("MASSIVE_API_KEY is required for IBKR smoke request construction")
 
     quote = RESTClient(api_key=api_key, pagination=False).get_last_quote(symbol)
     payload = {
@@ -485,7 +485,7 @@ def _latest_observed_state_from_rest(symbol: str) -> ObservedState:
         "as": getattr(quote, "ask_size", None),
         "q": getattr(quote, "sequence_number", None),
     }
-    event = PolygonPayloadNormalizer().normalize(payload)
+    event = MassivePayloadNormalizer().normalize(payload)
     if not isinstance(event, MarketEvent):
         raise ValueError(f"could not normalize last quote for symbol {symbol}")
     observed_state = FeatureEngine().update(event)

@@ -7,7 +7,7 @@ from hashlib import sha1
 from typing import Iterable
 
 from l1_microstructure.events import MarketEvent
-from l1_microstructure.ingest.polygon import event_sort_key
+from l1_microstructure.ingest.massive import event_sort_key
 
 from .interfaces import ReplayCheckpoint, ReplayCursor
 
