@@ -310,8 +310,8 @@ class ArtifactDrivenResearchWorkflow:
 
     def _build_panels(self, *, symbol: str, events: list[MarketEvent]):
         dataset_builder = PipelineTransitionDatasetBuilder(events, config=self.framework_config)
-        state_panel = dataset_builder.build_state_panel(symbol)
-        transition_panel = dataset_builder.build_transition_panel(symbol)
+        # Use single-pass method for ~2x speedup
+        state_panel, transition_panel = dataset_builder.build_panels_single_pass(symbol)
         if state_panel.frame.empty:
             raise ValueError(f"state panel is empty for symbol {symbol}")
         if transition_panel.frame.empty:
