@@ -40,38 +40,46 @@ class ForwardDriftLabeler:
         return None
 
     def _label_fast(self, request: HorizonLabelRequest, events: list[MarketEvent]) -> DriftLabel:
-        """O(log n) labeling using binary search."""
+        """O(log n) labeling using binary search — semantically identical to _label_slow."""
         if not events:
             return self._build_label(request, request.start_timestamp_ns, request.reference_price, censored=True)
 
         # Extract timestamps for binary search
         timestamps = np.array([e.timestamp_ns for e in events], dtype=np.int64)
 
-        # Find start index (first event >= start_timestamp_ns)
+        # Find start index (first event with ts >= start_timestamp_ns)
         start_idx = bisect_left(timestamps, request.start_timestamp_ns)
         resolve_ns = request.start_timestamp_ns + request.horizon_ns
-
-        # Find end index (first event >= resolve_ns)
-        end_idx = bisect_right(timestamps, resolve_ns - 1)
+        # First event with ts >= resolve_ns (the "uncensored trigger" position)
+        resolve_idx = bisect_left(timestamps, resolve_ns)
 
         if start_idx >= len(events):
             return self._build_label(request, request.start_timestamp_ns, request.reference_price, censored=True)
 
-        # Find the last price before or at resolve_ns
         latest_price = request.reference_price
         latest_timestamp = request.start_timestamp_ns
 
-        for i in range(start_idx, min(end_idx, len(events))):
+        # Accumulate the running price up to (but not including) resolve_ns
+        for i in range(start_idx, min(resolve_idx, len(events))):
             event = events[i]
+            if event.symbol != request.symbol:
+                continue
             event_price = self._price_for_event(event)
             if event_price is not None:
                 latest_price = event_price
                 latest_timestamp = event.timestamp_ns
 
-        # Check if we found an event at or past resolve_ns
-        censored = end_idx >= len(events) or events[min(end_idx, len(events) - 1)].timestamp_ns < resolve_ns
+        # Scan from resolve_idx for the first same-symbol priced event:
+        # that event triggers censored=False (mirrors _label_slow's early-return).
+        for i in range(resolve_idx, len(events)):
+            event = events[i]
+            if event.symbol != request.symbol:
+                continue
+            event_price = self._price_for_event(event)
+            if event_price is not None:
+                return self._build_label(request, event.timestamp_ns, event_price, censored=False)
 
-        return self._build_label(request, latest_timestamp, latest_price, censored)
+        return self._build_label(request, latest_timestamp, latest_price, censored=True)
 
     def _label_slow(self, request: HorizonLabelRequest, events: Iterable[MarketEvent]) -> DriftLabel:
         """Original O(n) labeling for backward compatibility."""

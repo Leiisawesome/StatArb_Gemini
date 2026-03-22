@@ -91,6 +91,8 @@ class L1MicrostructureStateMachine:
         self.pending_orders: Deque[ExecutionRequest] = deque()
         self.open_positions: dict[str, OpenPosition] = {}
         self.execution_history: list[ExecutionReport] = []
+        self.fill_count: int = 0
+        self.cancel_count: int = 0
         self.signal_expectations: dict[str, float] = {}
         self.last_midpoints: dict[str, float] = {}
         self.return_history: dict[str, Deque[float]] = {}
@@ -201,6 +203,9 @@ class L1MicrostructureStateMachine:
             maxlen=self.transition_kernel.increment_history.maxlen,
         )
         self.transition_kernel.observation_index = int(snapshot.transition_state["observation_index"])
+        # Recompute O(1) counters from restored execution history
+        self.fill_count = sum(1 for r in self.execution_history if r.status == "filled")
+        self.cancel_count = sum(1 for r in self.execution_history if r.status == "cancelled")
 
     def on_event(self, event: MarketEvent) -> FrameworkUpdate | None:
         state = self.feature_engine.update(event)
@@ -259,8 +264,12 @@ class L1MicrostructureStateMachine:
     def ingest_execution_report(self, report: ExecutionReport) -> None:
         self.execution_history.append(report)
         self.risk_engine.process_fill(report)
-        if report.status == "filled" and report.fill_price is not None:
-            self._update_position_from_fill(report)
+        if report.status == "filled":
+            self.fill_count += 1
+            if report.fill_price is not None:
+                self._update_position_from_fill(report)
+        elif report.status == "cancelled":
+            self.cancel_count += 1
 
     def run_replay(self, events: Iterable[MarketEvent]) -> list[FrameworkUpdate]:
         updates: list[FrameworkUpdate] = []
@@ -298,17 +307,35 @@ class L1MicrostructureStateMachine:
 
         self.signal_expectations[state.symbol] = self._signal_strength(intent)
         target_fraction = self._portfolio_target_fraction(state.symbol)
+
+        # Single pass over open_positions: compute gross/net/symbol/beta exposures together.
+        # Also compute the trading symbol's beta once and reuse it for all three callers.
+        equity = max(self.risk_engine.equity, 1e-6)
+        sym_beta = self._estimate_symbol_beta(state.symbol)
+        gross_notional = net_notional = beta_notional = 0.0
+        symbol_signed_notional = 0.0
+        for pos_symbol, position in self.open_positions.items():
+            price = self._mark_price(pos_symbol, state.book.midpoint)
+            direction = 1.0 if position.side == TradeAction.BUY else -1.0
+            signed_notional = direction * position.quantity * price
+            gross_notional += position.quantity * price
+            net_notional += signed_notional
+            pos_beta = sym_beta if pos_symbol == state.symbol else self._estimate_symbol_beta(pos_symbol)
+            beta_notional += signed_notional * pos_beta
+            if pos_symbol == state.symbol:
+                symbol_signed_notional = signed_notional
+
         return self.risk_engine.authorize(
             intent,
             state,
             target_fraction=target_fraction,
             current_position=self.open_positions.get(state.symbol),
-            current_gross_exposure=self._gross_exposure_fraction(state),
-            current_net_exposure=self._net_exposure_fraction(state),
-            current_symbol_exposure=self._symbol_exposure_fraction(state.symbol, state.book.midpoint),
-            current_beta_exposure=self._beta_exposure_fraction(state),
-            current_symbol_beta_exposure=self._symbol_beta_exposure_fraction(state.symbol, state.book.midpoint),
-            proposed_symbol_beta=self._estimate_symbol_beta(state.symbol),
+            current_gross_exposure=gross_notional / equity,
+            current_net_exposure=net_notional / equity,
+            current_symbol_exposure=symbol_signed_notional / equity,
+            current_beta_exposure=beta_notional / equity,
+            current_symbol_beta_exposure=symbol_signed_notional * sym_beta / equity,
+            proposed_symbol_beta=sym_beta,
         )
 
     def _portfolio_target_fraction(self, symbol: str) -> float | None:

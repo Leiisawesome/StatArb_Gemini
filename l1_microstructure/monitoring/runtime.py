@@ -40,11 +40,22 @@ class JsonlMonitoringSink:
     def __init__(self, path: str | Path):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        # Keep the handle open and use line-buffering so each "\n"-terminated
+        # write is flushed to the OS immediately without explicit flush() calls.
+        self._handle = self.path.open("a", encoding="utf-8", buffering=1)
 
     def publish(self, snapshot: RuntimeSnapshot) -> None:
         record = asdict(snapshot)
-        with self.path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(record, sort_keys=True) + "\n")
+        self._handle.write(json.dumps(record, sort_keys=True) + "\n")
+
+    def close(self) -> None:
+        self._handle.close()
+
+    def __del__(self) -> None:
+        try:
+            self._handle.close()
+        except Exception:
+            pass
 
 
 class RuntimeMonitor:
@@ -52,8 +63,7 @@ class RuntimeMonitor:
         self.sink = sink
 
     def publish_update(self, update: FrameworkUpdate, machine: L1MicrostructureStateMachine) -> RuntimeSnapshot:
-        filled_reports = [report for report in machine.execution_history if report.status == "filled"]
-        cancelled_reports = [report for report in machine.execution_history if report.status == "cancelled"]
+        total_reports = max(len(machine.execution_history), 1)
         resolved_realized_drift = None
         if update.resolved_outcomes:
             resolved_realized_drift = float(sum(drift for _, drift in update.resolved_outcomes) / len(update.resolved_outcomes))
@@ -72,8 +82,8 @@ class RuntimeMonitor:
             metadata={
                 "symbol": update.state.symbol,
                 "edge_activation_count": edge_count,
-                "fill_rate": len(filled_reports) / max(len(machine.execution_history), 1),
-                "cancel_rate": len(cancelled_reports) / max(len(machine.execution_history), 1),
+                "fill_rate": machine.fill_count / total_reports,
+                "cancel_rate": machine.cancel_count / total_reports,
                 "expected_drift_bps": expected_drift_bps,
                 "realized_drift_bps": resolved_realized_drift,
                 "kill_switch_active": machine.risk_engine.halted,

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
-from math import exp, log
+from math import exp, log, sqrt
 from typing import Deque
 
 import numpy as np
@@ -26,31 +26,62 @@ class EdgeStatistics:
     holding_times_ns: list[int] = field(default_factory=list)
     drift_samples_bps: list[float] = field(default_factory=list)
     last_observation_index: int = 0
+    # Welford incremental stats — O(1) property access regardless of session length
+    _ht_count: int = field(default=0, init=False, repr=False)
+    _ht_mean: float = field(default=0.0, init=False, repr=False)
+    _d_count: int = field(default=0, init=False, repr=False)
+    _d_mean: float = field(default=0.0, init=False, repr=False)
+    _d_M2: float = field(default=0.0, init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        # Bootstrap incremental stats from any pre-populated lists (e.g. loaded payloads)
+        for ht in self.holding_times_ns:
+            self._welford_update_ht(ht)
+        for d in self.drift_samples_bps:
+            self._welford_update_d(d)
+
+    def _welford_update_ht(self, value: int) -> None:
+        self._ht_count += 1
+        delta = value - self._ht_mean
+        self._ht_mean += delta / self._ht_count
+
+    def _welford_update_d(self, value: float) -> None:
+        self._d_count += 1
+        delta = value - self._d_mean
+        self._d_mean += delta / self._d_count
+        delta2 = value - self._d_mean
+        self._d_M2 += delta * delta2
+
+    def record_holding_time(self, ht_ns: int) -> None:
+        """Append a holding-time sample and update incremental stats."""
+        self.holding_times_ns.append(int(ht_ns))
+        self._welford_update_ht(ht_ns)
+
+    def record_drift(self, drift_bps: float) -> None:
+        """Append a drift sample and update incremental stats."""
+        self.drift_samples_bps.append(float(drift_bps))
+        self._welford_update_d(drift_bps)
 
     @property
     def mean_holding_time_ns(self) -> float:
-        if not self.holding_times_ns:
-            return 0.0
-        return float(np.mean(self.holding_times_ns))
+        return self._ht_mean if self._ht_count > 0 else 0.0
 
     @property
     def drift_mean_bps(self) -> float:
-        if not self.drift_samples_bps:
-            return 0.0
-        return float(np.mean(self.drift_samples_bps))
+        return self._d_mean if self._d_count > 0 else 0.0
 
     @property
     def drift_std_bps(self) -> float:
-        if len(self.drift_samples_bps) < 2:
+        if self._d_count < 2:
             return 0.0
-        return float(np.std(self.drift_samples_bps, ddof=1))
+        return sqrt(self._d_M2 / (self._d_count - 1))
 
     @property
     def signal_to_noise(self) -> float:
-        if len(self.drift_samples_bps) < 2:
+        if self._d_count < 2:
             return 0.0
         std = self.drift_std_bps
-        return abs(self.drift_mean_bps) / std if std > 0 else 0.0
+        return abs(self._d_mean) / std if std > 0 else 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,24 +96,35 @@ class TransitionDiagnostic:
 
 
 class TransitionKernel:
+    # Recompute the precision matrix every this many new increments.
+    # The covariance changes slowly; daily re-pinv cost is negligible at this interval.
+    _PRECISION_TTL: int = 50
+
     def __init__(self, config: TransitionConfig | None = None):
         self.config = config or TransitionConfig()
         self.edge_stats: dict[EdgeKey, EdgeStatistics] = {}
         self.outgoing_counts: dict[tuple[str, MicrostructureRegime], dict[str, int]] = defaultdict(lambda: defaultdict(int))
         self.increment_history: Deque[np.ndarray] = deque(maxlen=self.config.covariance_history)
         self.observation_index: int = 0
+        self._precision_matrix: np.ndarray | None = None
+        self._precision_stale_count: int = 0
 
     def mahalanobis_distance(self, previous_vector: np.ndarray, current_vector: np.ndarray) -> float:
         delta = np.asarray(current_vector, dtype=float) - np.asarray(previous_vector, dtype=float)
         if len(self.increment_history) < 5:
-            distance = float(np.linalg.norm(delta))
-        else:
+            self.increment_history.append(delta)
+            return float(np.linalg.norm(delta))
+
+        self._precision_stale_count += 1
+        if self._precision_matrix is None or self._precision_stale_count >= self._PRECISION_TTL:
             history = np.vstack(self.increment_history)
             covariance = np.cov(history, rowvar=False)
             covariance = np.atleast_2d(covariance)
             covariance += np.eye(covariance.shape[0]) * 1e-6
-            inverse = np.linalg.pinv(covariance)
-            distance = float(delta.T @ inverse @ delta)
+            self._precision_matrix = np.linalg.pinv(covariance)
+            self._precision_stale_count = 0
+
+        distance = float(delta @ self._precision_matrix @ delta)
         self.increment_history.append(delta)
         return distance
 
@@ -93,14 +135,14 @@ class TransitionKernel:
         self.observation_index += 1
         stats = self.edge_stats.setdefault(edge, EdgeStatistics())
         stats.count += 1
-        stats.holding_times_ns.append(int(holding_time_ns))
+        stats.record_holding_time(holding_time_ns)
         stats.last_observation_index = self.observation_index
         self.outgoing_counts[(edge.from_state, edge.regime)][edge.to_state] += 1
         return stats
 
     def attach_drift(self, edge: EdgeKey, drift_bps: float) -> EdgeStatistics:
         stats = self.edge_stats.setdefault(edge, EdgeStatistics())
-        stats.drift_samples_bps.append(float(drift_bps))
+        stats.record_drift(drift_bps)
         stats.last_observation_index = self.observation_index
         return stats
 
@@ -155,6 +197,8 @@ class TransitionKernel:
         self.edge_stats.clear()
         self.outgoing_counts.clear()
         self.increment_history.clear()
+        self._precision_matrix = None
+        self._precision_stale_count = 0
         self.observation_index = int(payload.get("sample_count", 0))
 
         edge_payloads = payload.get("edges", {})

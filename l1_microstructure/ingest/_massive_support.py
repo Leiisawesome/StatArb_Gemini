@@ -231,6 +231,7 @@ class MassiveEventFilterMixin:
     _active_auctions: dict[str, int]
     _auction_resume_exclusion_until_ns: dict[str, int]
     _active_trade_indices: dict[str, int]
+    _all_exclusion_windows: tuple
 
     def _initialize_massive_event_filters(
         self,
@@ -241,6 +242,11 @@ class MassiveEventFilterMixin:
         self.normalizer = normalizer or MassivePayloadNormalizer()
         self.session_filter = session_filter or RTHSessionFilter()
         self.filter_config = filter_config or MassiveFilterConfig()
+        # Pre-concatenate once; avoids tuple construction on every _in_exclusion_window call
+        self._all_exclusion_windows = (
+            *self.filter_config.macro_exclusion_windows,
+            *self.filter_config.earnings_exclusion_windows,
+        )
         self._reset_halt_state()
 
     def _normalize_payloads(self, payloads: Iterable[dict[str, Any] | MarketEvent]) -> list[MarketEvent]:
@@ -312,8 +318,7 @@ class MassiveEventFilterMixin:
         return True
 
     def _in_exclusion_window(self, symbol: str, timestamp_ns: int) -> bool:
-        scheduled_windows = (*self.filter_config.macro_exclusion_windows, *self.filter_config.earnings_exclusion_windows)
-        return any(window.accepts(symbol, timestamp_ns) for window in scheduled_windows)
+        return any(window.accepts(symbol, timestamp_ns) for window in self._all_exclusion_windows)
 
     def _in_halt_exclusion(self, symbol: str, timestamp_ns: int) -> bool:
         if not self.filter_config.exclude_halted_periods:

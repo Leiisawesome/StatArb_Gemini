@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime, time, timedelta, timezone
+import heapq
 import json
 import os
 from pathlib import Path
@@ -93,12 +95,14 @@ class MassiveRESTDataSource(MassiveEventFilterMixin, MarketDataSource):
 
     def load_historical(self, request: HistoricalBatchRequest) -> Iterable[MarketEvent]:
         self._reset_halt_state()
-        client = self.client_factory(self.rest_config)
-        events: list[MarketEvent] = []
-        symbols = set(request.symbols)
         timestamp_gte, timestamp_lte = self._historical_time_bounds(request)
+        symbols = set(request.symbols)
 
-        for symbol in request.symbols:
+        def _fetch_symbol(symbol: str) -> list[MarketEvent]:
+            # Each worker creates its own client to avoid sharing connection pools
+            # across threads.  Filter state is read-only after _reset_halt_state().
+            client = self.client_factory(self.rest_config)
+            events: list[MarketEvent] = []
             if request.include_quotes:
                 for quote in client.list_quotes(
                     symbol,
@@ -111,7 +115,6 @@ class MassiveRESTDataSource(MassiveEventFilterMixin, MarketDataSource):
                     event = self._normalize_vendor_payload(self._quote_payload_from_rest(symbol, quote))
                     if event is not None:
                         events.append(event)
-
             if request.include_trades:
                 for trade in client.list_trades(
                     symbol,
@@ -124,8 +127,19 @@ class MassiveRESTDataSource(MassiveEventFilterMixin, MarketDataSource):
                     event = self._normalize_vendor_payload(self._trade_payload_from_rest(symbol, trade))
                     if event is not None:
                         events.append(event)
+            # Per-symbol events are already nearly sorted (asc from API); finalize sort.
+            return sorted(events, key=event_sort_key)
 
-        for event in sorted(events, key=event_sort_key):
+        num_workers = min(len(request.symbols), 8)
+        per_symbol: dict[str, list[MarketEvent]] = {}
+        with ThreadPoolExecutor(max_workers=num_workers) as executor:
+            futures = {executor.submit(_fetch_symbol, sym): sym for sym in request.symbols}
+            for future in as_completed(futures):
+                per_symbol[futures[future]] = future.result()
+
+        # heapq.merge lazily merges pre-sorted per-symbol lists — O(N log S) total
+        # where S = number of symbols, avoiding full in-memory sort.
+        for event in heapq.merge(*per_symbol.values(), key=event_sort_key):
             if event.symbol not in symbols:
                 continue
             if not self.session_filter.accepts(event.symbol, event.timestamp_ns):

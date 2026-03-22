@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass
 from enum import Enum
+from math import exp
 from typing import Deque
 
 import numpy as np
@@ -59,6 +60,15 @@ class RegimeInferencer:
         self.state_window: Deque[ObservedState] = deque()
         self.previous_probabilities: dict[MicrostructureRegime, float] | None = None
         self.previous_timestamp_ns: int | None = None
+        # Precompute transition-matrix constants — these only depend on calibration (set once)
+        self._cached_base_prior = np.array(
+            [self._base_prior(r) for r in self.REGIME_ORDER], dtype=float
+        )
+        self._cached_holding_times_ns = np.array(
+            [self._expected_holding_time_ns(r) for r in self.REGIME_ORDER], dtype=np.int64
+        )
+        n = len(self.REGIME_ORDER)
+        self._off_diagonal_masks = np.ones((n, n), dtype=float) - np.eye(n, dtype=float)
 
     def update(self, state: ObservedState) -> RegimePosterior:
         self.state_window.append(state)
@@ -97,22 +107,19 @@ class RegimeInferencer:
     def _slow_context(self) -> SlowContext:
         if not self.state_window:
             return SlowContext(0.0, 0.0, 0.0, 0.0)
-
-        volatility = float(np.mean([state.realized_volatility for state in self.state_window]))
-        spread_persistence = float(
-            np.mean([1.0 if state.spread_state == SpreadState.WIDE else 0.0 for state in self.state_window])
-        )
-        trade_intensity = float(
-            np.mean([abs(state.trade_pressure) for state in self.state_window])
-        )
-        imbalance_persistence = float(
-            np.mean([abs(state.quote_pressure) for state in self.state_window])
-        )
+        n = len(self.state_window)
+        sv = ss = st = si = 0.0
+        wide = SpreadState.WIDE
+        for state in self.state_window:
+            sv += state.realized_volatility
+            ss += 1.0 if state.spread_state is wide else 0.0
+            st += abs(state.trade_pressure)
+            si += abs(state.quote_pressure)
         return SlowContext(
-            slow_volatility=volatility,
-            spread_persistence=spread_persistence,
-            trade_intensity=trade_intensity,
-            imbalance_persistence=imbalance_persistence,
+            slow_volatility=sv / n,
+            spread_persistence=ss / n,
+            trade_intensity=st / n,
+            imbalance_persistence=si / n,
         )
 
     def _calm_score(self, state: ObservedState, slow_context: SlowContext) -> float:
@@ -208,20 +215,19 @@ class RegimeInferencer:
         }
 
     def _transition_matrix(self, dt_ns: int) -> np.ndarray:
-        base_prior = np.array([self._base_prior(regime) for regime in self.REGIME_ORDER], dtype=float)
-        matrix = np.zeros((len(self.REGIME_ORDER), len(self.REGIME_ORDER)), dtype=float)
-        for row_index, regime in enumerate(self.REGIME_ORDER):
-            holding_time_ns = max(self._expected_holding_time_ns(regime), 1)
-            stay_probability = float(np.exp(-dt_ns / holding_time_ns))
+        base_prior = self._cached_base_prior
+        n = len(self.REGIME_ORDER)
+        matrix = np.zeros((n, n), dtype=float)
+        for row_index in range(n):
+            holding_time_ns = max(int(self._cached_holding_times_ns[row_index]), 1)
+            stay_probability = exp(-dt_ns / holding_time_ns)
             stay_probability = min(max(stay_probability, self.config.posterior_floor), 1.0)
             leave_mass = max(1.0 - stay_probability, 0.0)
 
-            off_diagonal = base_prior.copy()
-            off_diagonal[row_index] = 0.0
+            off_diagonal = base_prior * self._off_diagonal_masks[row_index]
             off_diagonal_total = float(np.sum(off_diagonal))
             if off_diagonal_total <= 0:
-                off_diagonal = np.full(len(self.REGIME_ORDER), 1.0 / max(len(self.REGIME_ORDER) - 1, 1), dtype=float)
-                off_diagonal[row_index] = 0.0
+                off_diagonal = self._off_diagonal_masks[row_index] / max(n - 1, 1)
                 off_diagonal_total = float(np.sum(off_diagonal))
 
             matrix[row_index, :] = leave_mass * (off_diagonal / off_diagonal_total)
