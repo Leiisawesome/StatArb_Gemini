@@ -71,6 +71,7 @@ l1_microstructure/
     source.py
   monitoring/
     __init__.py
+    alerts.py
     interfaces.py
     runtime.py
   replay/
@@ -138,7 +139,9 @@ Defines artifact-store contracts and implements local storage, runtime bundle lo
 Defines validation contracts and implements the rolling out-of-sample validation harness.
 
 `monitoring/`
-Defines monitoring contracts and implements runtime snapshot publication to in-memory and JSONL sinks.
+Defines runtime snapshots plus typed operational alerts with severity,
+categories, bounded history, and time-window deduplication. In-memory, JSONL,
+routed-live, and supervised production paths share this contract.
 
 `recovery.py`
 Defines the typed, versioned state-machine recovery schema and owns validation,
@@ -167,7 +170,7 @@ Examples of contract surfaces already used in tests and implementations include:
 5. `TransitionDatasetBuilder` in `datasets/interfaces.py`
 6. `ArtifactStore` in `artifacts/interfaces.py`
 7. `ValidationHarness` in `validation/interfaces.py`
-8. `MonitoringSink` in `monitoring/interfaces.py`
+8. `MonitoringSink` and `AlertSink` in `monitoring/interfaces.py`
 9. `PaperTradingRunner` and `OrderRouter` in `live/interfaces.py`
 
 These interfaces are not theoretical placeholders anymore. They are the package’s internal seams for substitution, testing, and operational hardening.

@@ -12,7 +12,7 @@ from l1_microstructure.artifacts import ArtifactBundleSelector, RunQualityGate, 
 from l1_microstructure.config import FrameworkConfig
 from l1_microstructure.execution import ExecutionReport
 from l1_microstructure.ingest.interfaces import LiveSubscriptionRequest, MarketDataSource
-from l1_microstructure.monitoring import InMemoryMonitoringSink, RuntimeMonitor
+from l1_microstructure.monitoring import AlertCategory, AlertSeverity, InMemoryMonitoringSink, RuntimeMonitor
 from l1_microstructure.pipeline import FrameworkUpdate, L1MicrostructureStateMachine
 
 from .execution_session import RoutedExecutionService
@@ -86,25 +86,53 @@ class RoutedLiveTradingRunner:
         self._symbols = config.symbols
         monitor = RuntimeMonitor(self.monitoring_sink)
         selected_symbols = set(config.symbols)
+        health = self.execution_service.health()
+        if health is not None and not health.get("connected", False):
+            monitor.publish_alert(
+                AlertSeverity.ERROR,
+                AlertCategory.BROKER_CONNECTIVITY,
+                "broker_disconnected",
+                str(health.get("error") or health.get("status") or "router is disconnected"),
+            )
 
         if recovery_snapshot is not None:
-            self._ingest_router_reports(machine, config.symbols)
+            self._ingest_router_reports(machine, config.symbols, monitor)
 
         for event in self.source.subscribe_live(request):
             if not self.is_running:
                 break
-            self._ingest_router_reports(machine, config.symbols)
+            self._ingest_router_reports(machine, config.symbols, monitor)
             if event.symbol not in selected_symbols:
                 continue
             update = machine.on_event(event)
             if update is None:
                 continue
-            self.route_acknowledgements.extend(self.execution_service.submit_all(update.submitted_requests))
-            self._ingest_router_reports(machine, config.symbols)
+            acknowledgements = self.execution_service.submit_all(update.submitted_requests)
+            self.route_acknowledgements.extend(acknowledgements)
+            for acknowledgement in acknowledgements:
+                if acknowledgement.status != "accepted":
+                    monitor.publish_alert(
+                        AlertSeverity.ERROR,
+                        AlertCategory.ORDER_ROUTING,
+                        "order_rejected",
+                        acknowledgement.reason,
+                        symbol=event.symbol,
+                        timestamp_ns=event.timestamp_ns,
+                    )
+            self._ingest_router_reports(machine, config.symbols, monitor)
             self.updates.append(update)
             monitor.publish_update(update, machine)
+            if machine.risk_engine.halted:
+                monitor.publish_alert(
+                    AlertSeverity.CRITICAL,
+                    AlertCategory.RISK,
+                    "strategy_risk_halt",
+                    f"strategy risk engine halted for {event.symbol}",
+                    symbol=event.symbol,
+                    timestamp_ns=event.timestamp_ns,
+                )
 
-        self._ingest_router_reports(machine, config.symbols)
+        self._ingest_router_reports(machine, config.symbols, monitor)
         self.is_running = False
         return self
 
@@ -161,9 +189,24 @@ class RoutedLiveTradingRunner:
             return self.bundle_selector.resolve_latest_for_symbol(symbol)
         return self.bundle_selector.resolve_by_run_id(symbol=symbol, run_id=run_id)
 
-    def _ingest_router_reports(self, machine: L1MicrostructureStateMachine, symbols: tuple[str, ...]) -> None:
-        self.execution_service.poll(
+    def _ingest_router_reports(
+        self,
+        machine: L1MicrostructureStateMachine,
+        symbols: tuple[str, ...],
+        monitor: RuntimeMonitor,
+    ) -> None:
+        reports = self.execution_service.poll(
             symbols,
             consumer_for_symbol=lambda _symbol: machine,
             after_report=self.execution_reports.append,
         )
+        for report in reports:
+            if report.status == "rejected":
+                monitor.publish_alert(
+                    AlertSeverity.ERROR,
+                    AlertCategory.ORDER_ROUTING,
+                    "order_rejected",
+                    report.reason,
+                    symbol=report.symbol,
+                    timestamp_ns=report.timestamp_ns,
+                )

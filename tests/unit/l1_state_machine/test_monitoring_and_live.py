@@ -21,7 +21,13 @@ from l1_microstructure.live import (
     RunnerConfig,
     SimulatorPaperTradingRunner,
 )
-from l1_microstructure.monitoring import InMemoryMonitoringSink, JsonlMonitoringSink
+from l1_microstructure.monitoring import (
+    AlertCategory,
+    AlertSeverity,
+    InMemoryMonitoringSink,
+    JsonlMonitoringSink,
+    OperationalAlertManager,
+)
 from l1_microstructure.training import EmpiricalTransitionTrainer
 from tests.unit.l1_state_machine.support import FixtureMarketDataSource as InMemoryMassiveDataSource
 
@@ -166,6 +172,63 @@ def test_jsonl_monitoring_sink_writes_snapshots(tmp_path) -> None:
     first_record = json.loads(lines[0])
     assert first_record["state_label"]
     assert "metadata" in first_record
+
+
+def test_operational_alert_manager_deduplicates_by_category_code_and_symbol() -> None:
+    sink = InMemoryMonitoringSink()
+    manager = OperationalAlertManager(sink, deduplication_window_ns=100)
+
+    first = manager.emit(
+        AlertSeverity.ERROR,
+        AlertCategory.ORDER_ROUTING,
+        "order_rejected",
+        "first rejection",
+        symbol="AAPL",
+        timestamp_ns=1_000,
+    )
+    duplicate = manager.emit(
+        AlertSeverity.ERROR,
+        AlertCategory.ORDER_ROUTING,
+        "order_rejected",
+        "duplicate rejection",
+        symbol="AAPL",
+        timestamp_ns=1_050,
+    )
+    next_window = manager.emit(
+        AlertSeverity.ERROR,
+        AlertCategory.ORDER_ROUTING,
+        "order_rejected",
+        "later rejection",
+        symbol="AAPL",
+        timestamp_ns=1_100,
+    )
+
+    assert first is not None
+    assert duplicate is None
+    assert next_window is not None
+    assert [alert.message for alert in sink.alerts] == ["first rejection", "later rejection"]
+
+
+def test_jsonl_monitoring_sink_writes_typed_alerts(tmp_path) -> None:
+    path = Path(tmp_path) / "alerts.jsonl"
+    sink = JsonlMonitoringSink(path)
+    manager = OperationalAlertManager(sink)
+
+    manager.emit(
+        AlertSeverity.CRITICAL,
+        AlertCategory.MARKET_DATA,
+        "stale_market_data",
+        "stale AAPL quote",
+        symbol="AAPL",
+        timestamp_ns=123,
+    )
+    sink.close()
+
+    record = json.loads(path.read_text(encoding="utf-8"))
+    assert record["record_type"] == "alert"
+    assert record["severity"] == "critical"
+    assert record["category"] == "market_data"
+    assert record["symbol"] == "AAPL"
 
 
 def test_simulator_paper_runner_produces_update_and_execution_summary() -> None:
@@ -403,6 +466,8 @@ def test_routed_live_runner_handles_cancelled_router_reports() -> None:
     summary = runner.execution_summary()
     assert summary["route_submission_count"] >= 1.0
     assert summary["cancel_count"] >= 1.0
+    assert runner.monitoring_sink.alerts
+    assert runner.monitoring_sink.alerts[0].category is AlertCategory.ORDER_ROUTING
 
 
 def test_routed_live_runner_reconciles_broker_backed_partial_fill_and_cancel() -> None:

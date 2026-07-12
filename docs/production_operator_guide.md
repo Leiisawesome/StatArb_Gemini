@@ -64,6 +64,12 @@ The daemon writes its SQLite/WAL ledger under `var/` by default. Back up the
 database only with a SQLite-aware backup process while the daemon is running.
 Do not edit the ledger manually.
 
+The authenticated localhost API exposes `/health`, `/events`, and `/alerts`.
+Alerts use typed severity and category fields and cover broker disconnects,
+reconciliation failures, order rejections, stale market data, strategy risk
+halts, and runtime failures. Repeated alerts with the same category, code, and
+symbol are suppressed within the deduplication window.
+
 For `launchd`, replace every `REPLACE_WITH_REPOSITORY_PATH` value in
 `ops/macos/com.statarb-gemini.daemon.plist`, create `var/log`, and install the
 plist under the operator's `~/Library/LaunchAgents` directory.

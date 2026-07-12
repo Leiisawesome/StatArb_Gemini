@@ -10,15 +10,20 @@ import pandas as pd
 
 from l1_microstructure.pipeline import FrameworkUpdate, L1MicrostructureStateMachine
 
-from .interfaces import RuntimeSnapshot
+from .alerts import OperationalAlertManager
+from .interfaces import AlertCategory, AlertSeverity, OperationalAlert, RuntimeSnapshot
 
 
 class InMemoryMonitoringSink:
     def __init__(self):
         self.snapshots: list[RuntimeSnapshot] = []
+        self.alerts: list[OperationalAlert] = []
 
     def publish(self, snapshot: RuntimeSnapshot) -> None:
         self.snapshots.append(snapshot)
+
+    def publish_alert(self, alert: OperationalAlert) -> None:
+        self.alerts.append(alert)
 
     def to_frame(self) -> pd.DataFrame:
         return pd.DataFrame(
@@ -35,6 +40,9 @@ class InMemoryMonitoringSink:
             ]
         )
 
+    def alerts_frame(self) -> pd.DataFrame:
+        return pd.DataFrame([alert.to_dict() for alert in self.alerts])
+
 
 class JsonlMonitoringSink:
     def __init__(self, path: str | Path):
@@ -45,7 +53,11 @@ class JsonlMonitoringSink:
         self._handle = self.path.open("a", encoding="utf-8", buffering=1)
 
     def publish(self, snapshot: RuntimeSnapshot) -> None:
-        record = asdict(snapshot)
+        record = {"record_type": "snapshot", **asdict(snapshot)}
+        self._handle.write(json.dumps(record, sort_keys=True) + "\n")
+
+    def publish_alert(self, alert: OperationalAlert) -> None:
+        record = {"record_type": "alert", **alert.to_dict()}
         self._handle.write(json.dumps(record, sort_keys=True) + "\n")
 
     def close(self) -> None:
@@ -61,12 +73,36 @@ class JsonlMonitoringSink:
 class RuntimeMonitor:
     def __init__(self, sink: InMemoryMonitoringSink | JsonlMonitoringSink):
         self.sink = sink
+        self.alerts = OperationalAlertManager(sink)
+
+    def publish_alert(
+        self,
+        severity: AlertSeverity,
+        category: AlertCategory,
+        code: str,
+        message: str,
+        *,
+        symbol: str | None = None,
+        metadata: dict | None = None,
+        timestamp_ns: int | None = None,
+    ) -> OperationalAlert | None:
+        return self.alerts.emit(
+            severity,
+            category,
+            code,
+            message,
+            symbol=symbol,
+            metadata=metadata,
+            timestamp_ns=timestamp_ns,
+        )
 
     def publish_update(self, update: FrameworkUpdate, machine: L1MicrostructureStateMachine) -> RuntimeSnapshot:
         total_reports = max(len(machine.execution_history), 1)
         resolved_realized_drift = None
         if update.resolved_outcomes:
-            resolved_realized_drift = float(sum(drift for _, drift in update.resolved_outcomes) / len(update.resolved_outcomes))
+            resolved_realized_drift = float(
+                sum(drift for _, drift in update.resolved_outcomes) / len(update.resolved_outcomes)
+            )
 
         edge_count = 0
         if update.transition_edge is not None:

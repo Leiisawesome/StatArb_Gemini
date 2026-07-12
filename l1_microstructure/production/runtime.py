@@ -17,6 +17,7 @@ from l1_microstructure.execution import ExecutionReport, ExecutionRequest
 from l1_microstructure.ingest.interfaces import LiveSubscriptionRequest, MarketDataSource
 from l1_microstructure.live.execution_session import RoutedExecutionService
 from l1_microstructure.live.interfaces import ProductionOrderRouter, RouteAcknowledgement
+from l1_microstructure.monitoring import AlertCategory, AlertSeverity, OperationalAlertManager
 from l1_microstructure.pipeline import L1MicrostructureStateMachine
 from l1_microstructure.risk import OpenPosition
 from l1_microstructure.transitions import EdgeKey
@@ -48,6 +49,7 @@ class ProductionRuntime:
         self.framework_config = framework_config or FrameworkConfig()
         self.ledger = ledger or OperationalLedger(config.database_path)
         self.alert_sink = alert_sink or LocalAlertSink()
+        self.alerts = OperationalAlertManager(self.alert_sink)
         persisted_state = self.ledger.get_state("lifecycle_state", LifecycleState.STOPPED.value)
         initial = LifecycleState.HALTED if persisted_state == LifecycleState.HALTED.value else LifecycleState.STOPPED
         self.lifecycle = RuntimeLifecycle(initial)
@@ -75,7 +77,14 @@ class ProductionRuntime:
                 self._transition(LifecycleState.RECONCILING, "reconciling broker and ledger")
             failure, snapshot = self._reconciliation_failure()
             if failure is not None:
-                self._halt(failure)
+                broker_disconnected = failure.startswith("broker is not connected")
+                self._halt(
+                    failure,
+                    category=(
+                        AlertCategory.BROKER_CONNECTIVITY if broker_disconnected else AlertCategory.RECONCILIATION
+                    ),
+                    code="broker_disconnected" if broker_disconnected else "reconciliation_failed",
+                )
                 return
             if not self.machines:
                 self._load_machines()
@@ -101,7 +110,7 @@ class ProductionRuntime:
                 try:
                     self.start()
                 except BaseException as exc:
-                    self._halt(f"runtime startup failed: {exc}")
+                    self._halt(f"runtime startup failed: {exc}", code="runtime_startup_failed")
             if self.lifecycle.state not in {LifecycleState.WARMING, LifecycleState.RUNNING, LifecycleState.FLATTENING}:
                 sleep(self.config.reconnect_backoff_seconds)
                 continue
@@ -111,7 +120,11 @@ class ProductionRuntime:
                         break
                     self.process_event(event)
             except BaseException as exc:
-                self._halt(f"market-data loop failed: {exc}")
+                self._halt(
+                    f"market-data loop failed: {exc}",
+                    category=AlertCategory.MARKET_DATA,
+                    code="market_data_loop_failed",
+                )
             finally:
                 self._poll_reports()
             if not self._shutdown:
@@ -121,7 +134,12 @@ class ProductionRuntime:
         if event.symbol not in self.machines:
             return
         if self._event_is_stale(event):
-            self._halt(f"stale market data for {event.symbol}")
+            self._halt(
+                f"stale market data for {event.symbol}",
+                category=AlertCategory.MARKET_DATA,
+                code="stale_market_data",
+                symbol=event.symbol,
+            )
             return
         if self.lifecycle.state is LifecycleState.FLATTENING:
             machine = self.machines[event.symbol]
@@ -133,7 +151,7 @@ class ProductionRuntime:
                 self._transition(LifecycleState.STOPPED, "flatten complete")
                 self._running = False
             elif self._flatten_timed_out(event.timestamp_ns):
-                self._halt("flatten timed out with unresolved positions or orders")
+                self._halt("flatten timed out with unresolved positions or orders", code="flatten_timeout")
             return
         session_phase = self._session_phase(event.timestamp_ns)
         self.last_event_timestamp_ns[event.symbol] = event.timestamp_ns
@@ -141,9 +159,18 @@ class ProductionRuntime:
         self._poll_reports()
         daily_loss_reason = self._daily_loss_breach()
         if daily_loss_reason is not None:
-            self._halt(daily_loss_reason)
+            self._halt(daily_loss_reason, category=AlertCategory.RISK, code="daily_loss_limit_breached")
             return
         update = self.machines[event.symbol].on_event(event)
+        risk_engine = getattr(self.machines[event.symbol], "risk_engine", None)
+        if bool(getattr(risk_engine, "halted", False)):
+            self._halt(
+                f"strategy risk engine halted for {event.symbol}",
+                category=AlertCategory.RISK,
+                code="strategy_risk_halt",
+                symbol=event.symbol,
+            )
+            return
         self._complete_warmup_if_ready()
         if session_phase == "flatten" and self.lifecycle.state in {
             LifecycleState.WARMING,
@@ -153,7 +180,11 @@ class ProductionRuntime:
             self.flatten()
             return
         if session_phase == "closed" and any(machine.open_positions for machine in self.machines.values()):
-            self._halt("market closed with unresolved strategy positions")
+            self._halt(
+                "market closed with unresolved strategy positions",
+                category=AlertCategory.RISK,
+                code="positions_open_after_close",
+            )
             return
         if update is None:
             return
@@ -183,7 +214,7 @@ class ProductionRuntime:
 
     def halt(self, reason: str = "operator kill switch") -> None:
         self.ledger.set_state("kill_switch", True)
-        self._halt(reason)
+        self._halt(reason, category=AlertCategory.RISK, code="operator_kill_switch")
 
     def clear_kill_switch(self) -> None:
         if self.lifecycle.state is not LifecycleState.HALTED:
@@ -275,7 +306,11 @@ class ProductionRuntime:
                 if symbol in machine.open_positions
             },
             "broker": self._router_health(),
+            "alerts": self.recent_alerts(20),
         }
+
+    def recent_alerts(self, limit: int = 100) -> list[dict[str, Any]]:
+        return self.alerts.recent_dicts(limit)
 
     def _load_machines(self) -> None:
         selector = ArtifactBundleSelector(LocalArtifactStore(self.config.artifact_root))
@@ -403,7 +438,12 @@ class ProductionRuntime:
             )
             self.ledger.append_event("order", "route_acknowledgement", {**payload, **asdict(acknowledgement)})
             if acknowledgement.status != "accepted":
-                self._halt(f"broker rejected order for {current.symbol}: {acknowledgement.reason}")
+                self._halt(
+                    f"broker rejected order for {current.symbol}: {acknowledgement.reason}",
+                    category=AlertCategory.ORDER_ROUTING,
+                    code="order_rejected",
+                    symbol=current.symbol,
+                )
 
         self.execution_service.submit(
             request,
@@ -412,6 +452,16 @@ class ProductionRuntime:
         )
 
     def _poll_reports(self) -> None:
+        if self._shutdown or self.lifecycle.state is LifecycleState.STOPPED:
+            return
+        health = self._router_health()
+        if not health.get("connected"):
+            self._halt(
+                f"broker disconnected: {health.get('error') or health.get('status')}",
+                category=AlertCategory.BROKER_CONNECTIVITY,
+                code="broker_disconnected",
+            )
+            return
         self.execution_service.poll(
             self.config.symbols,
             consumer_for_symbol=self.machines.get,
@@ -429,6 +479,13 @@ class ProductionRuntime:
                 payload=asdict(report),
             )
         self.ledger.append_event("order", "execution_report", asdict(report))
+        if report.status == "rejected":
+            self._halt(
+                f"broker rejected order for {report.symbol}: {report.reason}",
+                category=AlertCategory.ORDER_ROUTING,
+                code="order_rejected",
+                symbol=report.symbol,
+            )
 
     def _persist_positions(self) -> None:
         positions: dict[str, float] = {}
@@ -539,12 +596,30 @@ class ProductionRuntime:
         if missing:
             raise TypeError(f"production router is missing required capabilities: {missing}")
 
-    def _halt(self, reason: str) -> None:
+    def _halt(
+        self,
+        reason: str,
+        *,
+        category: AlertCategory = AlertCategory.RUNTIME,
+        code: str = "runtime_halted",
+        symbol: str | None = None,
+    ) -> None:
         if self.lifecycle.state is not LifecycleState.HALTED:
             self._transition(LifecycleState.HALTED, reason)
         self._running = False
-        self.ledger.append_event("incident", "runtime_halted", {"reason": reason})
-        self.alert_sink.critical("Trading runtime halted", reason)
+        alert = self.alerts.emit(
+            AlertSeverity.CRITICAL,
+            category,
+            code,
+            reason,
+            symbol=symbol,
+            metadata={"lifecycle": self.lifecycle.state.value},
+        )
+        self.ledger.append_event(
+            "incident",
+            "runtime_halted",
+            {"reason": reason, "alert": alert.to_dict() if alert is not None else None},
+        )
 
     def _transition(self, target: LifecycleState, reason: str) -> None:
         transition = self.lifecycle.transition(target, reason)

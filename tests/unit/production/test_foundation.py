@@ -3,11 +3,12 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 import pickle
+from types import SimpleNamespace
 
 import pytest
 
 from l1_microstructure.events import QuoteEvent
-from l1_microstructure.live import RoutedExecutionService
+from l1_microstructure.live import RouteAcknowledgement, RoutedExecutionService
 from l1_microstructure.artifacts import LocalArtifactStore
 from l1_microstructure.production.config import ModelQualityPolicy, OperatingMode, ProductionConfig
 from l1_microstructure.production.ledger import OperationalLedger
@@ -169,6 +170,83 @@ def test_production_runtime_halts_on_position_reconciliation_mismatch(tmp_path) 
 
     assert runtime.lifecycle.state is LifecycleState.HALTED
     assert "position reconciliation mismatch" in alerts.messages[0][1]
+    assert runtime.recent_alerts()[0]["category"] == "reconciliation"
+    assert runtime.recent_alerts()[0]["code"] == "reconciliation_failed"
+    runtime.stop()
+
+
+def test_production_runtime_categorizes_broker_disconnect(tmp_path) -> None:
+    class DisconnectedRouter(_Router):
+        def health_check(self):
+            return {"connected": False, "status": "disconnected", "error": "gateway unavailable"}
+
+    alerts = _Alerts()
+    runtime = _Runtime(_config(tmp_path), source=_Source(), router=DisconnectedRouter(), alert_sink=alerts)
+
+    runtime.start()
+
+    alert = runtime.recent_alerts()[0]
+    assert alert["category"] == "broker_connectivity"
+    assert alert["code"] == "broker_disconnected"
+    runtime.stop()
+
+
+def test_production_runtime_emits_typed_stale_data_alert(tmp_path) -> None:
+    runtime = _Runtime(_config(tmp_path, event_stale_after_seconds=1.0), source=_Source(), router=_Router())
+    runtime.start()
+
+    runtime.process_event(QuoteEvent("AAPL", 1, 100.0, 100.01, 100, 100))
+
+    assert runtime.lifecycle.state is LifecycleState.HALTED
+    alert = runtime.recent_alerts()[0]
+    assert alert["category"] == "market_data"
+    assert alert["code"] == "stale_market_data"
+    assert alert["symbol"] == "AAPL"
+    runtime.stop()
+
+
+def test_production_runtime_emits_typed_strategy_risk_halt(tmp_path) -> None:
+    runtime = _Runtime(_config(tmp_path), source=_Source(), router=_Router())
+    runtime.start()
+    runtime.machines["AAPL"].risk_engine = SimpleNamespace(halted=True)
+    timestamp_ns = int(datetime.now(timezone.utc).timestamp() * 1_000_000_000)
+
+    runtime.process_event(QuoteEvent("AAPL", timestamp_ns, 100.0, 100.01, 100, 100))
+
+    assert runtime.lifecycle.state is LifecycleState.HALTED
+    alert = runtime.recent_alerts()[0]
+    assert alert["category"] == "risk"
+    assert alert["code"] == "strategy_risk_halt"
+    runtime.stop()
+
+
+def test_production_runtime_emits_typed_order_rejection_alert(tmp_path) -> None:
+    class RejectingRouter(_Router):
+        def submit(self, request):
+            self.requests.append(request)
+            return RouteAcknowledgement(
+                external_order_id="rejected-1",
+                status="rejected",
+                reason="broker risk check failed",
+            )
+
+    runtime = _Runtime(_config(tmp_path), source=_Source(), router=RejectingRouter())
+    runtime.start()
+    request = SimpleNamespace(
+        symbol="AAPL",
+        action=SimpleNamespace(value="buy"),
+        quantity=1,
+        decision_timestamp_ns=1,
+        client_order_id="client-1",
+    )
+
+    runtime._route(request)
+
+    assert runtime.lifecycle.state is LifecycleState.HALTED
+    alert = runtime.recent_alerts()[0]
+    assert alert["category"] == "order_routing"
+    assert alert["code"] == "order_rejected"
+    assert alert["symbol"] == "AAPL"
     runtime.stop()
 
 

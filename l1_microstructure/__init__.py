@@ -9,6 +9,8 @@ from typing import Any
 
 
 _LAZY_EXPORTS: dict[str, tuple[str, str]] = {
+    "AlertCategory": (".monitoring", "AlertCategory"),
+    "AlertSeverity": (".monitoring", "AlertSeverity"),
     "ArtifactBundleLoader": (".artifacts", "ArtifactBundleLoader"),
     "ArtifactBundleSelector": (".artifacts", "ArtifactBundleSelector"),
     "ArtifactDrivenResearchWorkflow": (".workflow", "ArtifactDrivenResearchWorkflow"),
@@ -26,6 +28,8 @@ _LAZY_EXPORTS: dict[str, tuple[str, str]] = {
     "MassivePayloadNormalizer": (".ingest", "MassivePayloadNormalizer"),
     "MicrostructureRegime": (".regime", "MicrostructureRegime"),
     "ObservedState": (".features", "ObservedState"),
+    "OperationalAlert": (".monitoring", "OperationalAlert"),
+    "OperationalAlertManager": (".monitoring", "OperationalAlertManager"),
     "PipelineTransitionDatasetBuilder": (".datasets", "PipelineTransitionDatasetBuilder"),
     "QuantileStateCalibrator": (".calibration", "QuantileStateCalibrator"),
     "QuoteEvent": (".events", "QuoteEvent"),
@@ -60,6 +64,8 @@ def __dir__() -> list[str]:
 
 
 __all__ = [
+    "AlertCategory",
+    "AlertSeverity",
     "DeterministicReplayEngine",
     "EmpiricalRegimeCalibrator",
     "EmpiricalTransitionTrainer",
@@ -76,6 +82,8 @@ __all__ = [
     "LocalArtifactStore",
     "MicrostructureRegime",
     "ObservedState",
+    "OperationalAlert",
+    "OperationalAlertManager",
     "PipelineTransitionDatasetBuilder",
     "MassivePayloadNormalizer",
     "QuantileStateCalibrator",
