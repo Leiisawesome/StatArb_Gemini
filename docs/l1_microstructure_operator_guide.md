@@ -117,8 +117,9 @@ The usual sequence is:
 1. run `workflow` for a symbol and trade date
 2. inspect the resulting manifest with `list-runs`
 3. replay the chosen bundle with `paper-historical` or `paper-live`
-4. move to `live-routed` only after the artifact bundle and validation results look acceptable
-5. use IBKR smoke paths only after the broker boundary is configured and healthy
+4. use `live-routed` with a paper broker account to qualify the routing boundary
+5. use `trading-daemon` for any supervised live-capital operation
+6. use IBKR smoke paths only after the broker boundary is configured and healthy
 
 Commands emit JSON to stdout. That JSON is the primary operational output.
 
@@ -310,6 +311,10 @@ Operational notes:
 
 ## 6.5 `live-routed`
 
+This command is a lightweight embedding and paper-account qualification path,
+not the production trading runtime. It rejects live-capital routing. Use
+`trading-daemon` with the production operator guide for supervised operation.
+
 Purpose:
 
 1. subscribe to the live source for one symbol
@@ -475,15 +480,18 @@ For a conservative operator workflow:
 5. run `paper-historical`
 6. run `paper-live`
 7. run `ibkr-live-smoke`
-8. only then consider `live-routed` or `ibkr-live-order-smoke`
+8. only then consider paper-account `live-routed` or `ibkr-live-order-smoke`
 
 ## 9. Safety rules
 
 1. Prefer `--require-validation-passed` whenever `--run-id` is omitted.
 2. Prefer explicit quality gates when selecting bundles for paper or live operation.
-3. Treat `live-routed` as materially riskier than simulator-backed paper flows.
-4. Do not pass `--allow-live-broker-routing` unless you intentionally want to remove the paper-only safeguard.
-5. Do not use `ibkr-live-order-smoke` before `ibkr-live-smoke` succeeds cleanly.
+3. Treat `live-routed` as a paper-account qualification shell, not a production runtime.
+4. Use `trading-daemon` for live capital; it owns reconciliation, lifecycle controls,
+   persistent audit state, exposure gates, and flattening.
+5. Use `--allow-live-broker-routing` only with explicitly controlled broker smoke
+   commands; `live-routed` rejects this flag.
+6. Do not use `ibkr-live-order-smoke` before `ibkr-live-smoke` succeeds cleanly.
 
 ## 10. Troubleshooting
 

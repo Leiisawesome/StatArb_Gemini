@@ -6,10 +6,14 @@ routing, and at most 25 US equity symbols.
 
 ## Safety model
 
+`trading-daemon` and `ProductionRuntime` are the canonical operator-facing live
+architecture. The lightweight `live-routed` command is limited to paper-account
+qualification and embedded testing.
+
 The daemon fails closed. It will not enable entries until promoted artifacts have
 both a committed run manifest and a passing validation result, satisfy the configured
-`model_quality` thresholds, and are
-loaded, IBKR is connected, persisted orders and positions match the broker, every
+`model_quality` thresholds, and are loaded; IBKR is connected; persisted orders and
+positions match the broker; every
 symbol has rebuilt its configured market context, and the persistent kill switch
 is clear.
 

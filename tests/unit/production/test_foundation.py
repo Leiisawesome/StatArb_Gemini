@@ -7,6 +7,7 @@ import pickle
 import pytest
 
 from l1_microstructure.events import QuoteEvent
+from l1_microstructure.live import RoutedExecutionService
 from l1_microstructure.artifacts import LocalArtifactStore
 from l1_microstructure.production.config import ModelQualityPolicy, OperatingMode, ProductionConfig
 from l1_microstructure.production.ledger import OperationalLedger
@@ -148,6 +149,7 @@ class _Alerts:
 
 def test_production_runtime_isolates_symbol_engines(tmp_path) -> None:
     runtime = _Runtime(_config(tmp_path), source=_Source(), router=_Router())
+    assert isinstance(runtime.execution_service, RoutedExecutionService)
     runtime.start()
     timestamp_ns = int(datetime.now(timezone.utc).timestamp() * 1_000_000_000)
     runtime.process_event(QuoteEvent("AAPL", timestamp_ns, 100.0, 100.01, 100, 100))

@@ -155,7 +155,8 @@ Recommended migration sequence:
 2. inspect saved manifests with `list-runs`
 3. replay selected bundles with `paper-historical` and `paper-live`
 4. verify broker health with `ibkr-live-smoke`
-5. use `live-routed` or `ibkr-live-order-smoke` only after the artifact path and broker boundary are both stable
+5. use paper-account `live-routed` or `ibkr-live-order-smoke` only after the artifact path and broker boundary are stable
+6. use `trading-daemon` as the canonical supervised live-capital runtime
 
 ## Current limitations
 

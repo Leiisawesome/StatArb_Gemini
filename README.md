@@ -116,7 +116,7 @@ Current commands implemented by `l1_microstructure/cli.py` are:
 | `list-runs` | Inspect saved run manifests and filter by date, pass/fail, or quality gates |
 | `paper-historical` | Load a stored artifact bundle and run the paper path against historical data |
 | `paper-live` | Load a stored artifact bundle and run the paper path against the live subscription flow |
-| `live-routed` | Run the live subscription flow with an external order-routing boundary |
+| `live-routed` | Exercise the lightweight routed boundary against a paper broker account |
 | `ibkr-live-smoke` | Check broker health and list open order ids |
 | `ibkr-live-order-smoke` | Submit, poll, and cancel a paper-safe routed broker order |
 
@@ -170,6 +170,9 @@ python -m l1_microstructure live-routed `
   --require-validation-passed `
   --broker-env-file broker.env
 ```
+
+`live-routed` is an embedding and paper-account qualification shell. It rejects
+live-capital routing. Use `trading-daemon` for supervised live operation.
 
 Check IBKR connectivity at the routing boundary:
 

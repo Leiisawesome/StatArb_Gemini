@@ -13,9 +13,10 @@ from l1_microstructure.artifacts import ArtifactBundleSelector, LocalArtifactSto
 from l1_microstructure.config import FrameworkConfig
 from l1_microstructure.decision import TradeAction, TradeIntent
 from l1_microstructure.events import MarketEvent
-from l1_microstructure.execution import ExecutionRequest
+from l1_microstructure.execution import ExecutionReport, ExecutionRequest
 from l1_microstructure.ingest.interfaces import LiveSubscriptionRequest, MarketDataSource
-from l1_microstructure.live.interfaces import ProductionOrderRouter
+from l1_microstructure.live.execution_session import RoutedExecutionService
+from l1_microstructure.live.interfaces import ProductionOrderRouter, RouteAcknowledgement
 from l1_microstructure.pipeline import L1MicrostructureStateMachine
 from l1_microstructure.risk import OpenPosition
 from l1_microstructure.transitions import EdgeKey
@@ -43,6 +44,7 @@ class ProductionRuntime:
         self.source = source
         self._validate_router_capabilities(router)
         self.router = router
+        self.execution_service = RoutedExecutionService(router)
         self.framework_config = framework_config or FrameworkConfig()
         self.ledger = ledger or OperationalLedger(config.database_path)
         self.alert_sink = alert_sink or LocalAlertSink()
@@ -213,7 +215,7 @@ class ProductionRuntime:
         self._flatten_started_at_ns = int(datetime.now(timezone.utc).timestamp() * 1_000_000_000)
         self._flatten_submitted_symbols = set()
         for order_id in self._router_open_order_ids():
-            self.router.cancel(order_id)
+            self.execution_service.cancel(order_id)
         for symbol, machine in self.machines.items():
             self._route_flatten_symbol(symbol, machine)
         self._poll_reports()
@@ -245,7 +247,7 @@ class ProductionRuntime:
         self._running = False
         if self.lifecycle.state is LifecycleState.RUNNING:
             self.pause("runtime stopping")
-        self.router.stop()
+        self.execution_service.stop()
         if self.lifecycle.state in {
             LifecycleState.STARTING,
             LifecycleState.WARMING,
@@ -358,12 +360,8 @@ class ProductionRuntime:
         self._transition(LifecycleState.RUNNING, "runtime enabled")
 
     def _reconciliation_snapshot(self) -> dict[str, Any]:
-        snapshot = self.router.reconciliation_snapshot()
-        return (
-            dict(snapshot)
-            if isinstance(snapshot, dict)
-            else {"connected": False, "status": "invalid reconciliation snapshot"}
-        )
+        snapshot = self.execution_service.reconciliation_snapshot()
+        return snapshot or {"connected": False, "status": "invalid reconciliation snapshot"}
 
     def _may_route(self, request: ExecutionRequest) -> bool:
         machine = self.machines[request.symbol]
@@ -392,33 +390,45 @@ class ProductionRuntime:
             "quantity": request.quantity,
             "decision_timestamp_ns": request.decision_timestamp_ns,
         }
-        self.ledger.record_order_intent(payload, request.client_order_id)
-        acknowledgement = self.router.submit(request)
-        self.ledger.update_order(
-            request.client_order_id,
-            acknowledgement.status,
-            external_order_id=acknowledgement.external_order_id,
-            payload={**payload, "reason": acknowledgement.reason},
+
+        def record_intent(current: ExecutionRequest) -> None:
+            self.ledger.record_order_intent(payload, current.client_order_id)
+
+        def record_acknowledgement(current: ExecutionRequest, acknowledgement: RouteAcknowledgement) -> None:
+            self.ledger.update_order(
+                current.client_order_id,
+                acknowledgement.status,
+                external_order_id=acknowledgement.external_order_id,
+                payload={**payload, "reason": acknowledgement.reason},
+            )
+            self.ledger.append_event("order", "route_acknowledgement", {**payload, **asdict(acknowledgement)})
+            if acknowledgement.status != "accepted":
+                self._halt(f"broker rejected order for {current.symbol}: {acknowledgement.reason}")
+
+        self.execution_service.submit(
+            request,
+            before_submit=record_intent,
+            after_submit=record_acknowledgement,
         )
-        self.ledger.append_event("order", "route_acknowledgement", {**payload, **asdict(acknowledgement)})
-        if acknowledgement.status != "accepted":
-            self._halt(f"broker rejected order for {request.symbol}: {acknowledgement.reason}")
 
     def _poll_reports(self) -> None:
-        for report in self.router.poll(self.config.symbols):
-            machine = self.machines.get(report.symbol)
-            if machine is not None:
-                machine.ingest_execution_report(report)
-            if report.client_order_id:
-                ledger_status = "partial_filled" if report.reason == "broker reported partial fill" else report.status
-                self.ledger.update_order(
-                    report.client_order_id,
-                    ledger_status,
-                    external_order_id=report.external_order_id,
-                    payload=asdict(report),
-                )
-            self.ledger.append_event("order", "execution_report", asdict(report))
+        self.execution_service.poll(
+            self.config.symbols,
+            consumer_for_symbol=self.machines.get,
+            after_report=self._record_execution_report,
+        )
         self._persist_positions()
+
+    def _record_execution_report(self, report: ExecutionReport) -> None:
+        if report.client_order_id:
+            ledger_status = "partial_filled" if report.reason == "broker reported partial fill" else report.status
+            self.ledger.update_order(
+                report.client_order_id,
+                ledger_status,
+                external_order_id=report.external_order_id,
+                payload=asdict(report),
+            )
+        self.ledger.append_event("order", "execution_report", asdict(report))
 
     def _persist_positions(self) -> None:
         positions: dict[str, float] = {}
@@ -508,11 +518,10 @@ class ProductionRuntime:
         return warmup_start <= local < stop_entries
 
     def _router_health(self) -> dict[str, Any]:
-        health = self.router.health_check()
-        return dict(health) if isinstance(health, dict) else {"connected": False, "status": "invalid health response"}
+        return self.execution_service.health() or {"connected": False, "status": "invalid health response"}
 
     def _router_open_order_ids(self) -> list[str]:
-        return list(self.router.open_order_ids())
+        return self.execution_service.open_order_ids()
 
     def _model_quality_gate(self) -> RunQualityGate:
         policy = self.config.model_quality

@@ -16,6 +16,7 @@ from l1_microstructure.live import (
     IBKRBrokerOrderRouter,
     IBKRConnectionConfig,
     RouteAcknowledgement,
+    RoutedExecutionService,
     RoutedLiveTradingRunner,
     RunnerConfig,
     SimulatorPaperTradingRunner,
@@ -116,7 +117,9 @@ class CancelingRouter(AcceptedFillRouter):
                 timestamp_ns=request.executable_timestamp_ns,
             )
         )
-        return RouteAcknowledgement(external_order_id=f"cancelled-{len(self.submissions)}", status="rejected", reason="router rejected")
+        return RouteAcknowledgement(
+            external_order_id=f"cancelled-{len(self.submissions)}", status="rejected", reason="router rejected"
+        )
 
 
 def test_in_memory_monitoring_sink_collects_runtime_snapshots() -> None:
@@ -257,6 +260,7 @@ def test_routed_live_runner_submits_requests_and_ingests_external_reports() -> N
     )
 
     summary = result.execution_summary()
+    assert isinstance(result.execution_service, RoutedExecutionService)
     assert router.submissions
     assert summary["route_submission_count"] >= 1.0
     assert summary["fill_count"] >= 1.0
@@ -315,7 +319,10 @@ def test_routed_live_runner_can_resume_from_recovery_snapshot() -> None:
         recovery_snapshot=snapshot,
     )
 
-    assert resumed_runner.execution_summary()["route_submission_count"] >= first_runner.execution_summary()["route_submission_count"]
+    assert (
+        resumed_runner.execution_summary()["route_submission_count"]
+        >= first_runner.execution_summary()["route_submission_count"]
+    )
     assert len(resumed_runner.execution_reports) >= len(snapshot.execution_reports)
     assert resumed_runner.machine is not None
     assert resumed_runner.machine.execution_history
@@ -417,7 +424,14 @@ def test_routed_live_runner_reconciles_broker_backed_partial_fill_and_cancel() -
             return self.connected
 
         async def submit_order(self, symbol, quantity, side, order_type, limit_price=None):
-            order = BrokerOrder(symbol=symbol, side=side, quantity=quantity, order_type=order_type, price=limit_price, status=BrokerOrderStatus.SUBMITTED)
+            order = BrokerOrder(
+                symbol=symbol,
+                side=side,
+                quantity=quantity,
+                order_type=order_type,
+                price=limit_price,
+                status=BrokerOrderStatus.SUBMITTED,
+            )
             self.orders[order.order_id] = order
             return order
 
@@ -498,7 +512,14 @@ def test_routed_live_runner_can_resume_with_open_broker_backed_order() -> None:
             return self.connected
 
         async def submit_order(self, symbol, quantity, side, order_type, limit_price=None):
-            order = BrokerOrder(symbol=symbol, side=side, quantity=quantity, order_type=order_type, price=limit_price, status=BrokerOrderStatus.SUBMITTED)
+            order = BrokerOrder(
+                symbol=symbol,
+                side=side,
+                quantity=quantity,
+                order_type=order_type,
+                price=limit_price,
+                status=BrokerOrderStatus.SUBMITTED,
+            )
             self.orders[order.order_id] = order
             return order
 
@@ -524,7 +545,8 @@ def test_routed_live_runner_can_resume_with_open_broker_backed_order() -> None:
             return [
                 order
                 for order in self.orders.values()
-                if order.status not in {BrokerOrderStatus.FILLED, BrokerOrderStatus.CANCELLED, BrokerOrderStatus.REJECTED}
+                if order.status
+                not in {BrokerOrderStatus.FILLED, BrokerOrderStatus.CANCELLED, BrokerOrderStatus.REJECTED}
             ]
 
         async def cancel_order(self, order_id: str) -> bool:
@@ -970,7 +992,13 @@ def test_ibkr_native_reserve_order_id_raises_when_none() -> None:
 def test_ibkr_native_ignores_non_fatal_order_preset_warning() -> None:
     """Covers _ibkr_native.py: on_error ignores non-fatal IBKR warning 10349"""
     from l1_microstructure.live._ibkr_native import IBKRNativeBrokerSession
-    from l1_microstructure.live.broker_models import BrokerOrder, BrokerOrderSide, BrokerOrderType, BrokerOrderStatus, IBKRConnectionConfig
+    from l1_microstructure.live.broker_models import (
+        BrokerOrder,
+        BrokerOrderSide,
+        BrokerOrderType,
+        BrokerOrderStatus,
+        IBKRConnectionConfig,
+    )
 
     config = IBKRConnectionConfig(host="127.0.0.1", port=4002, client_id=999)
     session = IBKRNativeBrokerSession(config)
@@ -992,7 +1020,13 @@ def test_ibkr_native_ignores_non_fatal_order_preset_warning() -> None:
 def test_ibkr_native_ignores_expected_cancel_error_in_health_state() -> None:
     """Covers _ibkr_native.py: on_error does not retain cancellation code 202 as last_error"""
     from l1_microstructure.live._ibkr_native import IBKRNativeBrokerSession
-    from l1_microstructure.live.broker_models import BrokerOrder, BrokerOrderSide, BrokerOrderType, BrokerOrderStatus, IBKRConnectionConfig
+    from l1_microstructure.live.broker_models import (
+        BrokerOrder,
+        BrokerOrderSide,
+        BrokerOrderType,
+        BrokerOrderStatus,
+        IBKRConnectionConfig,
+    )
 
     config = IBKRConnectionConfig(host="127.0.0.1", port=4002, client_id=999)
     session = IBKRNativeBrokerSession(config)
@@ -1014,7 +1048,13 @@ def test_ibkr_native_ignores_expected_cancel_error_in_health_state() -> None:
 def test_ibkr_native_ignores_order_timing_warning() -> None:
     """Covers _ibkr_native.py: on_error ignores non-fatal IBKR warning 399"""
     from l1_microstructure.live._ibkr_native import IBKRNativeBrokerSession
-    from l1_microstructure.live.broker_models import BrokerOrder, BrokerOrderSide, BrokerOrderType, BrokerOrderStatus, IBKRConnectionConfig
+    from l1_microstructure.live.broker_models import (
+        BrokerOrder,
+        BrokerOrderSide,
+        BrokerOrderType,
+        BrokerOrderStatus,
+        IBKRConnectionConfig,
+    )
 
     config = IBKRConnectionConfig(host="127.0.0.1", port=4002, client_id=999)
     session = IBKRNativeBrokerSession(config)
@@ -1027,7 +1067,11 @@ def test_ibkr_native_ignores_order_timing_warning() -> None:
         order_id="3",
     )
 
-    session.on_error(3, 399, "Order Message: BUY 1 AAPL NASDAQ.NMS Warning: Your order will not be placed at the exchange until 2026-03-13 04:00:00 US/Eastern.")
+    session.on_error(
+        3,
+        399,
+        "Order Message: BUY 1 AAPL NASDAQ.NMS Warning: Your order will not be placed at the exchange until 2026-03-13 04:00:00 US/Eastern.",
+    )
 
     assert session._last_error is None
     assert session._orders["3"].status is BrokerOrderStatus.SUBMITTED
