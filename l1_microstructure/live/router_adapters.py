@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import math
 import os
 from dataclasses import dataclass, field
@@ -216,6 +217,19 @@ class IBKRBrokerOrderRouter:
             "open_order_count": len(self._open_requests),
         }
 
+    def reconciliation_snapshot(self) -> dict[str, Any]:
+        reconcile = getattr(self.broker, "reconciliation_snapshot", None)
+        if not callable(reconcile):
+            return {
+                **self.health_check(),
+                "positions": {},
+                "open_order_ids": list(self._open_requests),
+            }
+        snapshot = self._run_async(reconcile())
+        if not isinstance(snapshot, dict):
+            raise RuntimeError("broker returned an invalid reconciliation snapshot")
+        return dict(snapshot)
+
     def _broker_open_orders_by_id(self) -> dict[str, Any]:
         get_orders = getattr(self.broker, "get_orders", None)
         if not callable(get_orders):
@@ -251,15 +265,11 @@ class IBKRBrokerOrderRouter:
         side = BrokerOrderSide.BUY if request.action == TradeAction.BUY else BrokerOrderSide.SELL
         order_type = BrokerOrderType.LIMIT if self.prefer_limit_orders else BrokerOrderType.MARKET
         limit_price = self._limit_price(request) if order_type is BrokerOrderType.LIMIT else None
-        return self._run_async(
-            self.broker.submit_order(
-                request.symbol,
-                float(request.quantity),
-                side,
-                order_type=order_type,
-                limit_price=limit_price,
-            )
-        )
+        submit_order = self.broker.submit_order
+        kwargs: dict[str, Any] = {"order_type": order_type, "limit_price": limit_price}
+        if "client_order_id" in inspect.signature(submit_order).parameters:
+            kwargs["client_order_id"] = request.client_order_id
+        return self._run_async(submit_order(request.symbol, float(request.quantity), side, **kwargs))
 
     def _reports_from_order(self, order: Any, request: ExecutionRequest, order_id: str) -> tuple[list[ExecutionReport], bool]:
         status = self._order_status_value(getattr(order, "status", None))
@@ -285,6 +295,8 @@ class IBKRBrokerOrderRouter:
                     slippage_bps=self._slippage_bps(fill_price, request),
                     reason="broker reported partial fill" if filled_quantity < total_quantity else "broker reported fill",
                     timestamp_ns=timestamp_ns,
+                    client_order_id=request.client_order_id,
+                    external_order_id=order_id,
                 )
             )
             self._filled_quantities[order_id] = filled_quantity
@@ -303,6 +315,8 @@ class IBKRBrokerOrderRouter:
                     slippage_bps=0.0,
                     reason=f"broker order {status}",
                     timestamp_ns=timestamp_ns,
+                    client_order_id=request.client_order_id,
+                    external_order_id=order_id,
                 )
             )
             terminal = True
@@ -323,6 +337,7 @@ class IBKRBrokerOrderRouter:
             slippage_bps=0.0,
             reason=reason,
             timestamp_ns=request.executable_timestamp_ns,
+            client_order_id=request.client_order_id,
         )
 
     def _limit_price(self, request: ExecutionRequest) -> float:

@@ -164,6 +164,32 @@ def test_forward_drift_labeler_marks_horizon_and_censoring() -> None:
     assert label.censored is False
 
 
+def test_forward_drift_labeler_reuses_preindexed_timestamps() -> None:
+    reads = 0
+
+    class CountingEvent:
+        symbol = "AAPL"
+
+        def __init__(self, timestamp_ns: int):
+            self._timestamp_ns = timestamp_ns
+
+        @property
+        def timestamp_ns(self) -> int:
+            nonlocal reads
+            reads += 1
+            return self._timestamp_ns
+
+    events = [CountingEvent(1), CountingEvent(2), CountingEvent(3)]
+    labeler = ForwardDriftLabeler(preindexed_events={"AAPL": events})
+    reads_after_index = reads
+    request = HorizonLabelRequest("AAPL", horizon_ns=1, start_timestamp_ns=1, reference_price=100.0)
+
+    labeler.label(request)
+    labeler.label(request)
+
+    assert reads == reads_after_index
+
+
 def test_dataset_builder_creates_state_and_transition_panels() -> None:
     source = InMemoryMassiveDataSource(
         [

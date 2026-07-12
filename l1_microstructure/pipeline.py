@@ -183,6 +183,7 @@ class L1MicrostructureStateMachine:
         self.feature_engine.active_regime_hint = snapshot.feature_state["active_regime_hint"]
 
         self.regime_inferencer.state_window = deque(deepcopy(snapshot.regime_state["state_window"]))
+        self.regime_inferencer.rebuild_context_sums()
         previous_probabilities = snapshot.regime_state.get("previous_probabilities")
         self.regime_inferencer.previous_probabilities = (
             {
@@ -217,13 +218,16 @@ class L1MicrostructureStateMachine:
         self.feature_engine.set_regime_hint(regime.dominant_regime.value)
         resolved_outcomes = self._resolve_pending_outcomes(state)
         execution_reports = self._process_pending_orders(state)
-        execution_reports.extend(self._manage_open_positions(state, regime))
+        if self.route_orders_externally:
+            submitted_requests = self._manage_open_position_requests(state, regime)
+        else:
+            submitted_requests = []
+            execution_reports.extend(self._manage_open_positions(state, regime))
 
         transition_edge = None
         diagnostic = None
         intent = None
         risk_decision = None
-        submitted_requests: list[ExecutionRequest] = []
 
         if self.previous_state is not None and self.transition_kernel.is_transition(self.previous_state.vector, state.vector):
             transition_edge = EdgeKey(self.previous_state.label, state.label, regime.dominant_regime)
@@ -516,13 +520,25 @@ class L1MicrostructureStateMachine:
         return reports
 
     def _manage_open_positions(self, state: ObservedState, regime: RegimePosterior) -> list[ExecutionReport]:
+        request = self._exit_request(state, regime)
+        if request is None:
+            return []
+        report = self.execution_simulator.execute(request, state)
+        self.ingest_execution_report(report)
+        return [report]
+
+    def _manage_open_position_requests(self, state: ObservedState, regime: RegimePosterior) -> list[ExecutionRequest]:
+        request = self._exit_request(state, regime)
+        return [request] if request is not None else []
+
+    def _exit_request(self, state: ObservedState, regime: RegimePosterior) -> ExecutionRequest | None:
         position = self.open_positions.get(state.symbol)
         if position is None:
-            return []
+            return None
 
         hazard = self.decision_engine.exit_hazard_diagnostics(position.side, state, regime)
         if hazard.total_hazard < self.config.decision.exit_hazard_threshold:
-            return []
+            return None
 
         action = TradeAction.SELL if position.side == TradeAction.BUY else TradeAction.BUY
         exit_intent = TradeIntent(
@@ -541,10 +557,9 @@ class L1MicrostructureStateMachine:
             executable_timestamp_ns=state.timestamp_ns,
             expected_state=request.expected_state,
             intent=request.intent,
+            client_order_id=request.client_order_id,
         )
-        report = self.execution_simulator.execute(request, state)
-        self.ingest_execution_report(report)
-        return [report]
+        return request
 
     def _update_position_from_fill(self, report: ExecutionReport) -> None:
         existing = self.open_positions.get(report.symbol)

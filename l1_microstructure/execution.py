@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from hashlib import blake2b
 from math import exp, log1p
+from uuid import uuid4
 
 import numpy as np
 
@@ -23,6 +24,11 @@ class ExecutionRequest:
     executable_timestamp_ns: int
     expected_state: ObservedState
     intent: TradeIntent
+    client_order_id: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.client_order_id:
+            object.__setattr__(self, "client_order_id", uuid4().hex)
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,6 +43,8 @@ class ExecutionReport:
     slippage_bps: float
     reason: str
     timestamp_ns: int
+    client_order_id: str | None = None
+    external_order_id: str | None = None
 
 
 class ExecutionSimulator:

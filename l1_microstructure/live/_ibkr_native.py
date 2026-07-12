@@ -115,6 +115,22 @@ class _IBKRApp(EWrapper, EClient):
         super().connectionClosed()
         self._session.on_connection_closed()
 
+    def position(self, account: str, contract: Contract, position: float, avgCost: float) -> None:  # noqa: N802
+        super().position(account, contract, position, avgCost)
+        self._session.on_position(account, contract, position, avgCost)
+
+    def positionEnd(self) -> None:  # noqa: N802
+        super().positionEnd()
+        self._session.on_position_end()
+
+    def accountSummary(self, reqId: int, account: str, tag: str, value: str, currency: str) -> None:  # noqa: N802
+        super().accountSummary(reqId, account, tag, value, currency)
+        self._session.on_account_summary(account, tag, value, currency)
+
+    def accountSummaryEnd(self, reqId: int) -> None:  # noqa: N802
+        super().accountSummaryEnd(reqId)
+        self._session.on_account_summary_end()
+
 
 class IBKRNativeBrokerSession:
     def __init__(self, config: IBKRConnectionConfig):
@@ -122,12 +138,16 @@ class IBKRNativeBrokerSession:
         self._lock = Lock()
         self._ready_event = Event()
         self._open_orders_event = Event()
+        self._positions_event = Event()
+        self._account_summary_event = Event()
         self._connected = False
         self._app: _IBKRApp | None = None
         self._thread: Thread | None = None
         self._orders: dict[str, BrokerOrder] = {}
         self._next_order_id: int | None = None
         self._last_error: str | None = None
+        self._positions: dict[str, dict[str, Any]] = {}
+        self._net_liquidation: float | None = None
 
     async def connect(self) -> bool:
         if self.is_connected():
@@ -176,6 +196,7 @@ class IBKRNativeBrokerSession:
         *,
         order_type: BrokerOrderType = BrokerOrderType.MARKET,
         limit_price: float | None = None,
+        client_order_id: str | None = None,
     ) -> BrokerOrder:
         await self.connect()
         app = self._require_app()
@@ -189,10 +210,15 @@ class IBKRNativeBrokerSession:
             status=BrokerOrderStatus.SUBMITTED,
             timestamp=_utc_now(),
             order_id=str(order_id),
+            client_order_id=client_order_id,
         )
         with self._lock:
             self._orders[broker_order.order_id] = broker_order
-        app.placeOrder(order_id, self._stock_contract(symbol), self._build_order(side, quantity, order_type, limit_price))
+        app.placeOrder(
+            order_id,
+            self._stock_contract(symbol),
+            self._build_order(side, quantity, order_type, limit_price, client_order_id),
+        )
         return replace(broker_order)
 
     async def get_order(self, order_id: str) -> BrokerOrder | None:
@@ -234,7 +260,34 @@ class IBKRNativeBrokerSession:
             "client_id": self.config.client_id,
             "open_order_count": open_order_count,
             "last_error": last_error,
+            "net_liquidation": self._net_liquidation,
         }
+
+    async def reconciliation_snapshot(self) -> dict[str, Any]:
+        await self.connect()
+        app = self._require_app()
+        self._positions_event.clear()
+        self._account_summary_event.clear()
+        with self._lock:
+            self._positions = {}
+        app.reqPositions()
+        app.reqAccountSummary(91001, "All", "NetLiquidation")
+        positions_ready = self._positions_event.wait(timeout=5.0)
+        account_ready = self._account_summary_event.wait(timeout=5.0)
+        self._refresh_open_orders()
+        app.cancelPositions()
+        app.cancelAccountSummary(91001)
+        if not positions_ready or not account_ready:
+            raise RuntimeError("timed out reconciling IBKR positions or account summary")
+        with self._lock:
+            return {
+                "connected": self._connected,
+                "net_liquidation": self._net_liquidation,
+                "positions": {symbol: dict(value) for symbol, value in self._positions.items()},
+                "open_order_ids": [
+                    order_id for order_id, order in self._orders.items() if order.status not in _TERMINAL_STATUSES
+                ],
+            }
 
     def broker_name(self) -> str:
         return "Interactive Brokers"
@@ -315,6 +368,7 @@ class IBKRNativeBrokerSession:
                     status=_ibkr_status_to_broker_status(getattr(order_state, "status", None)),
                     timestamp=timestamp,
                     order_id=str(order_id),
+                    client_order_id=str(getattr(order, "orderRef", "") or "") or None,
                 )
                 self._orders[str(order_id)] = existing
             else:
@@ -326,6 +380,7 @@ class IBKRNativeBrokerSession:
                 existing.price = price
                 existing.status = _ibkr_status_to_broker_status(getattr(order_state, "status", None))
                 existing.timestamp = timestamp
+                existing.client_order_id = str(getattr(order, "orderRef", "") or "") or existing.client_order_id
 
     def on_open_order_end(self) -> None:
         self._open_orders_event.set()
@@ -349,6 +404,38 @@ class IBKRNativeBrokerSession:
     def on_connection_closed(self) -> None:
         with self._lock:
             self._connected = False
+
+    def on_position(self, account: str, contract: Contract, position: float, average_cost: float) -> None:
+        symbol = str(contract.symbol or "")
+        if not symbol:
+            return
+        with self._lock:
+            if float(position) == 0.0:
+                self._positions.pop(symbol, None)
+            else:
+                self._positions[symbol] = {
+                    "account": account,
+                    "quantity": float(position),
+                    "average_cost": float(average_cost),
+                }
+
+    def on_position_end(self) -> None:
+        self._positions_event.set()
+
+    def on_account_summary(self, account: str, tag: str, value: str, currency: str) -> None:
+        if tag != "NetLiquidation":
+            return
+        if self.config.account_id and account != self.config.account_id:
+            return
+        try:
+            net_liquidation = float(value)
+        except ValueError:
+            return
+        with self._lock:
+            self._net_liquidation = net_liquidation
+
+    def on_account_summary_end(self) -> None:
+        self._account_summary_event.set()
 
     def _refresh_open_orders(self) -> None:
         app = self._require_app()
@@ -385,6 +472,7 @@ class IBKRNativeBrokerSession:
         quantity: float,
         order_type: BrokerOrderType,
         limit_price: float | None,
+        client_order_id: str | None = None,
     ) -> Order:
         order = Order()
         order.action = "BUY" if side is BrokerOrderSide.BUY else "SELL"
@@ -394,6 +482,8 @@ class IBKRNativeBrokerSession:
         order.eTradeOnly = False
         order.firmQuoteOnly = False
         order.outsideRth = bool(self.config.outside_regular_trading_hours)
+        if client_order_id:
+            order.orderRef = client_order_id
         if self.config.account_id:
             order.account = self.config.account_id
         if order_type is BrokerOrderType.LIMIT:

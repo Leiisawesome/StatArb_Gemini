@@ -1,0 +1,30 @@
+{
+  "symbols": ["AAPL"],
+  "artifact_root": "var/artifacts",
+  "promoted_run_ids": {
+    "AAPL": "replace-with-promoted-run-id"
+  },
+  "database_path": "var/trading.sqlite3",
+  "mode": "paper",
+  "broker_env_file": "broker.env",
+  "api_host": "127.0.0.1",
+  "api_port": 8765,
+  "event_stale_after_seconds": 5.0,
+  "warmup_seconds": 1800.0,
+  "reconnect_backoff_seconds": 15.0,
+  "flatten_timeout_seconds": 60.0,
+  "risk": {
+    "daily_loss_fraction": 0.01,
+    "max_gross_exposure": 0.25,
+    "max_symbol_exposure": 0.03,
+    "allow_leverage": false,
+    "allow_shorting": false
+  },
+  "session": {
+    "timezone": "America/New_York",
+    "market_open": "09:30",
+    "stop_entries": "15:50",
+    "flatten_at": "15:58",
+    "market_close": "16:00"
+  }
+}

@@ -41,7 +41,7 @@ def _request(quantity: int = 25):
 class FakeAsyncBrokerFacade:
     def __init__(self) -> None:
         self.connected = False
-        self.orders: dict[str, Order] = {}
+        self.orders: dict[str, BrokerOrder] = {}
         self.last_submission: dict[str, object] | None = None
         self.cancelled_order_ids: list[str] = []
 

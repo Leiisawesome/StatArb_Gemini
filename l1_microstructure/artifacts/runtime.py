@@ -162,7 +162,7 @@ class ArtifactBundleLoader:
             raise ValueError(
                 f"artifact {artifact_id} has version {metadata.version}, expected {expected_version}"
             )
-        if metadata.payload_format not in {None, "pickle"}:
+        if metadata.payload_format not in {None, "json"}:
             raise ValueError(
                 f"artifact {artifact_id} uses unsupported payload format {metadata.payload_format}"
             )

@@ -12,6 +12,7 @@ Use the repository documents by role:
 2. `docs/l1_microstructure_operator_guide.md` is the operator runbook for the current CLI.
 3. `docs/l1_microstructure_state_machine.md` explains the model and runtime architecture.
 4. `docs/l1_microstructure_package_plan.md` describes the implemented package structure, contract seams, and remaining roadmap.
+5. `docs/production_operator_guide.md` covers the supervised daemon, terminal console, safety controls, and paper qualification.
 
 ## What `l1_microstructure` is
 
@@ -323,6 +324,39 @@ python -m l1_microstructure ibkr-live-smoke --broker-env-file broker.env
 ```
 
 `--allow-live-broker-routing` disables the paper-only safeguard and should be treated as a separate operational risk decision.
+
+## Supervised production runtime
+
+The production path is a separate daemon and terminal console. It runs one state
+machine per symbol, records lifecycle and order state in SQLite, reconciles IBKR
+before enabling entries, and binds its authenticated API to localhost only.
+
+Initial setup:
+
+```bash
+uv sync --extra dev
+trading-secret MASSIVE_API_KEY
+trading-secret TRADING_CONSOLE_TOKEN
+cp config/production.example.json config/production.json
+```
+
+After replacing the promoted run ids in `config/production.json`, start paper mode:
+
+```bash
+trading-daemon --config config/production.json
+trading-console
+```
+
+Production configuration defaults to regular-hours operation, stops entries at
+15:50 ET, flattens at 15:58 ET, and rejects live mode unless the configuration
+contains `"live_risk_acknowledgement": "I_ACCEPT_LIVE_CAPITAL_RISK"`.
+
+External integration tests are disabled by default. Run them only against an
+intended Massive account and IBKR paper session:
+
+```bash
+pytest --run-external -m external
+```
 
 ## Testing
 

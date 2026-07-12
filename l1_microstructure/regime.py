@@ -58,6 +58,10 @@ class RegimeInferencer:
         self.feature_config = feature_config or FeatureConfig()
         self.regime_calibration = regime_calibration
         self.state_window: Deque[ObservedState] = deque()
+        self._slow_volatility_sum = 0.0
+        self._wide_spread_count = 0
+        self._trade_intensity_sum = 0.0
+        self._imbalance_sum = 0.0
         self.previous_probabilities: dict[MicrostructureRegime, float] | None = None
         self.previous_timestamp_ns: int | None = None
         # Precompute transition-matrix constants — these only depend on calibration (set once)
@@ -72,6 +76,7 @@ class RegimeInferencer:
 
     def update(self, state: ObservedState) -> RegimePosterior:
         self.state_window.append(state)
+        self._add_to_context(state)
         self._prune(state.timestamp_ns)
         slow_context = self._slow_context()
 
@@ -102,25 +107,38 @@ class RegimeInferencer:
     def _prune(self, timestamp_ns: int) -> None:
         threshold_ns = timestamp_ns - int(self.feature_config.slow_context_window_seconds * 1_000_000_000)
         while self.state_window and self.state_window[0].timestamp_ns < threshold_ns:
-            self.state_window.popleft()
+            self._remove_from_context(self.state_window.popleft())
 
     def _slow_context(self) -> SlowContext:
         if not self.state_window:
             return SlowContext(0.0, 0.0, 0.0, 0.0)
         n = len(self.state_window)
-        sv = ss = st = si = 0.0
-        wide = SpreadState.WIDE
-        for state in self.state_window:
-            sv += state.realized_volatility
-            ss += 1.0 if state.spread_state is wide else 0.0
-            st += abs(state.trade_pressure)
-            si += abs(state.quote_pressure)
         return SlowContext(
-            slow_volatility=sv / n,
-            spread_persistence=ss / n,
-            trade_intensity=st / n,
-            imbalance_persistence=si / n,
+            slow_volatility=self._slow_volatility_sum / n,
+            spread_persistence=self._wide_spread_count / n,
+            trade_intensity=self._trade_intensity_sum / n,
+            imbalance_persistence=self._imbalance_sum / n,
         )
+
+    def rebuild_context_sums(self) -> None:
+        self._slow_volatility_sum = 0.0
+        self._wide_spread_count = 0
+        self._trade_intensity_sum = 0.0
+        self._imbalance_sum = 0.0
+        for state in self.state_window:
+            self._add_to_context(state)
+
+    def _add_to_context(self, state: ObservedState) -> None:
+        self._slow_volatility_sum += state.realized_volatility
+        self._wide_spread_count += int(state.spread_state is SpreadState.WIDE)
+        self._trade_intensity_sum += abs(state.trade_pressure)
+        self._imbalance_sum += abs(state.quote_pressure)
+
+    def _remove_from_context(self, state: ObservedState) -> None:
+        self._slow_volatility_sum -= state.realized_volatility
+        self._wide_spread_count -= int(state.spread_state is SpreadState.WIDE)
+        self._trade_intensity_sum -= abs(state.trade_pressure)
+        self._imbalance_sum -= abs(state.quote_pressure)
 
     def _calm_score(self, state: ObservedState, slow_context: SlowContext) -> float:
         score = 2.0

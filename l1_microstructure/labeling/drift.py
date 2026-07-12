@@ -5,8 +5,6 @@ from __future__ import annotations
 from bisect import bisect_left, bisect_right
 from typing import Iterable
 
-import numpy as np
-
 from l1_microstructure.events import BookSnapshot, MarketEvent, QuoteEvent, TradeEvent
 
 from .interfaces import DriftLabel, HorizonLabelRequest
@@ -17,6 +15,10 @@ class ForwardDriftLabeler:
 
     def __init__(self, preindexed_events: dict[str, list[MarketEvent]] | None = None):
         self._preindexed = preindexed_events
+        self._timestamps_by_symbol = {
+            symbol: tuple(event.timestamp_ns for event in events)
+            for symbol, events in (preindexed_events or {}).items()
+        }
 
     def label(self, request: HorizonLabelRequest, events: Iterable[MarketEvent] | None = None) -> DriftLabel:
         # Use pre-indexed events if available, otherwise fall back to iterable
@@ -25,7 +27,10 @@ class ForwardDriftLabeler:
             # Fall back to original behavior
             return self._label_slow(request, events)
 
-        return self._label_fast(request, event_list)
+        timestamps = self._timestamps_by_symbol.get(request.symbol)
+        if timestamps is None:
+            timestamps = tuple(event.timestamp_ns for event in event_list)
+        return self._label_fast(request, event_list, timestamps)
 
     def _get_event_list(self, symbol: str, events: Iterable[MarketEvent] | None) -> list[MarketEvent] | None:
         """Get pre-indexed event list if available."""
@@ -39,13 +44,15 @@ class ForwardDriftLabeler:
             return list(events)
         return None
 
-    def _label_fast(self, request: HorizonLabelRequest, events: list[MarketEvent]) -> DriftLabel:
+    def _label_fast(
+        self,
+        request: HorizonLabelRequest,
+        events: list[MarketEvent],
+        timestamps: tuple[int, ...],
+    ) -> DriftLabel:
         """O(log n) labeling using binary search — semantically identical to _label_slow."""
         if not events:
             return self._build_label(request, request.start_timestamp_ns, request.reference_price, censored=True)
-
-        # Extract timestamps for binary search
-        timestamps = np.array([e.timestamp_ns for e in events], dtype=np.int64)
 
         # Find start index (first event with ts >= start_timestamp_ns)
         start_idx = bisect_left(timestamps, request.start_timestamp_ns)

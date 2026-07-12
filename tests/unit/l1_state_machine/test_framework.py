@@ -125,6 +125,22 @@ def test_regime_inferencer_filters_marginal_one_step_flips() -> None:
     assert filtered.probabilities[MicrostructureRegime.EXECUTION_FLOW] < emission[MicrostructureRegime.EXECUTION_FLOW]
 
 
+def test_regime_slow_context_uses_incremental_window_sums() -> None:
+    engine = FeatureEngine()
+    inferencer = RegimeInferencer()
+    states = []
+    for index in range(4):
+        state = engine.update(_quote((index + 1) * 1_000_000_000, 100.0 + index * 0.01, 100.02 + index * 0.01))
+        assert state is not None
+        states.append(state)
+        posterior = inferencer.update(state)
+
+    expected_volatility = sum(state.realized_volatility for state in states) / len(states)
+    assert np.isclose(posterior.slow_context.slow_volatility, expected_volatility)
+    inferencer.rebuild_context_sums()
+    assert inferencer._slow_context() == posterior.slow_context
+
+
 def test_transition_kernel_mahalanobis_uses_prior_history_only() -> None:
     kernel = TransitionKernel()
     prior_history = [

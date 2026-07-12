@@ -15,7 +15,7 @@ from l1_microstructure.training import EmpiricalTransitionTrainer
 from tests.unit.l1_state_machine.support import FixtureMarketDataSource
 
 
-pytestmark = [pytest.mark.integration]
+pytestmark = [pytest.mark.integration, pytest.mark.external]
 
 
 def _payloads() -> list[dict[str, object]]:

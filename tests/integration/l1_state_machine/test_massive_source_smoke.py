@@ -17,7 +17,7 @@ def _et_ns(year: int, month: int, day: int, hour: int, minute: int, second: int 
     return int(timestamp.timestamp() * 1_000_000_000)
 
 
-pytestmark = [pytest.mark.integration, pytest.mark.requires_data]
+pytestmark = [pytest.mark.integration, pytest.mark.external, pytest.mark.requires_data]
 
 
 def test_massive_api_key_is_available_for_source_backed_smoke() -> None:

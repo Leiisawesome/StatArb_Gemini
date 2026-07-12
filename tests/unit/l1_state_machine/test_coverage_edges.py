@@ -701,7 +701,6 @@ def test_decision_engine_normal_cdf_zero_std() -> None:
 def test_artifact_bundle_loader_validation_errors(tmp_path) -> None:
     """Covers artifacts/runtime.py: _validate_metadata version and format errors."""
     import json
-    import pickle
 
     from l1_microstructure.artifacts import ArtifactMetadata, LocalArtifactStore
     from l1_microstructure.artifacts.runtime import ArtifactBundleLoader
@@ -710,7 +709,7 @@ def test_artifact_bundle_loader_validation_errors(tmp_path) -> None:
     loader = ArtifactBundleLoader(store)
 
     # Save state_calibration with wrong version
-    meta = ArtifactMetadata("bad-ver", "state_calibration", "v2", "2026-01-01", (), "h", "pickle", {})
+    meta = ArtifactMetadata("bad-ver", "state_calibration", "v2", "2026-01-01", (), "h", "json", {})
     payload = {"symbol": "AAPL", "spread_quantiles": [1, 2], "volatility_quantiles": [1e-4, 2e-3], "flicker_baseline": 4.0, "quote_pressure_scale": 0.5}
     store.save(meta, payload)
 
@@ -725,9 +724,9 @@ def test_artifact_bundle_loader_validation_errors(tmp_path) -> None:
         "artifact_type": "state_calibration",
         "version": "v1",
         "created_at": "2026-01-01",
-        "payload_format": "json",
+        "payload_format": "pickle",
     }))
-    (bad_dir / "payload.pkl").write_bytes(pickle.dumps(payload))
+    (bad_dir / "payload.pkl").write_bytes(b"legacy")
 
     with __import__("pytest").raises(ValueError, match="unsupported payload format"):
         loader._load_state_calibration("bad-fmt")

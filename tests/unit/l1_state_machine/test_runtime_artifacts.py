@@ -360,7 +360,7 @@ def test_local_artifact_store_detects_payload_corruption(tmp_path) -> None:
             "quote_pressure_scale": 0.5,
         },
     )
-    (tmp_path / "state-1" / "payload.pkl").write_bytes(b"corrupted")
+    (tmp_path / "state-1" / "payload.json").write_bytes(b"corrupted")
 
     with pytest.raises(ValueError, match="hash mismatch"):
         store.load("state-1")

@@ -1,0 +1,63 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "statarb-gemini"
+version = "0.1.0"
+description = "L1 market microstructure research and supervised trading runtime"
+readme = "README.md"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+  "aiohttp>=3.9,<4",
+  "fastapi>=0.115,<1",
+  "ibapi>=9.81.1.post1,<10",
+  "keyring>=25,<26",
+  "massive>=2.2,<3",
+  "numpy>=1.26,<3",
+  "pandas>=2.2,<3",
+  "pydantic>=2.10,<3",
+  "python-dotenv>=1,<2",
+  "scikit-learn>=1.4,<2",
+  "statsmodels>=0.14,<1",
+  "textual>=8,<9",
+  "uvicorn>=0.34,<1",
+  "websockets>=12,<16",
+]
+
+[project.optional-dependencies]
+dev = [
+  "httpx>=0.28,<1",
+  "pytest>=8,<9",
+  "pytest-asyncio>=0.25,<2",
+  "pytest-cov>=6,<8",
+  "ruff>=0.11,<1",
+]
+
+[project.scripts]
+l1-microstructure = "l1_microstructure.cli:main"
+trading-daemon = "l1_microstructure.production.daemon:main"
+trading-console = "l1_microstructure.production.console:main"
+trading-secret = "l1_microstructure.production.secret_cli:main"
+artifact-migrate = "l1_microstructure.production.migrate:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["l1_microstructure"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E9", "F63", "F7", "F82"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+  "unit: deterministic unit tests",
+  "integration: integration tests",
+  "external: tests that contact external systems or submit paper orders",
+  "requires_data: tests requiring market-data credentials",
+]
+addopts = "--strict-markers --tb=short"
+asyncio_mode = "auto"

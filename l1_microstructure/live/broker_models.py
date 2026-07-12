@@ -38,6 +38,7 @@ class BrokerOrder:
     average_price: float | None = None
     timestamp: datetime | None = None
     order_id: str = field(default_factory=lambda: uuid4().hex)
+    client_order_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

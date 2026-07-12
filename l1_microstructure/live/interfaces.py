@@ -15,6 +15,10 @@ class RunnerConfig:
     latency_ms: int
     metadata: dict[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        if len(self.symbols) != 1:
+            raise ValueError("legacy runner supports exactly one symbol; use ProductionRuntime for multi-symbol operation")
+
 
 @dataclass(frozen=True, slots=True)
 class RouteAcknowledgement:
