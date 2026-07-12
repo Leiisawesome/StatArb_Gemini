@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from typing import Iterable
 
 import pandas as pd
@@ -25,24 +26,22 @@ class PipelineTransitionDatasetBuilder:
         self.config = config or FrameworkConfig()
         self.labeler = labeler or ForwardDriftLabeler()
 
-        # Pre-index events by symbol for O(log n) labeling - done once in constructor
-        from collections import defaultdict
+        # Pre-index events by symbol once for O(log n) forward labeling.
         self._events_by_symbol: dict[str, list[MarketEvent]] = defaultdict(list)
         for event in self.events:
             self._events_by_symbol[event.symbol].append(event)
-        # Sort each symbol's events by timestamp
-        for sym in self._events_by_symbol:
-            self._events_by_symbol[sym].sort(key=lambda e: e.timestamp_ns)
 
-        # Create optimized labeler with pre-indexed events
+        # The global event sort also guarantees each per-symbol list is ordered.
         self._optimized_labeler = self.labeler.__class__(preindexed_events=self._events_by_symbol)
 
     def build_state_panel(self, symbol: str) -> DatasetSlice:
         machine = L1MicrostructureStateMachine(self.config)
         rows: list[dict[str, object]] = []
         for event in self.events:
+            if event.symbol != symbol:
+                continue
             update = machine.on_event(event)
-            if update is None or update.state.symbol != symbol:
+            if update is None:
                 continue
             rows.append(
                 {
@@ -70,10 +69,11 @@ class PipelineTransitionDatasetBuilder:
         machine = L1MicrostructureStateMachine(self.config)
         state_rows: list[dict[str, object]] = []
         transition_rows: list[dict[str, object]] = []
-        symbol_events = self._events_by_symbol.get(symbol, [])
         horizons = self.config.transition.drift_horizon_ns_values
 
         for event in self.events:
+            if event.symbol != symbol:
+                continue
             prior_state = machine.previous_state
             update = machine.on_event(event)
             if update is None:
@@ -117,7 +117,9 @@ class PipelineTransitionDatasetBuilder:
                             "from_state": update.transition_edge.from_state,
                             "to_state": update.transition_edge.to_state,
                             "regime": update.transition_edge.regime.value,
-                            "transition_probability": update.diagnostic.transition_probability if update.diagnostic else None,
+                            "transition_probability": update.diagnostic.transition_probability
+                            if update.diagnostic
+                            else None,
                             "entropy": update.diagnostic.entropy if update.diagnostic else None,
                             "alpha_score": update.diagnostic.alpha_score if update.diagnostic else None,
                             "horizon_ns": int(horizon_ns),
@@ -125,7 +127,9 @@ class PipelineTransitionDatasetBuilder:
                             "horizon_label": f"{int(horizon_ns / 1_000_000)}ms",
                             "realized_drift_bps": label.realized_drift_bps,
                             "censored": label.censored,
-                            "holding_time_ns": update.state.timestamp_ns - prior_state.timestamp_ns if prior_state is not None else 0,
+                            "holding_time_ns": update.state.timestamp_ns - prior_state.timestamp_ns
+                            if prior_state is not None
+                            else 0,
                         }
                     )
 
@@ -148,12 +152,13 @@ class PipelineTransitionDatasetBuilder:
     def build_transition_panel(self, symbol: str) -> DatasetSlice:
         machine = L1MicrostructureStateMachine(self.config)
         rows: list[dict[str, object]] = []
-        symbol_events = self._events_by_symbol.get(symbol, [])
         horizons = self.config.transition.drift_horizon_ns_values
         for event in self.events:
+            if event.symbol != symbol:
+                continue
             prior_state = machine.previous_state
             update = machine.on_event(event)
-            if update is None or update.state.symbol != symbol or update.transition_edge is None:
+            if update is None or update.transition_edge is None:
                 continue
             for horizon_ns in horizons:
                 label = self._optimized_labeler.label(
@@ -173,7 +178,9 @@ class PipelineTransitionDatasetBuilder:
                         "from_state": update.transition_edge.from_state,
                         "to_state": update.transition_edge.to_state,
                         "regime": update.transition_edge.regime.value,
-                        "transition_probability": update.diagnostic.transition_probability if update.diagnostic else None,
+                        "transition_probability": update.diagnostic.transition_probability
+                        if update.diagnostic
+                        else None,
                         "entropy": update.diagnostic.entropy if update.diagnostic else None,
                         "alpha_score": update.diagnostic.alpha_score if update.diagnostic else None,
                         "horizon_ns": int(horizon_ns),
@@ -181,7 +188,9 @@ class PipelineTransitionDatasetBuilder:
                         "horizon_label": f"{int(horizon_ns / 1_000_000)}ms",
                         "realized_drift_bps": label.realized_drift_bps,
                         "censored": label.censored,
-                        "holding_time_ns": update.state.timestamp_ns - prior_state.timestamp_ns if prior_state is not None else 0,
+                        "holding_time_ns": update.state.timestamp_ns - prior_state.timestamp_ns
+                        if prior_state is not None
+                        else 0,
                     }
                 )
         return DatasetSlice(

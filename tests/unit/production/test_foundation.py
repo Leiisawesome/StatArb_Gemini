@@ -8,7 +8,7 @@ import pytest
 
 from l1_microstructure.events import QuoteEvent
 from l1_microstructure.artifacts import LocalArtifactStore
-from l1_microstructure.production.config import OperatingMode, ProductionConfig
+from l1_microstructure.production.config import ModelQualityPolicy, OperatingMode, ProductionConfig
 from l1_microstructure.production.ledger import OperationalLedger
 from l1_microstructure.production.lifecycle import LifecycleState, RuntimeLifecycle
 from l1_microstructure.production.runtime import ProductionRuntime
@@ -108,6 +108,9 @@ class _Router:
     def open_order_ids(self):
         return []
 
+    def cancel(self, order_id):
+        return True
+
     def submit(self, request):
         self.requests.append(request)
         raise AssertionError("test runtime should not submit an order")
@@ -178,3 +181,46 @@ def test_production_runtime_requires_each_symbol_to_finish_warmup(tmp_path) -> N
 
     assert runtime.lifecycle.state is LifecycleState.RUNNING
     runtime.stop()
+
+
+def test_production_runtime_rejects_router_without_safety_capabilities(tmp_path) -> None:
+    class IncompleteRouter:
+        def submit(self, request):
+            return None
+
+        def poll(self, symbols):
+            return []
+
+        def stop(self):
+            return None
+
+    with pytest.raises(TypeError, match="missing required capabilities"):
+        _Runtime(_config(tmp_path), source=_Source(), router=IncompleteRouter())
+
+
+def test_production_config_validates_model_quality_policy(tmp_path) -> None:
+    with pytest.raises(ValueError, match="minimum_fill_rate"):
+        _config(tmp_path, model_quality=ModelQualityPolicy(minimum_fill_rate=1.1))
+
+
+def test_production_promotion_requires_passing_quality_gate(tmp_path, monkeypatch) -> None:
+    calls = []
+
+    def resolve_passing(self, *, symbol, run_id, quality_gate):
+        calls.append((symbol, run_id, quality_gate))
+        return object()
+
+    monkeypatch.setattr(
+        "l1_microstructure.production.runtime.ArtifactBundleSelector.resolve_passing_by_run_id", resolve_passing
+    )
+    runtime = _Runtime(
+        _config(tmp_path, model_quality=ModelQualityPolicy(minimum_fill_rate=0.5)),
+        source=_Source(),
+        router=_Router(),
+    )
+
+    runtime.promote_model("AAPL", "approved-run")
+
+    assert calls[0][0:2] == ("AAPL", "approved-run")
+    assert calls[0][2].minimum_fill_rate == 0.5
+    assert runtime.promoted_run_ids["AAPL"] == "approved-run"

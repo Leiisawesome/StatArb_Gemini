@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from bisect import bisect_left, bisect_right
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,7 +13,7 @@ import pandas as pd
 
 from .artifacts import ArtifactBundleLoader, ArtifactMetadata, LocalArtifactStore, RuntimeArtifactBundle
 from .config import FrameworkConfig
-from .datasets import PipelineTransitionDatasetBuilder
+from .datasets import DatasetSlice, PipelineTransitionDatasetBuilder
 from .events import MarketEvent
 from .live import RunnerConfig, SimulatorPaperTradingRunner
 from .monitoring import InMemoryMonitoringSink
@@ -70,25 +71,30 @@ class ArtifactDrivenResearchWorkflow:
         splits: list[RegimeSplitSpec] | None = None,
         runner_config: RunnerConfig | None = None,
     ) -> WorkflowRunResult:
-        normalized_events = [event for event in events if event.symbol == symbol]
+        normalized_events = sorted(
+            (event for event in events if event.symbol == symbol),
+            key=lambda event: event.timestamp_ns,
+        )
         if not normalized_events:
             raise ValueError(f"no events supplied for symbol {symbol}")
+        event_timestamps = tuple(event.timestamp_ns for event in normalized_events)
 
         run_id = self._run_id(symbol)
         trade_date = self._trade_date(normalized_events)
         full_state_panel, full_transition_panel = self._build_panels(symbol=symbol, events=normalized_events)
 
         # Ensure horizon_ns is properly typed before filtering
-        transition_frame = full_transition_panel.frame.copy()
-        transition_frame["horizon_ns"] = pd.to_numeric(transition_frame["horizon_ns"], errors="coerce").fillna(0).astype(int)
+        transition_frame = self._normalize_transition_frame(full_transition_panel.frame)
         target_horizon = int(self.framework_config.transition.drift_horizon_ns)
 
-        runtime_transition_frame = transition_frame[
-            transition_frame["horizon_ns"] == target_horizon
-        ].copy()
+        runtime_transition_frame = transition_frame[transition_frame["horizon_ns"] == target_horizon].copy()
         if runtime_transition_frame.empty:
-            raise ValueError(f"no transition rows found for runtime horizon {self.framework_config.transition.drift_horizon_ns}")
-        runtime_transition_frame["timestamp"] = pd.to_datetime(runtime_transition_frame["timestamp_ns"], unit="ns", utc=True)
+            raise ValueError(
+                f"no transition rows found for runtime horizon {self.framework_config.transition.drift_horizon_ns}"
+            )
+        runtime_transition_frame["timestamp"] = pd.to_datetime(
+            runtime_transition_frame["timestamp_ns"], unit="ns", utc=True
+        )
         effective_splits = splits or self._default_splits(runtime_transition_frame)
 
         validation_runner_config = runner_config or RunnerConfig(
@@ -99,6 +105,7 @@ class ArtifactDrivenResearchWorkflow:
         validation_report, validation_monitoring_frame = self._run_oos_validation(
             symbol=symbol,
             events=normalized_events,
+            event_timestamps=event_timestamps,
             validation_frame=runtime_transition_frame,
             splits=effective_splits,
             runner_config=validation_runner_config,
@@ -111,7 +118,11 @@ class ArtifactDrivenResearchWorkflow:
             regime_artifact,
             execution_artifact,
             transition_payload,
-        ) = self._fit_runtime_artifacts(symbol=symbol, events=normalized_events)
+        ) = self._fit_runtime_artifacts_from_panels(
+            symbol=symbol,
+            state_panel=full_state_panel,
+            transition_panel=full_transition_panel,
+        )
 
         state_calibration_id = self._save_artifact(
             artifact_id=f"{run_id}-{symbol}-state-calibration",
@@ -132,14 +143,9 @@ class ArtifactDrivenResearchWorkflow:
             metadata={"symbol": symbol, "run_id": run_id},
         )
 
-        # Ensure horizon_ns is properly typed before filtering
-        training_transition_frame = transition_panel.frame.copy()
-        training_transition_frame["horizon_ns"] = pd.to_numeric(training_transition_frame["horizon_ns"], errors="coerce").fillna(0).astype(int)
-        target_horizon = int(self.framework_config.transition.drift_horizon_ns)
-
-        runtime_training_transition_frame = training_transition_frame[
-            training_transition_frame["horizon_ns"] == target_horizon
-        ].copy()
+        runtime_training_transition_frame = transition_panel.frame[
+            transition_panel.frame["horizon_ns"] == target_horizon
+        ]
         transition_model_id = self._save_artifact(
             artifact_id=f"{run_id}-{symbol}-transition-model",
             artifact_type="transition_model",
@@ -211,7 +217,9 @@ class ArtifactDrivenResearchWorkflow:
                     "full_transition_panel_rows": int(len(full_transition_panel.frame)),
                     "runtime_transition_rows": int(len(runtime_transition_frame)),
                     "runtime_training_transition_rows": int(len(runtime_training_transition_frame)),
-                    "available_horizons_ns": sorted({int(value) for value in full_transition_panel.frame["horizon_ns"].unique()}),
+                    "available_horizons_ns": sorted(
+                        {int(value) for value in full_transition_panel.frame["horizon_ns"].unique()}
+                    ),
                     "validation_mode": "rolling-oos-retrain",
                     "validation_split_count": int(len(effective_splits)),
                     "validation_execution_snapshot_count": int(len(validation_monitoring_frame)),
@@ -303,10 +311,32 @@ class ArtifactDrivenResearchWorkflow:
         return timestamp.astimezone(ZoneInfo("America/New_York")).date().isoformat()
 
     @staticmethod
-    def _events_for_window(events: list[MarketEvent], *, start: str, end: str) -> list[MarketEvent]:
-        start_ns = int(pd.Timestamp(start, tz="UTC").value)
-        end_ns = int(pd.Timestamp(end, tz="UTC").value)
-        return [event for event in events if start_ns <= event.timestamp_ns <= end_ns]
+    def _timestamp_ns(value: str) -> int:
+        timestamp = pd.Timestamp(value)
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.tz_localize("UTC")
+        else:
+            timestamp = timestamp.tz_convert("UTC")
+        return int(timestamp.value)
+
+    @classmethod
+    def _events_for_window(
+        cls,
+        events: list[MarketEvent],
+        timestamps: tuple[int, ...],
+        *,
+        start: str,
+        end: str,
+    ) -> list[MarketEvent]:
+        start_index = bisect_left(timestamps, cls._timestamp_ns(start))
+        end_index = bisect_right(timestamps, cls._timestamp_ns(end))
+        return events[start_index:end_index]
+
+    @staticmethod
+    def _normalize_transition_frame(frame: pd.DataFrame) -> pd.DataFrame:
+        if not pd.api.types.is_integer_dtype(frame["horizon_ns"]):
+            frame["horizon_ns"] = pd.to_numeric(frame["horizon_ns"], errors="coerce").fillna(0).astype(int)
+        return frame
 
     def _build_panels(self, *, symbol: str, events: list[MarketEvent]):
         dataset_builder = PipelineTransitionDatasetBuilder(events, config=self.framework_config)
@@ -318,8 +348,17 @@ class ArtifactDrivenResearchWorkflow:
             raise ValueError(f"transition panel is empty for symbol {symbol}")
         return state_panel, transition_panel
 
-    def _fit_runtime_artifacts(self, *, symbol: str, events: list[MarketEvent]):
-        state_panel, transition_panel = self._build_panels(symbol=symbol, events=events)
+    def _fit_runtime_artifacts_from_panels(
+        self,
+        *,
+        symbol: str,
+        state_panel: DatasetSlice,
+        transition_panel: DatasetSlice,
+    ):
+        if state_panel.frame.empty:
+            raise ValueError(f"state panel is empty for symbol {symbol}")
+        if transition_panel.frame.empty:
+            raise ValueError(f"transition panel is empty for symbol {symbol}")
         state_artifact = QuantileStateCalibrator().fit(
             CalibrationDataset(symbol=symbol, features=state_panel.frame, metadata=state_panel.metadata)
         )
@@ -349,6 +388,7 @@ class ArtifactDrivenResearchWorkflow:
         *,
         symbol: str,
         events: list[MarketEvent],
+        event_timestamps: tuple[int, ...],
         validation_frame: pd.DataFrame,
         splits: list[RegimeSplitSpec],
         runner_config: RunnerConfig,
@@ -357,8 +397,18 @@ class ArtifactDrivenResearchWorkflow:
         training_failures: list[str] = []
 
         for split in splits:
-            train_events = self._events_for_window(events, start=split.train_start, end=split.train_end)
-            test_events = self._events_for_window(events, start=split.test_start, end=split.test_end)
+            train_events = self._events_for_window(
+                events,
+                event_timestamps,
+                start=split.train_start,
+                end=split.train_end,
+            )
+            test_events = self._events_for_window(
+                events,
+                event_timestamps,
+                start=split.test_start,
+                end=split.test_end,
+            )
             if not train_events:
                 training_failures.append(f"{split.label}: training window does not contain any events")
                 continue
@@ -366,9 +416,16 @@ class ArtifactDrivenResearchWorkflow:
                 training_failures.append(f"{split.label}: test window does not contain any events")
                 continue
             try:
-                _, _, state_artifact, regime_artifact, execution_artifact, transition_payload = self._fit_runtime_artifacts(
+                training_state_panel, training_transition_panel = self._build_panels(
                     symbol=symbol,
                     events=train_events,
+                )
+                _, _, state_artifact, regime_artifact, execution_artifact, transition_payload = (
+                    self._fit_runtime_artifacts_from_panels(
+                        symbol=symbol,
+                        state_panel=training_state_panel,
+                        transition_panel=training_transition_panel,
+                    )
                 )
             except ValueError as exc:
                 training_failures.append(f"{split.label}: {exc}")

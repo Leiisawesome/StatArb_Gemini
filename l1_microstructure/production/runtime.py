@@ -9,13 +9,13 @@ from time import sleep
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from l1_microstructure.artifacts import ArtifactBundleSelector, LocalArtifactStore
+from l1_microstructure.artifacts import ArtifactBundleSelector, LocalArtifactStore, RunQualityGate
 from l1_microstructure.config import FrameworkConfig
 from l1_microstructure.decision import TradeAction, TradeIntent
 from l1_microstructure.events import MarketEvent
 from l1_microstructure.execution import ExecutionRequest
 from l1_microstructure.ingest.interfaces import LiveSubscriptionRequest, MarketDataSource
-from l1_microstructure.live.interfaces import OrderRouter
+from l1_microstructure.live.interfaces import ProductionOrderRouter
 from l1_microstructure.pipeline import L1MicrostructureStateMachine
 from l1_microstructure.risk import OpenPosition
 from l1_microstructure.transitions import EdgeKey
@@ -34,13 +34,14 @@ class ProductionRuntime:
         config: ProductionConfig,
         *,
         source: MarketDataSource,
-        router: OrderRouter,
+        router: ProductionOrderRouter,
         framework_config: FrameworkConfig | None = None,
         ledger: OperationalLedger | None = None,
         alert_sink: LocalAlertSink | None = None,
     ):
         self.config = config
         self.source = source
+        self._validate_router_capabilities(router)
         self.router = router
         self.framework_config = framework_config or FrameworkConfig()
         self.ledger = ledger or OperationalLedger(config.database_path)
@@ -50,8 +51,7 @@ class ProductionRuntime:
         self.lifecycle = RuntimeLifecycle(initial)
         persisted_models = self.ledger.get_state("promoted_models", {})
         self.promoted_run_ids = {
-            symbol: str(persisted_models.get(symbol, config.promoted_run_ids[symbol]))
-            for symbol in config.symbols
+            symbol: str(persisted_models.get(symbol, config.promoted_run_ids[symbol])) for symbol in config.symbols
         }
         self.machines: dict[str, L1MicrostructureStateMachine] = {}
         self.last_event_timestamp_ns: dict[str, int] = {}
@@ -196,7 +196,11 @@ class ProductionRuntime:
         if symbol not in self.config.symbols:
             raise ValueError(f"symbol is not in the configured universe: {symbol}")
         selector = ArtifactBundleSelector(LocalArtifactStore(self.config.artifact_root))
-        selector.resolve_by_run_id(symbol=symbol, run_id=run_id)
+        selector.resolve_passing_by_run_id(
+            symbol=symbol,
+            run_id=run_id,
+            quality_gate=self._model_quality_gate(),
+        )
         self.promoted_run_ids[symbol] = run_id
         self.ledger.set_state("promoted_models", self.promoted_run_ids)
         self.ledger.append_event("model", "promoted", {"symbol": symbol, "run_id": run_id})
@@ -208,10 +212,8 @@ class ProductionRuntime:
         self._transition(LifecycleState.FLATTENING, "flatten requested")
         self._flatten_started_at_ns = int(datetime.now(timezone.utc).timestamp() * 1_000_000_000)
         self._flatten_submitted_symbols = set()
-        cancel = getattr(self.router, "cancel", None)
-        if callable(cancel):
-            for order_id in self._router_open_order_ids():
-                cancel(order_id)
+        for order_id in self._router_open_order_ids():
+            self.router.cancel(order_id)
         for symbol, machine in self.machines.items():
             self._route_flatten_symbol(symbol, machine)
         self._poll_reports()
@@ -278,9 +280,10 @@ class ProductionRuntime:
         self.machines = {
             symbol: L1MicrostructureStateMachine(
                 self.framework_config,
-                runtime_artifacts=selector.resolve_by_run_id(
+                runtime_artifacts=selector.resolve_passing_by_run_id(
                     symbol=symbol,
                     run_id=self.promoted_run_ids[symbol],
+                    quality_gate=self._model_quality_gate(),
                 ),
                 route_orders_externally=True,
             )
@@ -294,23 +297,30 @@ class ProductionRuntime:
         if not health.get("connected"):
             return f"broker is not connected: {health.get('error') or health.get('status')}", health
         ledger_external_ids = {
-            str(order["external_order_id"])
-            for order in self.ledger.open_orders()
-            if order.get("external_order_id")
+            str(order["external_order_id"]) for order in self.ledger.open_orders() if order.get("external_order_id")
         }
         router_ids = set(self._router_open_order_ids())
         snapshot_ids = {str(value) for value in health.get("open_order_ids", router_ids)}
         if snapshot_ids != router_ids:
-            return f"router reconciliation mismatch snapshot={sorted(snapshot_ids)} tracked={sorted(router_ids)}", health
+            return (
+                f"router reconciliation mismatch snapshot={sorted(snapshot_ids)} tracked={sorted(router_ids)}",
+                health,
+            )
         if ledger_external_ids != router_ids:
-            return f"open-order reconciliation mismatch ledger={sorted(ledger_external_ids)} broker={sorted(router_ids)}", health
+            return (
+                f"open-order reconciliation mismatch ledger={sorted(ledger_external_ids)} broker={sorted(router_ids)}",
+                health,
+            )
         expected_positions = self.ledger.get_state("strategy_positions", {})
         broker_positions = health.get("positions", {})
         for symbol in self.config.symbols:
             expected_quantity = float(expected_positions.get(symbol, 0.0))
             broker_quantity = float(dict(broker_positions.get(symbol, {})).get("quantity", 0.0))
             if expected_quantity != broker_quantity:
-                return f"position reconciliation mismatch for {symbol}: ledger={expected_quantity} broker={broker_quantity}", health
+                return (
+                    f"position reconciliation mismatch for {symbol}: ledger={expected_quantity} broker={broker_quantity}",
+                    health,
+                )
         if self.config.mode is OperatingMode.LIVE and health.get("net_liquidation") is None:
             return "live reconciliation requires broker net liquidation value", health
         if health.get("net_liquidation") is not None and self.ledger.get_state("session_start_net_liquidation") is None:
@@ -348,12 +358,12 @@ class ProductionRuntime:
         self._transition(LifecycleState.RUNNING, "runtime enabled")
 
     def _reconciliation_snapshot(self) -> dict[str, Any]:
-        reconcile = getattr(self.router, "reconciliation_snapshot", None)
-        if callable(reconcile):
-            snapshot = reconcile()
-            if isinstance(snapshot, dict):
-                return dict(snapshot)
-        return self._router_health()
+        snapshot = self.router.reconciliation_snapshot()
+        return (
+            dict(snapshot)
+            if isinstance(snapshot, dict)
+            else {"connected": False, "status": "invalid reconciliation snapshot"}
+        )
 
     def _may_route(self, request: ExecutionRequest) -> bool:
         machine = self.machines[request.symbol]
@@ -366,7 +376,9 @@ class ProductionRuntime:
             self.ledger.append_event("risk", "order_blocked", {"reason": session_phase, "symbol": request.symbol})
             return False
         if not is_exit and self._would_breach_exposure(request):
-            self.ledger.append_event("risk", "order_blocked", {"reason": "production exposure limit", "symbol": request.symbol})
+            self.ledger.append_event(
+                "risk", "order_blocked", {"reason": "production exposure limit", "symbol": request.symbol}
+            )
             return False
         if not is_exit and request.action is TradeAction.SELL and not self.config.risk.allow_shorting:
             self.ledger.append_event("risk", "order_blocked", {"reason": "shorting disabled", "symbol": request.symbol})
@@ -470,10 +482,13 @@ class ProductionRuntime:
     def _flatten_timed_out(self, event_timestamp_ns: int) -> bool:
         if self._flatten_started_at_ns is None:
             return False
-        elapsed_ns = max(
-            event_timestamp_ns,
-            int(datetime.now(timezone.utc).timestamp() * 1_000_000_000),
-        ) - self._flatten_started_at_ns
+        elapsed_ns = (
+            max(
+                event_timestamp_ns,
+                int(datetime.now(timezone.utc).timestamp() * 1_000_000_000),
+            )
+            - self._flatten_started_at_ns
+        )
         return elapsed_ns >= int(self.config.flatten_timeout_seconds * 1_000_000_000)
 
     def _event_is_stale(self, event: MarketEvent) -> bool:
@@ -487,19 +502,33 @@ class ProductionRuntime:
             return False
         market_open = datetime.combine(local.date(), time.fromisoformat(self.config.session.market_open), local.tzinfo)
         warmup_start = market_open - timedelta(seconds=self.config.warmup_seconds)
-        stop_entries = datetime.combine(local.date(), time.fromisoformat(self.config.session.stop_entries), local.tzinfo)
+        stop_entries = datetime.combine(
+            local.date(), time.fromisoformat(self.config.session.stop_entries), local.tzinfo
+        )
         return warmup_start <= local < stop_entries
 
     def _router_health(self) -> dict[str, Any]:
-        health_check = getattr(self.router, "health_check", None)
-        if not callable(health_check):
-            return {"connected": False, "status": "health check unavailable"}
-        health = health_check()
+        health = self.router.health_check()
         return dict(health) if isinstance(health, dict) else {"connected": False, "status": "invalid health response"}
 
     def _router_open_order_ids(self) -> list[str]:
-        open_order_ids = getattr(self.router, "open_order_ids", None)
-        return list(open_order_ids()) if callable(open_order_ids) else []
+        return list(self.router.open_order_ids())
+
+    def _model_quality_gate(self) -> RunQualityGate:
+        policy = self.config.model_quality
+        return RunQualityGate(
+            minimum_fill_rate=policy.minimum_fill_rate,
+            maximum_cancel_rate=policy.maximum_cancel_rate,
+            maximum_drift_tracking_error_bps=policy.maximum_drift_tracking_error_bps,
+            maximum_unseen_edge_rate=policy.maximum_unseen_edge_rate,
+        )
+
+    @staticmethod
+    def _validate_router_capabilities(router: ProductionOrderRouter) -> None:
+        required = ("submit", "poll", "stop", "cancel", "open_order_ids", "health_check", "reconciliation_snapshot")
+        missing = [name for name in required if not callable(getattr(router, name, None))]
+        if missing:
+            raise TypeError(f"production router is missing required capabilities: {missing}")
 
     def _halt(self, reason: str) -> None:
         if self.lifecycle.state is not LifecycleState.HALTED:

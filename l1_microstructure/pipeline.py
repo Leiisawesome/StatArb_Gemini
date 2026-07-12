@@ -44,6 +44,7 @@ class StateMachineRecoverySnapshot:
     feature_state: dict[str, object]
     regime_state: dict[str, object]
     transition_state: dict[str, object]
+    symbol: str | None = None
 
 
 @dataclass(slots=True)
@@ -69,6 +70,18 @@ class L1MicrostructureStateMachine:
         self.config = config or FrameworkConfig()
         self.runtime_artifacts = runtime_artifacts or RuntimeArtifactBundle()
         self.route_orders_externally = route_orders_externally
+        artifact_symbols = {
+            artifact.symbol
+            for artifact in (
+                self.runtime_artifacts.state_calibration,
+                self.runtime_artifacts.regime_calibration,
+                self.runtime_artifacts.execution_calibration,
+            )
+            if artifact is not None
+        }
+        if len(artifact_symbols) > 1:
+            raise ValueError(f"runtime artifacts contain multiple symbols: {sorted(artifact_symbols)}")
+        self.symbol: str | None = next(iter(artifact_symbols), None)
         self.feature_engine = FeatureEngine(self.config.feature, self.runtime_artifacts.state_calibration)
         self.regime_inferencer = RegimeInferencer(
             self.config.regime,
@@ -131,7 +144,10 @@ class L1MicrostructureStateMachine:
             regime_state={
                 "state_window": deepcopy(list(self.regime_inferencer.state_window)),
                 "previous_probabilities": (
-                    {regime.value: probability for regime, probability in self.regime_inferencer.previous_probabilities.items()}
+                    {
+                        regime.value: probability
+                        for regime, probability in self.regime_inferencer.previous_probabilities.items()
+                    }
                     if self.regime_inferencer.previous_probabilities is not None
                     else None
                 ),
@@ -143,10 +159,16 @@ class L1MicrostructureStateMachine:
                 "increment_history": deepcopy(list(self.transition_kernel.increment_history)),
                 "observation_index": int(self.transition_kernel.observation_index),
             },
+            symbol=self.symbol,
         )
 
     def restore_state(self, snapshot: StateMachineRecoverySnapshot) -> None:
+        if self.symbol is not None and snapshot.symbol is not None and self.symbol != snapshot.symbol:
+            raise ValueError(f"snapshot symbol {snapshot.symbol} does not match state machine symbol {self.symbol}")
+        self.symbol = snapshot.symbol or self.symbol
         self.previous_state = deepcopy(snapshot.previous_state)
+        if self.symbol is None and self.previous_state is not None:
+            self.symbol = self.previous_state.symbol
         self.pending_outcomes = deque(deepcopy(snapshot.pending_outcomes))
         self.pending_orders = deque(deepcopy(snapshot.pending_orders))
         self.open_positions = deepcopy(snapshot.open_positions)
@@ -166,7 +188,9 @@ class L1MicrostructureStateMachine:
         self.risk_engine.halted = bool(snapshot.risk_state["halted"])
 
         self.feature_engine.current_book = deepcopy(snapshot.feature_state["current_book"])
-        self.feature_engine.quote_history = deque(deepcopy(snapshot.feature_state["quote_history"]), maxlen=self.feature_engine.quote_history.maxlen)
+        self.feature_engine.quote_history = deque(
+            deepcopy(snapshot.feature_state["quote_history"]), maxlen=self.feature_engine.quote_history.maxlen
+        )
         self.feature_engine.microprice_history = deque(deepcopy(snapshot.feature_state["microprice_history"]))
         self.feature_engine.trade_pressure_window = deque(deepcopy(snapshot.feature_state["trade_pressure_window"]))
         self.feature_engine.spread_norm_history = deque(
@@ -186,10 +210,7 @@ class L1MicrostructureStateMachine:
         self.regime_inferencer.rebuild_context_sums()
         previous_probabilities = snapshot.regime_state.get("previous_probabilities")
         self.regime_inferencer.previous_probabilities = (
-            {
-                MicrostructureRegime(key): float(value)
-                for key, value in previous_probabilities.items()
-            }
+            {MicrostructureRegime(key): float(value) for key, value in previous_probabilities.items()}
             if previous_probabilities is not None
             else None
         )
@@ -209,6 +230,10 @@ class L1MicrostructureStateMachine:
         self.cancel_count = sum(1 for r in self.execution_history if r.status == "cancelled")
 
     def on_event(self, event: MarketEvent) -> FrameworkUpdate | None:
+        if self.symbol is None:
+            self.symbol = event.symbol
+        elif event.symbol != self.symbol:
+            raise ValueError(f"state machine for {self.symbol} cannot process event for {event.symbol}")
         state = self.feature_engine.update(event)
         if state is None:
             return None
@@ -229,7 +254,9 @@ class L1MicrostructureStateMachine:
         intent = None
         risk_decision = None
 
-        if self.previous_state is not None and self.transition_kernel.is_transition(self.previous_state.vector, state.vector):
+        if self.previous_state is not None and self.transition_kernel.is_transition(
+            self.previous_state.vector, state.vector
+        ):
             transition_edge = EdgeKey(self.previous_state.label, state.label, regime.dominant_regime)
             edge_stats = self.transition_kernel.observe_transition(
                 transition_edge,
@@ -367,7 +394,9 @@ class L1MicrostructureStateMachine:
             covariance = pd.DataFrame(aligned_returns).cov(min_periods=2)
         elif len(aligned_returns) == 1:
             only_symbol = next(iter(aligned_returns))
-            variance = float(aligned_returns[only_symbol].var(ddof=1)) if len(aligned_returns[only_symbol]) >= 2 else 0.0
+            variance = (
+                float(aligned_returns[only_symbol].var(ddof=1)) if len(aligned_returns[only_symbol]) >= 2 else 0.0
+            )
             covariance = pd.DataFrame([[variance]], index=[only_symbol], columns=[only_symbol])
         else:
             covariance = pd.DataFrame(dtype=float)
@@ -375,7 +404,9 @@ class L1MicrostructureStateMachine:
         covariance = covariance.reindex(index=symbols, columns=symbols, fill_value=0.0).astype(float)
         for current_symbol in symbols:
             fallback_variance = self._fallback_variance(current_symbol)
-            current_variance = float(covariance.at[current_symbol, current_symbol]) if current_symbol in covariance.index else 0.0
+            current_variance = (
+                float(covariance.at[current_symbol, current_symbol]) if current_symbol in covariance.index else 0.0
+            )
             covariance.at[current_symbol, current_symbol] = max(current_variance, fallback_variance)
         return covariance
 
@@ -398,7 +429,9 @@ class L1MicrostructureStateMachine:
         total_signed_notional = 0.0
         for position in self.open_positions.values():
             direction = 1.0 if position.side == TradeAction.BUY else -1.0
-            total_signed_notional += direction * position.quantity * self._mark_price(position.symbol, state.book.midpoint)
+            total_signed_notional += (
+                direction * position.quantity * self._mark_price(position.symbol, state.book.midpoint)
+            )
         return total_signed_notional / equity
 
     def _symbol_exposure_fraction(self, symbol: str, fallback_midpoint: float) -> float:

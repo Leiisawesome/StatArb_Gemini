@@ -6,7 +6,9 @@ routing, and at most 25 US equity symbols.
 
 ## Safety model
 
-The daemon fails closed. It will not enable entries until promoted artifacts are
+The daemon fails closed. It will not enable entries until promoted artifacts have
+both a committed run manifest and a passing validation result, satisfy the configured
+`model_quality` thresholds, and are
 loaded, IBKR is connected, persisted orders and positions match the broker, every
 symbol has rebuilt its configured market context, and the persistent kill switch
 is clear.

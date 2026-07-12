@@ -66,7 +66,9 @@ class ArtifactBundleLoader:
     ) -> RuntimeArtifactBundle:
         state_calibration = self._load_state_calibration(state_calibration_id) if state_calibration_id else None
         regime_calibration = self._load_regime_calibration(regime_calibration_id) if regime_calibration_id else None
-        execution_calibration = self._load_execution_calibration(execution_calibration_id) if execution_calibration_id else None
+        execution_calibration = (
+            self._load_execution_calibration(execution_calibration_id) if execution_calibration_id else None
+        )
         transition_model = self.store.load(transition_model_id) if transition_model_id else None
         artifact_ids = {
             key: value
@@ -89,7 +91,11 @@ class ArtifactBundleLoader:
     def _load_state_calibration(self, artifact_id: str) -> StateCalibrationArtifact:
         self._validate_metadata(artifact_id, expected_type="state_calibration")
         payload = self.store.load(artifact_id)
-        self._require_payload_keys(payload, artifact_id, ("symbol", "spread_quantiles", "volatility_quantiles", "flicker_baseline", "quote_pressure_scale"))
+        self._require_payload_keys(
+            payload,
+            artifact_id,
+            ("symbol", "spread_quantiles", "volatility_quantiles", "flicker_baseline", "quote_pressure_scale"),
+        )
         return StateCalibrationArtifact(
             symbol=str(payload["symbol"]),
             spread_quantiles=tuple(payload["spread_quantiles"]),
@@ -146,26 +152,24 @@ class ArtifactBundleLoader:
             slippage_intercept_bps=float(payload["slippage_intercept_bps"]),
             spread_slippage_weight=float(payload["spread_slippage_weight"]),
             adverse_selection_weight=float(payload["adverse_selection_weight"]),
-            regime_fill_multipliers={str(key): float(value) for key, value in payload["regime_fill_multipliers"].items()},
-            regime_slippage_multipliers={str(key): float(value) for key, value in payload["regime_slippage_multipliers"].items()},
+            regime_fill_multipliers={
+                str(key): float(value) for key, value in payload["regime_fill_multipliers"].items()
+            },
+            regime_slippage_multipliers={
+                str(key): float(value) for key, value in payload["regime_slippage_multipliers"].items()
+            },
             metadata=dict(payload.get("metadata", {})),
         )
 
     def _validate_metadata(self, artifact_id: str, *, expected_type: str) -> ArtifactMetadata:
         metadata = self.store.load_metadata(artifact_id)
         if metadata.artifact_type != expected_type:
-            raise ValueError(
-                f"artifact {artifact_id} has type {metadata.artifact_type}, expected {expected_type}"
-            )
+            raise ValueError(f"artifact {artifact_id} has type {metadata.artifact_type}, expected {expected_type}")
         expected_version = self.EXPECTED_VERSIONS.get(expected_type)
         if expected_version is not None and metadata.version != expected_version:
-            raise ValueError(
-                f"artifact {artifact_id} has version {metadata.version}, expected {expected_version}"
-            )
+            raise ValueError(f"artifact {artifact_id} has version {metadata.version}, expected {expected_version}")
         if metadata.payload_format not in {None, "json"}:
-            raise ValueError(
-                f"artifact {artifact_id} uses unsupported payload format {metadata.payload_format}"
-            )
+            raise ValueError(f"artifact {artifact_id} uses unsupported payload format {metadata.payload_format}")
         return metadata
 
     @staticmethod
@@ -184,11 +188,11 @@ class ArtifactBundleSelector:
         self.loader = ArtifactBundleLoader(store)
 
     def resolve_latest_for_symbol(self, symbol: str) -> RuntimeArtifactBundle:
-        manifests = self._symbol_manifests(symbol)
-        run_id = self._latest_complete_run_id(manifests)
-        if run_id is None:
+        manifests = self.list_run_manifests(symbol)
+        if not manifests:
             raise ValueError(f"no complete artifact bundle found for symbol {symbol}")
-        return self.resolve_by_run_id(symbol=symbol, run_id=run_id)
+        manifests.sort(key=lambda manifest: (datetime.fromisoformat(manifest.created_at), manifest.run_id))
+        return self.resolve_by_run_id(symbol=symbol, run_id=manifests[-1].run_id)
 
     def resolve_latest_passing_for_symbol(
         self,
@@ -226,20 +230,35 @@ class ArtifactBundleSelector:
         return self.resolve_by_run_id(symbol=symbol, run_id=run_manifests[-1].run_id)
 
     def resolve_by_run_id(self, *, symbol: str, run_id: str) -> RuntimeArtifactBundle:
-        manifests = self._symbol_manifests(symbol)
-        selected = {metadata.artifact_type: metadata for metadata in manifests if metadata.metadata.get("run_id") == run_id}
-        missing = [artifact_type for artifact_type in self.REQUIRED_TYPES if artifact_type not in selected]
-        if missing:
-            raise ValueError(f"incomplete artifact bundle for symbol {symbol}, run_id {run_id}: missing {missing}")
         run_manifest = next(
             (manifest for manifest in self.list_run_manifests(symbol) if manifest.run_id == run_id),
             None,
         )
+        if run_manifest is None:
+            raise ValueError(f"no committed run manifest found for symbol {symbol}, run_id {run_id}")
+        if run_manifest.symbol != symbol:
+            raise ValueError(f"run manifest {run_id} belongs to {run_manifest.symbol}, expected {symbol}")
+        missing = [
+            artifact_type for artifact_type in self.REQUIRED_TYPES if artifact_type not in run_manifest.artifact_ids
+        ]
+        if missing:
+            raise ValueError(f"incomplete artifact bundle for symbol {symbol}, run_id {run_id}: missing {missing}")
+        selected: dict[str, str] = {}
+        for artifact_type in self.REQUIRED_TYPES:
+            artifact_id = run_manifest.artifact_ids[artifact_type]
+            metadata = self.store.load_metadata(artifact_id)
+            if metadata.artifact_type != artifact_type:
+                raise ValueError(
+                    f"run manifest artifact {artifact_id} has type {metadata.artifact_type}, expected {artifact_type}"
+                )
+            if metadata.metadata.get("symbol") != symbol or metadata.metadata.get("run_id") != run_id:
+                raise ValueError(f"run manifest artifact {artifact_id} does not belong to {symbol}/{run_id}")
+            selected[artifact_type] = artifact_id
         bundle = self.loader.load_runtime_bundle(
-            state_calibration_id=selected["state_calibration"].artifact_id,
-            regime_calibration_id=selected["regime_calibration"].artifact_id,
-            execution_calibration_id=selected["execution_calibration"].artifact_id,
-            transition_model_id=selected["transition_model"].artifact_id,
+            state_calibration_id=selected["state_calibration"],
+            regime_calibration_id=selected["regime_calibration"],
+            execution_calibration_id=selected["execution_calibration"],
+            transition_model_id=selected["transition_model"],
         )
         return RuntimeArtifactBundle(
             state_calibration=bundle.state_calibration,
@@ -250,14 +269,27 @@ class ArtifactBundleSelector:
             metadata={
                 "run_id": run_id,
                 "symbol": symbol,
-                **(run_manifest.metadata if run_manifest is not None else {}),
+                **run_manifest.metadata,
             },
         )
 
+    def resolve_passing_by_run_id(
+        self,
+        *,
+        symbol: str,
+        run_id: str,
+        quality_gate: RunQualityGate | None = None,
+    ) -> RuntimeArtifactBundle:
+        approved = any(
+            manifest.run_id == run_id
+            for manifest in self.list_run_manifests(symbol, passing_only=True, quality_gate=quality_gate)
+        )
+        if not approved:
+            raise ValueError(f"run {run_id} for {symbol} is not committed and validation-approved")
+        return self.resolve_by_run_id(symbol=symbol, run_id=run_id)
+
     def available_run_ids(self, symbol: str) -> list[str]:
-        manifests = self._symbol_manifests(symbol)
-        run_ids = {str(metadata.metadata.get("run_id")) for metadata in manifests if metadata.metadata.get("run_id")}
-        return sorted(run_ids)
+        return sorted(manifest.run_id for manifest in self.list_run_manifests(symbol))
 
     def list_run_manifests(
         self,
@@ -305,30 +337,3 @@ class ArtifactBundleSelector:
             if unseen_edge_rate > quality_gate.maximum_unseen_edge_rate:
                 return False
         return True
-
-    def _symbol_manifests(self, symbol: str) -> list[ArtifactMetadata]:
-        return [
-            metadata
-            for metadata in self.store.list_metadata()
-            if metadata.metadata.get("symbol") == symbol and metadata.artifact_type in self.REQUIRED_TYPES
-        ]
-
-    def _latest_complete_run_id(self, manifests: list[ArtifactMetadata]) -> str | None:
-        grouped: dict[str, list[ArtifactMetadata]] = {}
-        for metadata in manifests:
-            run_id = metadata.metadata.get("run_id")
-            if not run_id:
-                continue
-            grouped.setdefault(str(run_id), []).append(metadata)
-
-        complete_runs: list[tuple[datetime, str]] = []
-        for run_id, entries in grouped.items():
-            present = {entry.artifact_type for entry in entries}
-            if not all(required in present for required in self.REQUIRED_TYPES):
-                continue
-            latest_created_at = max(datetime.fromisoformat(entry.created_at) for entry in entries)
-            complete_runs.append((latest_created_at, run_id))
-        if not complete_runs:
-            return None
-        complete_runs.sort(key=lambda item: (item[0], item[1]))
-        return complete_runs[-1][1]
