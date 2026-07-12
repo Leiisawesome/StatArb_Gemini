@@ -17,10 +17,16 @@ from urllib.parse import urlparse
 
 from dotenv import dotenv_values
 
-from l1_microstructure.events import MarketEvent, QuoteEvent, TradeEvent
+from l1_microstructure.events import MarketEvent, QuoteEvent, TradeEvent, event_sort_key
 
-from ._massive_support import _EASTERN, MassiveEventFilterMixin, MassiveFilterConfig, event_sort_key
-from .interfaces import EventNormalizer, HistoricalBatchRequest, LiveSubscriptionRequest, MarketDataSource, SessionFilter
+from ._massive_support import _EASTERN, MassiveEventFilterMixin, MassiveFilterConfig
+from .interfaces import (
+    EventNormalizer,
+    HistoricalBatchRequest,
+    LiveSubscriptionRequest,
+    MarketDataSource,
+    SessionFilter,
+)
 
 RestClientFactory = Callable[["MassiveRESTConfig"], Any]
 WebSocketClientFactory = Callable[["MassiveWebSocketConfig", LiveSubscriptionRequest], Any]
@@ -148,7 +154,11 @@ class MassiveRESTDataSource(MassiveEventFilterMixin, MarketDataSource):
                 continue
             if isinstance(event, TradeEvent) and not request.include_trades:
                 continue
-            event_date = datetime.fromtimestamp(event.timestamp_ns / 1_000_000_000.0, tz=timezone.utc).astimezone(_EASTERN).date()
+            event_date = (
+                datetime.fromtimestamp(event.timestamp_ns / 1_000_000_000.0, tz=timezone.utc)
+                .astimezone(_EASTERN)
+                .date()
+            )
             if event_date != request.trade_date:
                 continue
             yield event

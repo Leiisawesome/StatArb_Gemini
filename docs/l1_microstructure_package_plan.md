@@ -30,6 +30,7 @@ l1_microstructure/
   execution.py
   features.py
   pipeline.py
+  recovery.py
   portfolio.py
   regime.py
   risk.py
@@ -61,13 +62,16 @@ l1_microstructure/
     __init__.py
     _ibkr_native.py
     broker_models.py
+    execution_session.py
     interfaces.py
     paper.py
+    recovery.py
     routed.py
     router_adapters.py
     source.py
   monitoring/
     __init__.py
+    alerts.py
     interfaces.py
     runtime.py
   replay/
@@ -135,10 +139,23 @@ Defines artifact-store contracts and implements local storage, runtime bundle lo
 Defines validation contracts and implements the rolling out-of-sample validation harness.
 
 `monitoring/`
-Defines monitoring contracts and implements runtime snapshot publication to in-memory and JSONL sinks.
+Defines runtime snapshots plus typed operational alerts with severity,
+categories, bounded history, and time-window deduplication. In-memory, JSONL,
+routed-live, and supervised production paths share this contract.
+
+`recovery.py`
+Defines the typed, versioned state-machine recovery schema and owns validation,
+snapshot capture, and restoration. `pipeline.py` retains compatibility facade
+methods without serializing subordinate engine internals itself.
 
 `live/`
 Defines paper and routed-live runner contracts and implements the simulator-backed paper runner, source-backed paper runner, routed-live runner, and IBKR router boundary.
+
+`live/recovery.py`
+Defines versioned routed-live and broker recovery envelopes. Recovery validates
+the full machine/router snapshot before runner mutation, stages broker lookups
+before replacing tracked orders, and exposes explicit open, missing, terminal,
+and mismatched reconciliation outcomes.
 
 ## Stable contract layer
 
@@ -153,10 +170,16 @@ Examples of contract surfaces already used in tests and implementations include:
 5. `TransitionDatasetBuilder` in `datasets/interfaces.py`
 6. `ArtifactStore` in `artifacts/interfaces.py`
 7. `ValidationHarness` in `validation/interfaces.py`
-8. `MonitoringSink` in `monitoring/interfaces.py`
+8. `MonitoringSink` and `AlertSink` in `monitoring/interfaces.py`
 9. `PaperTradingRunner` and `OrderRouter` in `live/interfaces.py`
 
 These interfaces are not theoretical placeholders anymore. They are the package’s internal seams for substitution, testing, and operational hardening.
+
+The root, `ingest`, and `live` package facades resolve exports lazily. Importing
+domain events, replay, research workflows, ingestion contracts, or routing
+contracts therefore does not initialize Massive, IBKR, FastAPI, Textual, or
+keyring integrations. Concrete infrastructure remains available through its
+explicit subpackage exports.
 
 ## Current execution model
 

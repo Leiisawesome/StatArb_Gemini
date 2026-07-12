@@ -20,6 +20,12 @@
     "allow_leverage": false,
     "allow_shorting": false
   },
+  "model_quality": {
+    "minimum_fill_rate": null,
+    "maximum_cancel_rate": null,
+    "maximum_drift_tracking_error_bps": null,
+    "maximum_unseen_edge_rate": null
+  },
   "session": {
     "timezone": "America/New_York",
     "market_open": "09:30",

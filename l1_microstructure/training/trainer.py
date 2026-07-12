@@ -6,6 +6,7 @@ from collections import defaultdict
 from dataclasses import asdict
 from datetime import datetime, timezone
 from hashlib import sha1
+from statistics import stdev
 from typing import Iterable
 
 import pandas as pd
@@ -70,22 +71,21 @@ class EmpiricalTransitionTrainer:
         if missing:
             raise ValueError(f"transition panel is missing required columns: {missing}")
 
+        columns = tuple(frame.columns)
+        column_indexes = {column: index for index, column in enumerate(columns)}
+        metadata_columns = tuple(column for column in columns if column not in required)
         samples: list[TransitionTrainingSample] = []
-        for record in frame.to_dict(orient="records"):
-            metadata = {
-                key: value
-                for key, value in record.items()
-                if key not in required
-            }
+        for values in frame.itertuples(index=False, name=None):
+            metadata = {column: values[column_indexes[column]] for column in metadata_columns}
             samples.append(
                 TransitionTrainingSample(
-                    symbol=str(record["symbol"]),
-                    from_state=str(record["from_state"]),
-                    to_state=str(record["to_state"]),
-                    regime=str(record["regime"]),
-                    horizon_ns=int(record.get("horizon_ns", 0)),
-                    holding_time_ns=int(record["holding_time_ns"]),
-                    realized_drift_bps=float(record["realized_drift_bps"]),
+                    symbol=str(values[column_indexes["symbol"]]),
+                    from_state=str(values[column_indexes["from_state"]]),
+                    to_state=str(values[column_indexes["to_state"]]),
+                    regime=str(values[column_indexes["regime"]]),
+                    horizon_ns=int(values[column_indexes["horizon_ns"]]) if "horizon_ns" in column_indexes else 0,
+                    holding_time_ns=int(values[column_indexes["holding_time_ns"]]),
+                    realized_drift_bps=float(values[column_indexes["realized_drift_bps"]]),
                     metadata=metadata,
                 )
             )
@@ -148,7 +148,7 @@ class EmpiricalTransitionTrainer:
                 "transition_probability": len(edge_samples) / max(total_outgoing, 1),
                 "mean_holding_time_ns": float(sum(holding_times) / max(len(holding_times), 1)),
                 "drift_mean_bps": float(sum(drifts) / max(len(drifts), 1)),
-                "drift_std_bps": float(pd.Series(drifts).std(ddof=1)) if len(drifts) > 1 else 0.0,
+                "drift_std_bps": float(stdev(drifts)) if len(drifts) > 1 else 0.0,
                 "holding_times_ns": [int(value) for value in holding_times],
                 "drift_samples_bps": [float(value) for value in drifts],
             }
@@ -162,6 +162,16 @@ class EmpiricalTransitionTrainer:
     @staticmethod
     def _model_id(samples: list[TransitionTrainingSample]) -> str:
         digest = sha1()
-        for sample in sorted(samples, key=lambda current: (current.symbol, current.from_state, current.to_state, current.regime, current.holding_time_ns, current.realized_drift_bps)):
+        for sample in sorted(
+            samples,
+            key=lambda current: (
+                current.symbol,
+                current.from_state,
+                current.to_state,
+                current.regime,
+                current.holding_time_ns,
+                current.realized_drift_bps,
+            ),
+        ):
             digest.update(repr(asdict(sample)).encode("utf-8"))
         return digest.hexdigest()

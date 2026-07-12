@@ -46,6 +46,10 @@ def create_app(runtime: ProductionRuntime, api_token: str) -> FastAPI:
     def events(limit: int = 100, _: None = Depends(authorize)) -> list[dict]:
         return runtime.ledger.recent_events(min(max(limit, 1), 500))
 
+    @app.get("/alerts")
+    def alerts(limit: int = 100, _: None = Depends(authorize)) -> list[dict]:
+        return runtime.recent_alerts(min(max(limit, 1), 500))
+
     @app.post("/control/pause")
     def pause(request: ControlRequest, _: None = Depends(authorize)) -> dict:
         runtime.pause(request.reason)

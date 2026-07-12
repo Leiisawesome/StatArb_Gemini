@@ -6,6 +6,8 @@ from datetime import datetime
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
+import pytest
+
 from l1_microstructure.cli import main
 from l1_microstructure.events import MarketEvent
 from l1_microstructure.execution import ExecutionReport
@@ -28,7 +30,15 @@ def _payloads() -> list[dict[str, object]]:
         {"ev": "T", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 5), "p": 100.05, "s": 300, "side": "buy"},
         {"ev": "Q", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 7), "bp": 100.07, "ap": 100.09, "bs": 420, "as": 60},
         {"ev": "T", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 8), "p": 100.08, "s": 350, "side": "buy"},
-        {"ev": "Q", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 10), "bp": 100.10, "ap": 100.14, "bs": 30, "as": 260},
+        {
+            "ev": "Q",
+            "sym": "AAPL",
+            "t": _et_ns(2024, 3, 11, 9, 30, 10),
+            "bp": 100.10,
+            "ap": 100.14,
+            "bs": 30,
+            "as": 260,
+        },
     ]
 
 
@@ -55,7 +65,9 @@ def _patched_cli_sources():
     with (
         patch("l1_microstructure.cli._historical_source", side_effect=lambda: _fixture_source()),
         patch("l1_microstructure.cli._live_source", side_effect=lambda: _fixture_source()),
-        patch("l1_microstructure.cli._latest_observed_state_from_rest", side_effect=lambda symbol: _latest_state(symbol)),
+        patch(
+            "l1_microstructure.cli._latest_observed_state_from_rest", side_effect=lambda symbol: _latest_state(symbol)
+        ),
     ):
         yield
 
@@ -344,6 +356,7 @@ def test_cli_paper_historical_accepts_quality_gate(tmp_path, capsys) -> None:
 
 def test_cli_live_routed_runs_with_ibkr_router(tmp_path, capsys) -> None:
     artifact_root = tmp_path / "artifacts"
+
     class FakeLiveRouter:
         def __init__(self) -> None:
             self.pending_reports: list[ExecutionReport] = []
@@ -363,7 +376,11 @@ def test_cli_live_routed_runs_with_ibkr_router(tmp_path, capsys) -> None:
                     timestamp_ns=request.executable_timestamp_ns,
                 )
             )
-            return type("Ack", (), {"external_order_id": "ibkr-live-1", "status": "accepted", "reason": "accepted", "metadata": {}})()
+            return type(
+                "Ack",
+                (),
+                {"external_order_id": "ibkr-live-1", "status": "accepted", "reason": "accepted", "metadata": {}},
+            )()
 
         def poll(self, symbols):
             ready = [report for report in self.pending_reports if report.symbol in symbols]
@@ -373,7 +390,10 @@ def test_cli_live_routed_runs_with_ibkr_router(tmp_path, capsys) -> None:
         def stop(self):
             return None
 
-    with _patched_cli_sources(), patch("l1_microstructure.cli.IBKRBrokerOrderRouter.from_env", return_value=FakeLiveRouter()):
+    with (
+        _patched_cli_sources(),
+        patch("l1_microstructure.cli.IBKRBrokerOrderRouter.from_env", return_value=FakeLiveRouter()),
+    ):
         workflow_exit = main(
             [
                 "workflow",
@@ -431,6 +451,20 @@ def test_cli_ibkr_live_smoke_reports_router_health(capsys) -> None:
     assert payload["health"]["connected"] is True
     assert payload["open_order_ids"] == ["ibkr-1"]
     factory.assert_called_once_with("broker.env", require_paper=True)
+
+
+def test_cli_lightweight_routed_runner_rejects_live_capital() -> None:
+    with pytest.raises(ValueError, match="supervised trading-daemon"):
+        main(
+            [
+                "live-routed",
+                "--artifact-root",
+                "unused",
+                "--symbol",
+                "AAPL",
+                "--allow-live-broker-routing",
+            ]
+        )
 
 
 def test_cli_ibkr_live_order_smoke_submits_and_cancels_open_route(tmp_path, capsys) -> None:

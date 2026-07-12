@@ -4,6 +4,7 @@ from collections import deque
 from dataclasses import replace
 
 import numpy as np
+import pytest
 
 from l1_microstructure.artifacts.runtime import RuntimeArtifactBundle
 from l1_microstructure.config import FrameworkConfig
@@ -192,7 +193,9 @@ def test_execution_simulator_cancels_when_state_misaligned() -> None:
     regime = machine.regime_inferencer.update(expected)
 
     edge = EdgeKey("x", "y", MicrostructureRegime.LIQUIDITY_SHOCK)
-    intent = machine.decision_engine.decide(edge, machine.transition_kernel.get_edge(edge), machine.transition_kernel.diagnostic(edge), regime, expected)
+    intent = machine.decision_engine.decide(
+        edge, machine.transition_kernel.get_edge(edge), machine.transition_kernel.diagnostic(edge), regime, expected
+    )
     request = simulator.build_request(intent, expected, 100)
     report = simulator.execute(request, realized)
 
@@ -294,7 +297,11 @@ def test_execution_simulator_penalizes_large_orders_against_thin_touch_depth() -
     request = simulator.build_request(
         TradeIntent(
             action=TradeAction.BUY,
-            edge=EdgeKey("tight|neutral|neutral|stable|quiet", "wide|buy_heavy|buy_heavy|chaotic|stressed", MicrostructureRegime.EXECUTION_FLOW),
+            edge=EdgeKey(
+                "tight|neutral|neutral|stable|quiet",
+                "wide|buy_heavy|buy_heavy|chaotic|stressed",
+                MicrostructureRegime.EXECUTION_FLOW,
+            ),
             posterior=PosteriorEstimate(
                 mean_bps=4.0,
                 std_bps=1.0,
@@ -401,7 +408,11 @@ def test_state_machine_sizes_incrementally_against_portfolio_target_weight() -> 
 
     intent = TradeIntent(
         action=TradeAction.BUY,
-        edge=EdgeKey("tight|neutral|neutral|stable|quiet", "wide|buy_heavy|buy_heavy|chaotic|stressed", MicrostructureRegime.EXECUTION_FLOW),
+        edge=EdgeKey(
+            "tight|neutral|neutral|stable|quiet",
+            "wide|buy_heavy|buy_heavy|chaotic|stressed",
+            MicrostructureRegime.EXECUTION_FLOW,
+        ),
         posterior=PosteriorEstimate(
             mean_bps=4.0,
             std_bps=1.0,
@@ -495,3 +506,11 @@ def test_pipeline_resolves_forward_drift_outcomes() -> None:
     summary = machine.summarize_transition_edges()
     assert not summary.empty
     assert "drift_mean_bps" in summary.columns
+
+
+def test_state_machine_rejects_events_for_a_different_symbol() -> None:
+    machine = L1MicrostructureStateMachine()
+    machine.on_event(QuoteEvent("AAPL", 1_000_000_000, 100.0, 100.01, 100, 100))
+
+    with pytest.raises(ValueError, match="cannot process event for MSFT"):
+        machine.on_event(QuoteEvent("MSFT", 2_000_000_000, 200.0, 200.01, 100, 100))

@@ -9,13 +9,15 @@ from time import sleep
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from l1_microstructure.artifacts import ArtifactBundleSelector, LocalArtifactStore
+from l1_microstructure.artifacts import ArtifactBundleSelector, LocalArtifactStore, RunQualityGate
 from l1_microstructure.config import FrameworkConfig
 from l1_microstructure.decision import TradeAction, TradeIntent
 from l1_microstructure.events import MarketEvent
-from l1_microstructure.execution import ExecutionRequest
+from l1_microstructure.execution import ExecutionReport, ExecutionRequest
 from l1_microstructure.ingest.interfaces import LiveSubscriptionRequest, MarketDataSource
-from l1_microstructure.live.interfaces import OrderRouter
+from l1_microstructure.live.execution_session import RoutedExecutionService
+from l1_microstructure.live.interfaces import ProductionOrderRouter, RouteAcknowledgement
+from l1_microstructure.monitoring import AlertCategory, AlertSeverity, OperationalAlertManager
 from l1_microstructure.pipeline import L1MicrostructureStateMachine
 from l1_microstructure.risk import OpenPosition
 from l1_microstructure.transitions import EdgeKey
@@ -34,24 +36,26 @@ class ProductionRuntime:
         config: ProductionConfig,
         *,
         source: MarketDataSource,
-        router: OrderRouter,
+        router: ProductionOrderRouter,
         framework_config: FrameworkConfig | None = None,
         ledger: OperationalLedger | None = None,
         alert_sink: LocalAlertSink | None = None,
     ):
         self.config = config
         self.source = source
+        self._validate_router_capabilities(router)
         self.router = router
+        self.execution_service = RoutedExecutionService(router)
         self.framework_config = framework_config or FrameworkConfig()
         self.ledger = ledger or OperationalLedger(config.database_path)
         self.alert_sink = alert_sink or LocalAlertSink()
+        self.alerts = OperationalAlertManager(self.alert_sink)
         persisted_state = self.ledger.get_state("lifecycle_state", LifecycleState.STOPPED.value)
         initial = LifecycleState.HALTED if persisted_state == LifecycleState.HALTED.value else LifecycleState.STOPPED
         self.lifecycle = RuntimeLifecycle(initial)
         persisted_models = self.ledger.get_state("promoted_models", {})
         self.promoted_run_ids = {
-            symbol: str(persisted_models.get(symbol, config.promoted_run_ids[symbol]))
-            for symbol in config.symbols
+            symbol: str(persisted_models.get(symbol, config.promoted_run_ids[symbol])) for symbol in config.symbols
         }
         self.machines: dict[str, L1MicrostructureStateMachine] = {}
         self.last_event_timestamp_ns: dict[str, int] = {}
@@ -73,7 +77,14 @@ class ProductionRuntime:
                 self._transition(LifecycleState.RECONCILING, "reconciling broker and ledger")
             failure, snapshot = self._reconciliation_failure()
             if failure is not None:
-                self._halt(failure)
+                broker_disconnected = failure.startswith("broker is not connected")
+                self._halt(
+                    failure,
+                    category=(
+                        AlertCategory.BROKER_CONNECTIVITY if broker_disconnected else AlertCategory.RECONCILIATION
+                    ),
+                    code="broker_disconnected" if broker_disconnected else "reconciliation_failed",
+                )
                 return
             if not self.machines:
                 self._load_machines()
@@ -99,7 +110,7 @@ class ProductionRuntime:
                 try:
                     self.start()
                 except BaseException as exc:
-                    self._halt(f"runtime startup failed: {exc}")
+                    self._halt(f"runtime startup failed: {exc}", code="runtime_startup_failed")
             if self.lifecycle.state not in {LifecycleState.WARMING, LifecycleState.RUNNING, LifecycleState.FLATTENING}:
                 sleep(self.config.reconnect_backoff_seconds)
                 continue
@@ -109,7 +120,11 @@ class ProductionRuntime:
                         break
                     self.process_event(event)
             except BaseException as exc:
-                self._halt(f"market-data loop failed: {exc}")
+                self._halt(
+                    f"market-data loop failed: {exc}",
+                    category=AlertCategory.MARKET_DATA,
+                    code="market_data_loop_failed",
+                )
             finally:
                 self._poll_reports()
             if not self._shutdown:
@@ -119,7 +134,12 @@ class ProductionRuntime:
         if event.symbol not in self.machines:
             return
         if self._event_is_stale(event):
-            self._halt(f"stale market data for {event.symbol}")
+            self._halt(
+                f"stale market data for {event.symbol}",
+                category=AlertCategory.MARKET_DATA,
+                code="stale_market_data",
+                symbol=event.symbol,
+            )
             return
         if self.lifecycle.state is LifecycleState.FLATTENING:
             machine = self.machines[event.symbol]
@@ -131,7 +151,7 @@ class ProductionRuntime:
                 self._transition(LifecycleState.STOPPED, "flatten complete")
                 self._running = False
             elif self._flatten_timed_out(event.timestamp_ns):
-                self._halt("flatten timed out with unresolved positions or orders")
+                self._halt("flatten timed out with unresolved positions or orders", code="flatten_timeout")
             return
         session_phase = self._session_phase(event.timestamp_ns)
         self.last_event_timestamp_ns[event.symbol] = event.timestamp_ns
@@ -139,9 +159,18 @@ class ProductionRuntime:
         self._poll_reports()
         daily_loss_reason = self._daily_loss_breach()
         if daily_loss_reason is not None:
-            self._halt(daily_loss_reason)
+            self._halt(daily_loss_reason, category=AlertCategory.RISK, code="daily_loss_limit_breached")
             return
         update = self.machines[event.symbol].on_event(event)
+        risk_engine = getattr(self.machines[event.symbol], "risk_engine", None)
+        if bool(getattr(risk_engine, "halted", False)):
+            self._halt(
+                f"strategy risk engine halted for {event.symbol}",
+                category=AlertCategory.RISK,
+                code="strategy_risk_halt",
+                symbol=event.symbol,
+            )
+            return
         self._complete_warmup_if_ready()
         if session_phase == "flatten" and self.lifecycle.state in {
             LifecycleState.WARMING,
@@ -151,7 +180,11 @@ class ProductionRuntime:
             self.flatten()
             return
         if session_phase == "closed" and any(machine.open_positions for machine in self.machines.values()):
-            self._halt("market closed with unresolved strategy positions")
+            self._halt(
+                "market closed with unresolved strategy positions",
+                category=AlertCategory.RISK,
+                code="positions_open_after_close",
+            )
             return
         if update is None:
             return
@@ -181,7 +214,7 @@ class ProductionRuntime:
 
     def halt(self, reason: str = "operator kill switch") -> None:
         self.ledger.set_state("kill_switch", True)
-        self._halt(reason)
+        self._halt(reason, category=AlertCategory.RISK, code="operator_kill_switch")
 
     def clear_kill_switch(self) -> None:
         if self.lifecycle.state is not LifecycleState.HALTED:
@@ -196,7 +229,11 @@ class ProductionRuntime:
         if symbol not in self.config.symbols:
             raise ValueError(f"symbol is not in the configured universe: {symbol}")
         selector = ArtifactBundleSelector(LocalArtifactStore(self.config.artifact_root))
-        selector.resolve_by_run_id(symbol=symbol, run_id=run_id)
+        selector.resolve_passing_by_run_id(
+            symbol=symbol,
+            run_id=run_id,
+            quality_gate=self._model_quality_gate(),
+        )
         self.promoted_run_ids[symbol] = run_id
         self.ledger.set_state("promoted_models", self.promoted_run_ids)
         self.ledger.append_event("model", "promoted", {"symbol": symbol, "run_id": run_id})
@@ -208,10 +245,8 @@ class ProductionRuntime:
         self._transition(LifecycleState.FLATTENING, "flatten requested")
         self._flatten_started_at_ns = int(datetime.now(timezone.utc).timestamp() * 1_000_000_000)
         self._flatten_submitted_symbols = set()
-        cancel = getattr(self.router, "cancel", None)
-        if callable(cancel):
-            for order_id in self._router_open_order_ids():
-                cancel(order_id)
+        for order_id in self._router_open_order_ids():
+            self.execution_service.cancel(order_id)
         for symbol, machine in self.machines.items():
             self._route_flatten_symbol(symbol, machine)
         self._poll_reports()
@@ -243,7 +278,7 @@ class ProductionRuntime:
         self._running = False
         if self.lifecycle.state is LifecycleState.RUNNING:
             self.pause("runtime stopping")
-        self.router.stop()
+        self.execution_service.stop()
         if self.lifecycle.state in {
             LifecycleState.STARTING,
             LifecycleState.WARMING,
@@ -271,16 +306,21 @@ class ProductionRuntime:
                 if symbol in machine.open_positions
             },
             "broker": self._router_health(),
+            "alerts": self.recent_alerts(20),
         }
+
+    def recent_alerts(self, limit: int = 100) -> list[dict[str, Any]]:
+        return self.alerts.recent_dicts(limit)
 
     def _load_machines(self) -> None:
         selector = ArtifactBundleSelector(LocalArtifactStore(self.config.artifact_root))
         self.machines = {
             symbol: L1MicrostructureStateMachine(
                 self.framework_config,
-                runtime_artifacts=selector.resolve_by_run_id(
+                runtime_artifacts=selector.resolve_passing_by_run_id(
                     symbol=symbol,
                     run_id=self.promoted_run_ids[symbol],
+                    quality_gate=self._model_quality_gate(),
                 ),
                 route_orders_externally=True,
             )
@@ -294,23 +334,30 @@ class ProductionRuntime:
         if not health.get("connected"):
             return f"broker is not connected: {health.get('error') or health.get('status')}", health
         ledger_external_ids = {
-            str(order["external_order_id"])
-            for order in self.ledger.open_orders()
-            if order.get("external_order_id")
+            str(order["external_order_id"]) for order in self.ledger.open_orders() if order.get("external_order_id")
         }
         router_ids = set(self._router_open_order_ids())
         snapshot_ids = {str(value) for value in health.get("open_order_ids", router_ids)}
         if snapshot_ids != router_ids:
-            return f"router reconciliation mismatch snapshot={sorted(snapshot_ids)} tracked={sorted(router_ids)}", health
+            return (
+                f"router reconciliation mismatch snapshot={sorted(snapshot_ids)} tracked={sorted(router_ids)}",
+                health,
+            )
         if ledger_external_ids != router_ids:
-            return f"open-order reconciliation mismatch ledger={sorted(ledger_external_ids)} broker={sorted(router_ids)}", health
+            return (
+                f"open-order reconciliation mismatch ledger={sorted(ledger_external_ids)} broker={sorted(router_ids)}",
+                health,
+            )
         expected_positions = self.ledger.get_state("strategy_positions", {})
         broker_positions = health.get("positions", {})
         for symbol in self.config.symbols:
             expected_quantity = float(expected_positions.get(symbol, 0.0))
             broker_quantity = float(dict(broker_positions.get(symbol, {})).get("quantity", 0.0))
             if expected_quantity != broker_quantity:
-                return f"position reconciliation mismatch for {symbol}: ledger={expected_quantity} broker={broker_quantity}", health
+                return (
+                    f"position reconciliation mismatch for {symbol}: ledger={expected_quantity} broker={broker_quantity}",
+                    health,
+                )
         if self.config.mode is OperatingMode.LIVE and health.get("net_liquidation") is None:
             return "live reconciliation requires broker net liquidation value", health
         if health.get("net_liquidation") is not None and self.ledger.get_state("session_start_net_liquidation") is None:
@@ -348,12 +395,8 @@ class ProductionRuntime:
         self._transition(LifecycleState.RUNNING, "runtime enabled")
 
     def _reconciliation_snapshot(self) -> dict[str, Any]:
-        reconcile = getattr(self.router, "reconciliation_snapshot", None)
-        if callable(reconcile):
-            snapshot = reconcile()
-            if isinstance(snapshot, dict):
-                return dict(snapshot)
-        return self._router_health()
+        snapshot = self.execution_service.reconciliation_snapshot()
+        return snapshot or {"connected": False, "status": "invalid reconciliation snapshot"}
 
     def _may_route(self, request: ExecutionRequest) -> bool:
         machine = self.machines[request.symbol]
@@ -366,7 +409,9 @@ class ProductionRuntime:
             self.ledger.append_event("risk", "order_blocked", {"reason": session_phase, "symbol": request.symbol})
             return False
         if not is_exit and self._would_breach_exposure(request):
-            self.ledger.append_event("risk", "order_blocked", {"reason": "production exposure limit", "symbol": request.symbol})
+            self.ledger.append_event(
+                "risk", "order_blocked", {"reason": "production exposure limit", "symbol": request.symbol}
+            )
             return False
         if not is_exit and request.action is TradeAction.SELL and not self.config.risk.allow_shorting:
             self.ledger.append_event("risk", "order_blocked", {"reason": "shorting disabled", "symbol": request.symbol})
@@ -380,33 +425,67 @@ class ProductionRuntime:
             "quantity": request.quantity,
             "decision_timestamp_ns": request.decision_timestamp_ns,
         }
-        self.ledger.record_order_intent(payload, request.client_order_id)
-        acknowledgement = self.router.submit(request)
-        self.ledger.update_order(
-            request.client_order_id,
-            acknowledgement.status,
-            external_order_id=acknowledgement.external_order_id,
-            payload={**payload, "reason": acknowledgement.reason},
+
+        def record_intent(current: ExecutionRequest) -> None:
+            self.ledger.record_order_intent(payload, current.client_order_id)
+
+        def record_acknowledgement(current: ExecutionRequest, acknowledgement: RouteAcknowledgement) -> None:
+            self.ledger.update_order(
+                current.client_order_id,
+                acknowledgement.status,
+                external_order_id=acknowledgement.external_order_id,
+                payload={**payload, "reason": acknowledgement.reason},
+            )
+            self.ledger.append_event("order", "route_acknowledgement", {**payload, **asdict(acknowledgement)})
+            if acknowledgement.status != "accepted":
+                self._halt(
+                    f"broker rejected order for {current.symbol}: {acknowledgement.reason}",
+                    category=AlertCategory.ORDER_ROUTING,
+                    code="order_rejected",
+                    symbol=current.symbol,
+                )
+
+        self.execution_service.submit(
+            request,
+            before_submit=record_intent,
+            after_submit=record_acknowledgement,
         )
-        self.ledger.append_event("order", "route_acknowledgement", {**payload, **asdict(acknowledgement)})
-        if acknowledgement.status != "accepted":
-            self._halt(f"broker rejected order for {request.symbol}: {acknowledgement.reason}")
 
     def _poll_reports(self) -> None:
-        for report in self.router.poll(self.config.symbols):
-            machine = self.machines.get(report.symbol)
-            if machine is not None:
-                machine.ingest_execution_report(report)
-            if report.client_order_id:
-                ledger_status = "partial_filled" if report.reason == "broker reported partial fill" else report.status
-                self.ledger.update_order(
-                    report.client_order_id,
-                    ledger_status,
-                    external_order_id=report.external_order_id,
-                    payload=asdict(report),
-                )
-            self.ledger.append_event("order", "execution_report", asdict(report))
+        if self._shutdown or self.lifecycle.state is LifecycleState.STOPPED:
+            return
+        health = self._router_health()
+        if not health.get("connected"):
+            self._halt(
+                f"broker disconnected: {health.get('error') or health.get('status')}",
+                category=AlertCategory.BROKER_CONNECTIVITY,
+                code="broker_disconnected",
+            )
+            return
+        self.execution_service.poll(
+            self.config.symbols,
+            consumer_for_symbol=self.machines.get,
+            after_report=self._record_execution_report,
+        )
         self._persist_positions()
+
+    def _record_execution_report(self, report: ExecutionReport) -> None:
+        if report.client_order_id:
+            ledger_status = "partial_filled" if report.reason == "broker reported partial fill" else report.status
+            self.ledger.update_order(
+                report.client_order_id,
+                ledger_status,
+                external_order_id=report.external_order_id,
+                payload=asdict(report),
+            )
+        self.ledger.append_event("order", "execution_report", asdict(report))
+        if report.status == "rejected":
+            self._halt(
+                f"broker rejected order for {report.symbol}: {report.reason}",
+                category=AlertCategory.ORDER_ROUTING,
+                code="order_rejected",
+                symbol=report.symbol,
+            )
 
     def _persist_positions(self) -> None:
         positions: dict[str, float] = {}
@@ -470,10 +549,13 @@ class ProductionRuntime:
     def _flatten_timed_out(self, event_timestamp_ns: int) -> bool:
         if self._flatten_started_at_ns is None:
             return False
-        elapsed_ns = max(
-            event_timestamp_ns,
-            int(datetime.now(timezone.utc).timestamp() * 1_000_000_000),
-        ) - self._flatten_started_at_ns
+        elapsed_ns = (
+            max(
+                event_timestamp_ns,
+                int(datetime.now(timezone.utc).timestamp() * 1_000_000_000),
+            )
+            - self._flatten_started_at_ns
+        )
         return elapsed_ns >= int(self.config.flatten_timeout_seconds * 1_000_000_000)
 
     def _event_is_stale(self, event: MarketEvent) -> bool:
@@ -487,26 +569,57 @@ class ProductionRuntime:
             return False
         market_open = datetime.combine(local.date(), time.fromisoformat(self.config.session.market_open), local.tzinfo)
         warmup_start = market_open - timedelta(seconds=self.config.warmup_seconds)
-        stop_entries = datetime.combine(local.date(), time.fromisoformat(self.config.session.stop_entries), local.tzinfo)
+        stop_entries = datetime.combine(
+            local.date(), time.fromisoformat(self.config.session.stop_entries), local.tzinfo
+        )
         return warmup_start <= local < stop_entries
 
     def _router_health(self) -> dict[str, Any]:
-        health_check = getattr(self.router, "health_check", None)
-        if not callable(health_check):
-            return {"connected": False, "status": "health check unavailable"}
-        health = health_check()
-        return dict(health) if isinstance(health, dict) else {"connected": False, "status": "invalid health response"}
+        return self.execution_service.health() or {"connected": False, "status": "invalid health response"}
 
     def _router_open_order_ids(self) -> list[str]:
-        open_order_ids = getattr(self.router, "open_order_ids", None)
-        return list(open_order_ids()) if callable(open_order_ids) else []
+        return self.execution_service.open_order_ids()
 
-    def _halt(self, reason: str) -> None:
+    def _model_quality_gate(self) -> RunQualityGate:
+        policy = self.config.model_quality
+        return RunQualityGate(
+            minimum_fill_rate=policy.minimum_fill_rate,
+            maximum_cancel_rate=policy.maximum_cancel_rate,
+            maximum_drift_tracking_error_bps=policy.maximum_drift_tracking_error_bps,
+            maximum_unseen_edge_rate=policy.maximum_unseen_edge_rate,
+        )
+
+    @staticmethod
+    def _validate_router_capabilities(router: ProductionOrderRouter) -> None:
+        required = ("submit", "poll", "stop", "cancel", "open_order_ids", "health_check", "reconciliation_snapshot")
+        missing = [name for name in required if not callable(getattr(router, name, None))]
+        if missing:
+            raise TypeError(f"production router is missing required capabilities: {missing}")
+
+    def _halt(
+        self,
+        reason: str,
+        *,
+        category: AlertCategory = AlertCategory.RUNTIME,
+        code: str = "runtime_halted",
+        symbol: str | None = None,
+    ) -> None:
         if self.lifecycle.state is not LifecycleState.HALTED:
             self._transition(LifecycleState.HALTED, reason)
         self._running = False
-        self.ledger.append_event("incident", "runtime_halted", {"reason": reason})
-        self.alert_sink.critical("Trading runtime halted", reason)
+        alert = self.alerts.emit(
+            AlertSeverity.CRITICAL,
+            category,
+            code,
+            reason,
+            symbol=symbol,
+            metadata={"lifecycle": self.lifecycle.state.value},
+        )
+        self.ledger.append_event(
+            "incident",
+            "runtime_halted",
+            {"reason": reason, "alert": alert.to_dict() if alert is not None else None},
+        )
 
     def _transition(self, target: LifecycleState, reason: str) -> None:
         transition = self.lifecycle.transition(target, reason)

@@ -33,6 +33,14 @@ class SessionPolicy:
 
 
 @dataclass(frozen=True, slots=True)
+class ModelQualityPolicy:
+    minimum_fill_rate: float | None = None
+    maximum_cancel_rate: float | None = None
+    maximum_drift_tracking_error_bps: float | None = None
+    maximum_unseen_edge_rate: float | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class ProductionConfig:
     symbols: tuple[str, ...]
     artifact_root: Path
@@ -48,6 +56,7 @@ class ProductionConfig:
     flatten_timeout_seconds: float = 60.0
     risk: RiskLimits = field(default_factory=RiskLimits)
     session: SessionPolicy = field(default_factory=SessionPolicy)
+    model_quality: ModelQualityPolicy = field(default_factory=ModelQualityPolicy)
     live_risk_acknowledgement: str | None = None
 
     def __post_init__(self) -> None:
@@ -71,6 +80,15 @@ class ProductionConfig:
         self._validate_fraction("daily_loss_fraction", self.risk.daily_loss_fraction)
         self._validate_fraction("max_gross_exposure", self.risk.max_gross_exposure)
         self._validate_fraction("max_symbol_exposure", self.risk.max_symbol_exposure)
+        for name in ("minimum_fill_rate", "maximum_cancel_rate", "maximum_unseen_edge_rate"):
+            value = getattr(self.model_quality, name)
+            if value is not None:
+                self._validate_fraction(name, value, allow_zero=True)
+        if (
+            self.model_quality.maximum_drift_tracking_error_bps is not None
+            and self.model_quality.maximum_drift_tracking_error_bps < 0
+        ):
+            raise ValueError("maximum_drift_tracking_error_bps cannot be negative")
         if self.risk.max_symbol_exposure > self.risk.max_gross_exposure:
             raise ValueError("max_symbol_exposure cannot exceed max_gross_exposure")
         if self.mode is OperatingMode.LIVE and self.live_risk_acknowledgement != "I_ACCEPT_LIVE_CAPITAL_RISK":
@@ -84,12 +102,13 @@ class ProductionConfig:
             raise ValueError("production configuration must be a JSON object")
         risk = RiskLimits(**dict(payload.pop("risk", {})))
         session = SessionPolicy(**dict(payload.pop("session", {})))
+        model_quality = ModelQualityPolicy(**dict(payload.pop("model_quality", {})))
         for key in ("artifact_root", "database_path", "broker_env_file"):
             if payload.get(key) is not None:
                 payload[key] = Path(payload[key]).expanduser()
         payload["symbols"] = tuple(payload["symbols"])
         payload["mode"] = OperatingMode(payload.get("mode", OperatingMode.PAPER.value))
-        return cls(risk=risk, session=session, **payload)
+        return cls(risk=risk, session=session, model_quality=model_quality, **payload)
 
     def public_dict(self) -> dict[str, Any]:
         return {
@@ -101,9 +120,17 @@ class ProductionConfig:
             "api_port": self.api_port,
             "event_stale_after_seconds": self.event_stale_after_seconds,
             "warmup_seconds": self.warmup_seconds,
+            "model_quality": {
+                "minimum_fill_rate": self.model_quality.minimum_fill_rate,
+                "maximum_cancel_rate": self.model_quality.maximum_cancel_rate,
+                "maximum_drift_tracking_error_bps": self.model_quality.maximum_drift_tracking_error_bps,
+                "maximum_unseen_edge_rate": self.model_quality.maximum_unseen_edge_rate,
+            },
         }
 
     @staticmethod
-    def _validate_fraction(name: str, value: float) -> None:
-        if not 0.0 < float(value) <= 1.0:
-            raise ValueError(f"{name} must be in (0, 1]")
+    def _validate_fraction(name: str, value: float, *, allow_zero: bool = False) -> None:
+        lower_bound_satisfied = float(value) >= 0.0 if allow_zero else float(value) > 0.0
+        if not lower_bound_satisfied or float(value) > 1.0:
+            interval = "[0, 1]" if allow_zero else "(0, 1]"
+            raise ValueError(f"{name} must be in {interval}")

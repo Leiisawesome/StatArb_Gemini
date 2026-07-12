@@ -12,23 +12,18 @@ from l1_microstructure.artifacts import ArtifactBundleSelector, RunQualityGate, 
 from l1_microstructure.config import FrameworkConfig
 from l1_microstructure.execution import ExecutionReport
 from l1_microstructure.ingest.interfaces import LiveSubscriptionRequest, MarketDataSource
-from l1_microstructure.monitoring import InMemoryMonitoringSink, RuntimeMonitor
-from l1_microstructure.pipeline import FrameworkUpdate, L1MicrostructureStateMachine, StateMachineRecoverySnapshot
+from l1_microstructure.monitoring import AlertCategory, AlertSeverity, InMemoryMonitoringSink, RuntimeMonitor
+from l1_microstructure.pipeline import FrameworkUpdate, L1MicrostructureStateMachine
 
+from .execution_session import RoutedExecutionService
 from .interfaces import OrderRouter, RouteAcknowledgement, RunnerConfig
-
-
-@dataclass(frozen=True, slots=True)
-class RoutedLiveRecoverySnapshot:
-    machine_snapshot: StateMachineRecoverySnapshot
-    runtime_artifacts: RuntimeArtifactBundle
-    route_acknowledgements: list[RouteAcknowledgement]
-    execution_reports: list[ExecutionReport]
-    router_recovery_state: Any | None = None
+from .recovery import BrokerRecoveryReconciliation, RoutedLiveRecoveryCodec, RoutedLiveRecoverySnapshot
 
 
 @dataclass(slots=True)
 class RoutedLiveTradingRunner:
+    """Lightweight embedded runner; use ProductionRuntime for operator-facing live trading."""
+
     source: MarketDataSource
     router: OrderRouter
     framework_config: FrameworkConfig | None = None
@@ -42,11 +37,14 @@ class RoutedLiveTradingRunner:
     updates: list[FrameworkUpdate] = field(default_factory=list)
     route_acknowledgements: list[RouteAcknowledgement] = field(default_factory=list)
     execution_reports: list[ExecutionReport] = field(default_factory=list)
+    execution_service: RoutedExecutionService = field(init=False)
+    _symbols: tuple[str, ...] = field(default_factory=tuple, init=False)
 
     def __post_init__(self) -> None:
         self.framework_config = self.framework_config or FrameworkConfig()
         self.monitoring_sink = self.monitoring_sink or InMemoryMonitoringSink()
         self.runtime_artifacts = self.runtime_artifacts or RuntimeArtifactBundle()
+        self.execution_service = RoutedExecutionService(self.router)
 
     def run_live(
         self,
@@ -55,86 +53,116 @@ class RoutedLiveTradingRunner:
         run_id: str | None = None,
         recovery_snapshot: RoutedLiveRecoverySnapshot | None = None,
     ) -> "RoutedLiveTradingRunner":
-        self.is_running = True
-        self.updates = []
-        self.route_acknowledgements = [] if recovery_snapshot is None else deepcopy(recovery_snapshot.route_acknowledgements)
-        self.execution_reports = [] if recovery_snapshot is None else deepcopy(recovery_snapshot.execution_reports)
-        self.runtime_artifacts = (
+        restored_acknowledgements = (
+            [] if recovery_snapshot is None else deepcopy(recovery_snapshot.route_acknowledgements)
+        )
+        restored_reports = [] if recovery_snapshot is None else deepcopy(recovery_snapshot.execution_reports)
+        restored_artifacts = (
             self._resolve_runtime_artifacts(config.symbols, run_id=run_id)
             if recovery_snapshot is None
             else recovery_snapshot.runtime_artifacts
         )
         machine = L1MicrostructureStateMachine(
             self.framework_config,
-            runtime_artifacts=self.runtime_artifacts,
+            runtime_artifacts=restored_artifacts,
             route_orders_externally=True,
         )
         if recovery_snapshot is not None:
-            restore_router_state = getattr(self.router, "restore_recovery_state", None)
-            if callable(restore_router_state):
-                restore_router_state(recovery_snapshot.router_recovery_state)
+            RoutedLiveRecoveryCodec.validate(
+                machine,
+                recovery_snapshot,
+                config.symbols,
+                self.execution_service.validate_recovery_state,
+            )
             machine.restore_state(recovery_snapshot.machine_snapshot)
+            self.execution_service.restore_recovery_state(recovery_snapshot.router_recovery_state)
+
+        self.is_running = True
+        self.updates = []
+        self.route_acknowledgements = restored_acknowledgements
+        self.execution_reports = restored_reports
+        self.runtime_artifacts = restored_artifacts
         self.machine = machine
+        self._symbols = config.symbols
         monitor = RuntimeMonitor(self.monitoring_sink)
         selected_symbols = set(config.symbols)
+        health = self.execution_service.health()
+        if health is not None and not health.get("connected", False):
+            monitor.publish_alert(
+                AlertSeverity.ERROR,
+                AlertCategory.BROKER_CONNECTIVITY,
+                "broker_disconnected",
+                str(health.get("error") or health.get("status") or "router is disconnected"),
+            )
 
         if recovery_snapshot is not None:
-            self._ingest_router_reports(machine, config.symbols)
+            self._ingest_router_reports(machine, config.symbols, monitor)
 
         for event in self.source.subscribe_live(request):
             if not self.is_running:
                 break
-            self._ingest_router_reports(machine, config.symbols)
+            self._ingest_router_reports(machine, config.symbols, monitor)
             if event.symbol not in selected_symbols:
                 continue
             update = machine.on_event(event)
             if update is None:
                 continue
-            for execution_request in update.submitted_requests:
-                acknowledgement = self.router.submit(execution_request)
-                self.route_acknowledgements.append(acknowledgement)
-            self._ingest_router_reports(machine, config.symbols)
+            acknowledgements = self.execution_service.submit_all(update.submitted_requests)
+            self.route_acknowledgements.extend(acknowledgements)
+            for acknowledgement in acknowledgements:
+                if acknowledgement.status != "accepted":
+                    monitor.publish_alert(
+                        AlertSeverity.ERROR,
+                        AlertCategory.ORDER_ROUTING,
+                        "order_rejected",
+                        acknowledgement.reason,
+                        symbol=event.symbol,
+                        timestamp_ns=event.timestamp_ns,
+                    )
+            self._ingest_router_reports(machine, config.symbols, monitor)
             self.updates.append(update)
             monitor.publish_update(update, machine)
+            if machine.risk_engine.halted:
+                monitor.publish_alert(
+                    AlertSeverity.CRITICAL,
+                    AlertCategory.RISK,
+                    "strategy_risk_halt",
+                    f"strategy risk engine halted for {event.symbol}",
+                    symbol=event.symbol,
+                    timestamp_ns=event.timestamp_ns,
+                )
 
-        self._ingest_router_reports(machine, config.symbols)
+        self._ingest_router_reports(machine, config.symbols, monitor)
         self.is_running = False
         return self
 
     def snapshot_state(self) -> RoutedLiveRecoverySnapshot:
         if self.machine is None:
             raise ValueError("cannot snapshot routed live runner before it has started")
-        snapshot_router_state = getattr(self.router, "snapshot_recovery_state", None)
         return RoutedLiveRecoverySnapshot(
             machine_snapshot=self.machine.snapshot_state(),
             runtime_artifacts=self.runtime_artifacts,
             route_acknowledgements=deepcopy(self.route_acknowledgements),
             execution_reports=deepcopy(self.execution_reports),
-            router_recovery_state=deepcopy(snapshot_router_state()) if callable(snapshot_router_state) else None,
+            symbols=self._symbols,
+            router_recovery_state=deepcopy(self.execution_service.snapshot_recovery_state()),
         )
 
     def stop(self) -> None:
         self.is_running = False
-        self.router.stop()
+        self.execution_service.stop()
 
     def open_route_order_ids(self) -> list[str]:
-        open_order_ids = getattr(self.router, "open_order_ids", None)
-        if callable(open_order_ids):
-            return list(open_order_ids())
-        return []
+        return self.execution_service.open_order_ids()
 
     def cancel_route_order(self, order_id: str) -> bool:
-        cancel = getattr(self.router, "cancel", None)
-        if not callable(cancel):
-            return False
-        return bool(cancel(order_id))
+        return self.execution_service.cancel(order_id)
 
     def router_health(self) -> dict[str, Any] | None:
-        health_check = getattr(self.router, "health_check", None)
-        if not callable(health_check):
-            return None
-        health = health_check()
-        return dict(health) if isinstance(health, dict) else None
+        return self.execution_service.health()
+
+    def recovery_reconciliations(self) -> list[BrokerRecoveryReconciliation]:
+        return list(self.execution_service.recovery_reconciliations())
 
     def monitoring_frame(self) -> pd.DataFrame:
         return self.monitoring_sink.to_frame()
@@ -161,7 +189,24 @@ class RoutedLiveTradingRunner:
             return self.bundle_selector.resolve_latest_for_symbol(symbol)
         return self.bundle_selector.resolve_by_run_id(symbol=symbol, run_id=run_id)
 
-    def _ingest_router_reports(self, machine: L1MicrostructureStateMachine, symbols: tuple[str, ...]) -> None:
-        for report in self.router.poll(symbols):
-            machine.ingest_execution_report(report)
-            self.execution_reports.append(report)
+    def _ingest_router_reports(
+        self,
+        machine: L1MicrostructureStateMachine,
+        symbols: tuple[str, ...],
+        monitor: RuntimeMonitor,
+    ) -> None:
+        reports = self.execution_service.poll(
+            symbols,
+            consumer_for_symbol=lambda _symbol: machine,
+            after_report=self.execution_reports.append,
+        )
+        for report in reports:
+            if report.status == "rejected":
+                monitor.publish_alert(
+                    AlertSeverity.ERROR,
+                    AlertCategory.ORDER_ROUTING,
+                    "order_rejected",
+                    report.reason,
+                    symbol=report.symbol,
+                    timestamp_ns=report.timestamp_ns,
+                )

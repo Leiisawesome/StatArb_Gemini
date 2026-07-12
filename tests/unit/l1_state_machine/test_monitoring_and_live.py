@@ -16,11 +16,18 @@ from l1_microstructure.live import (
     IBKRBrokerOrderRouter,
     IBKRConnectionConfig,
     RouteAcknowledgement,
+    RoutedExecutionService,
     RoutedLiveTradingRunner,
     RunnerConfig,
     SimulatorPaperTradingRunner,
 )
-from l1_microstructure.monitoring import InMemoryMonitoringSink, JsonlMonitoringSink
+from l1_microstructure.monitoring import (
+    AlertCategory,
+    AlertSeverity,
+    InMemoryMonitoringSink,
+    JsonlMonitoringSink,
+    OperationalAlertManager,
+)
 from l1_microstructure.training import EmpiricalTransitionTrainer
 from tests.unit.l1_state_machine.support import FixtureMarketDataSource as InMemoryMassiveDataSource
 
@@ -116,7 +123,9 @@ class CancelingRouter(AcceptedFillRouter):
                 timestamp_ns=request.executable_timestamp_ns,
             )
         )
-        return RouteAcknowledgement(external_order_id=f"cancelled-{len(self.submissions)}", status="rejected", reason="router rejected")
+        return RouteAcknowledgement(
+            external_order_id=f"cancelled-{len(self.submissions)}", status="rejected", reason="router rejected"
+        )
 
 
 def test_in_memory_monitoring_sink_collects_runtime_snapshots() -> None:
@@ -163,6 +172,63 @@ def test_jsonl_monitoring_sink_writes_snapshots(tmp_path) -> None:
     first_record = json.loads(lines[0])
     assert first_record["state_label"]
     assert "metadata" in first_record
+
+
+def test_operational_alert_manager_deduplicates_by_category_code_and_symbol() -> None:
+    sink = InMemoryMonitoringSink()
+    manager = OperationalAlertManager(sink, deduplication_window_ns=100)
+
+    first = manager.emit(
+        AlertSeverity.ERROR,
+        AlertCategory.ORDER_ROUTING,
+        "order_rejected",
+        "first rejection",
+        symbol="AAPL",
+        timestamp_ns=1_000,
+    )
+    duplicate = manager.emit(
+        AlertSeverity.ERROR,
+        AlertCategory.ORDER_ROUTING,
+        "order_rejected",
+        "duplicate rejection",
+        symbol="AAPL",
+        timestamp_ns=1_050,
+    )
+    next_window = manager.emit(
+        AlertSeverity.ERROR,
+        AlertCategory.ORDER_ROUTING,
+        "order_rejected",
+        "later rejection",
+        symbol="AAPL",
+        timestamp_ns=1_100,
+    )
+
+    assert first is not None
+    assert duplicate is None
+    assert next_window is not None
+    assert [alert.message for alert in sink.alerts] == ["first rejection", "later rejection"]
+
+
+def test_jsonl_monitoring_sink_writes_typed_alerts(tmp_path) -> None:
+    path = Path(tmp_path) / "alerts.jsonl"
+    sink = JsonlMonitoringSink(path)
+    manager = OperationalAlertManager(sink)
+
+    manager.emit(
+        AlertSeverity.CRITICAL,
+        AlertCategory.MARKET_DATA,
+        "stale_market_data",
+        "stale AAPL quote",
+        symbol="AAPL",
+        timestamp_ns=123,
+    )
+    sink.close()
+
+    record = json.loads(path.read_text(encoding="utf-8"))
+    assert record["record_type"] == "alert"
+    assert record["severity"] == "critical"
+    assert record["category"] == "market_data"
+    assert record["symbol"] == "AAPL"
 
 
 def test_simulator_paper_runner_produces_update_and_execution_summary() -> None:
@@ -257,6 +323,7 @@ def test_routed_live_runner_submits_requests_and_ingests_external_reports() -> N
     )
 
     summary = result.execution_summary()
+    assert isinstance(result.execution_service, RoutedExecutionService)
     assert router.submissions
     assert summary["route_submission_count"] >= 1.0
     assert summary["fill_count"] >= 1.0
@@ -315,7 +382,10 @@ def test_routed_live_runner_can_resume_from_recovery_snapshot() -> None:
         recovery_snapshot=snapshot,
     )
 
-    assert resumed_runner.execution_summary()["route_submission_count"] >= first_runner.execution_summary()["route_submission_count"]
+    assert (
+        resumed_runner.execution_summary()["route_submission_count"]
+        >= first_runner.execution_summary()["route_submission_count"]
+    )
     assert len(resumed_runner.execution_reports) >= len(snapshot.execution_reports)
     assert resumed_runner.machine is not None
     assert resumed_runner.machine.execution_history
@@ -396,6 +466,8 @@ def test_routed_live_runner_handles_cancelled_router_reports() -> None:
     summary = runner.execution_summary()
     assert summary["route_submission_count"] >= 1.0
     assert summary["cancel_count"] >= 1.0
+    assert runner.monitoring_sink.alerts
+    assert runner.monitoring_sink.alerts[0].category is AlertCategory.ORDER_ROUTING
 
 
 def test_routed_live_runner_reconciles_broker_backed_partial_fill_and_cancel() -> None:
@@ -417,7 +489,14 @@ def test_routed_live_runner_reconciles_broker_backed_partial_fill_and_cancel() -
             return self.connected
 
         async def submit_order(self, symbol, quantity, side, order_type, limit_price=None):
-            order = BrokerOrder(symbol=symbol, side=side, quantity=quantity, order_type=order_type, price=limit_price, status=BrokerOrderStatus.SUBMITTED)
+            order = BrokerOrder(
+                symbol=symbol,
+                side=side,
+                quantity=quantity,
+                order_type=order_type,
+                price=limit_price,
+                status=BrokerOrderStatus.SUBMITTED,
+            )
             self.orders[order.order_id] = order
             return order
 
@@ -498,7 +577,14 @@ def test_routed_live_runner_can_resume_with_open_broker_backed_order() -> None:
             return self.connected
 
         async def submit_order(self, symbol, quantity, side, order_type, limit_price=None):
-            order = BrokerOrder(symbol=symbol, side=side, quantity=quantity, order_type=order_type, price=limit_price, status=BrokerOrderStatus.SUBMITTED)
+            order = BrokerOrder(
+                symbol=symbol,
+                side=side,
+                quantity=quantity,
+                order_type=order_type,
+                price=limit_price,
+                status=BrokerOrderStatus.SUBMITTED,
+            )
             self.orders[order.order_id] = order
             return order
 
@@ -524,7 +610,8 @@ def test_routed_live_runner_can_resume_with_open_broker_backed_order() -> None:
             return [
                 order
                 for order in self.orders.values()
-                if order.status not in {BrokerOrderStatus.FILLED, BrokerOrderStatus.CANCELLED, BrokerOrderStatus.REJECTED}
+                if order.status
+                not in {BrokerOrderStatus.FILLED, BrokerOrderStatus.CANCELLED, BrokerOrderStatus.REJECTED}
             ]
 
         async def cancel_order(self, order_id: str) -> bool:
@@ -970,7 +1057,13 @@ def test_ibkr_native_reserve_order_id_raises_when_none() -> None:
 def test_ibkr_native_ignores_non_fatal_order_preset_warning() -> None:
     """Covers _ibkr_native.py: on_error ignores non-fatal IBKR warning 10349"""
     from l1_microstructure.live._ibkr_native import IBKRNativeBrokerSession
-    from l1_microstructure.live.broker_models import BrokerOrder, BrokerOrderSide, BrokerOrderType, BrokerOrderStatus, IBKRConnectionConfig
+    from l1_microstructure.live.broker_models import (
+        BrokerOrder,
+        BrokerOrderSide,
+        BrokerOrderType,
+        BrokerOrderStatus,
+        IBKRConnectionConfig,
+    )
 
     config = IBKRConnectionConfig(host="127.0.0.1", port=4002, client_id=999)
     session = IBKRNativeBrokerSession(config)
@@ -992,7 +1085,13 @@ def test_ibkr_native_ignores_non_fatal_order_preset_warning() -> None:
 def test_ibkr_native_ignores_expected_cancel_error_in_health_state() -> None:
     """Covers _ibkr_native.py: on_error does not retain cancellation code 202 as last_error"""
     from l1_microstructure.live._ibkr_native import IBKRNativeBrokerSession
-    from l1_microstructure.live.broker_models import BrokerOrder, BrokerOrderSide, BrokerOrderType, BrokerOrderStatus, IBKRConnectionConfig
+    from l1_microstructure.live.broker_models import (
+        BrokerOrder,
+        BrokerOrderSide,
+        BrokerOrderType,
+        BrokerOrderStatus,
+        IBKRConnectionConfig,
+    )
 
     config = IBKRConnectionConfig(host="127.0.0.1", port=4002, client_id=999)
     session = IBKRNativeBrokerSession(config)
@@ -1014,7 +1113,13 @@ def test_ibkr_native_ignores_expected_cancel_error_in_health_state() -> None:
 def test_ibkr_native_ignores_order_timing_warning() -> None:
     """Covers _ibkr_native.py: on_error ignores non-fatal IBKR warning 399"""
     from l1_microstructure.live._ibkr_native import IBKRNativeBrokerSession
-    from l1_microstructure.live.broker_models import BrokerOrder, BrokerOrderSide, BrokerOrderType, BrokerOrderStatus, IBKRConnectionConfig
+    from l1_microstructure.live.broker_models import (
+        BrokerOrder,
+        BrokerOrderSide,
+        BrokerOrderType,
+        BrokerOrderStatus,
+        IBKRConnectionConfig,
+    )
 
     config = IBKRConnectionConfig(host="127.0.0.1", port=4002, client_id=999)
     session = IBKRNativeBrokerSession(config)
@@ -1027,7 +1132,11 @@ def test_ibkr_native_ignores_order_timing_warning() -> None:
         order_id="3",
     )
 
-    session.on_error(3, 399, "Order Message: BUY 1 AAPL NASDAQ.NMS Warning: Your order will not be placed at the exchange until 2026-03-13 04:00:00 US/Eastern.")
+    session.on_error(
+        3,
+        399,
+        "Order Message: BUY 1 AAPL NASDAQ.NMS Warning: Your order will not be placed at the exchange until 2026-03-13 04:00:00 US/Eastern.",
+    )
 
     assert session._last_error is None
     assert session._orders["3"].status is BrokerOrderStatus.SUBMITTED

@@ -6,8 +6,7 @@ from dataclasses import dataclass
 from hashlib import sha1
 from typing import Iterable
 
-from l1_microstructure.events import MarketEvent
-from l1_microstructure.ingest.massive import event_sort_key
+from l1_microstructure.events import MarketEvent, event_sort_key
 
 from .interfaces import ReplayCheckpoint, ReplayCursor
 
@@ -24,7 +23,9 @@ class DeterministicReplayEngine:
             stream_id=stream_id,
             speed_multiplier=speed_multiplier,
             current_index=start_index,
-            current_timestamp_ns=ordered_events[start_index - 1].timestamp_ns if ordered_events and start_index > 0 else 0,
+            current_timestamp_ns=ordered_events[start_index - 1].timestamp_ns
+            if ordered_events and start_index > 0
+            else 0,
         )
         for index in range(start_index, len(ordered_events)):
             event = ordered_events[index]

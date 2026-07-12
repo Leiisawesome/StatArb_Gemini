@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from l1_microstructure.artifacts import ArtifactBundleSelector, RunQualityGate
+from l1_microstructure.artifacts import ArtifactBundleSelector, ArtifactMetadata, LocalArtifactStore, RunQualityGate
 from l1_microstructure.config import FrameworkConfig
 from l1_microstructure.execution import ExecutionReport
 from l1_microstructure.ingest import HistoricalBatchRequest, LiveSubscriptionRequest
@@ -22,14 +22,54 @@ def _et_ns(year: int, month: int, day: int, hour: int, minute: int, second: int 
 def _make_source() -> InMemoryMassiveDataSource:
     return InMemoryMassiveDataSource(
         [
-            {"ev": "Q", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 0), "bp": 100.0, "ap": 100.02, "bs": 100, "as": 100},
-            {"ev": "Q", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 1), "bp": 100.01, "ap": 100.02, "bs": 450, "as": 40},
+            {
+                "ev": "Q",
+                "sym": "AAPL",
+                "t": _et_ns(2024, 3, 11, 9, 30, 0),
+                "bp": 100.0,
+                "ap": 100.02,
+                "bs": 100,
+                "as": 100,
+            },
+            {
+                "ev": "Q",
+                "sym": "AAPL",
+                "t": _et_ns(2024, 3, 11, 9, 30, 1),
+                "bp": 100.01,
+                "ap": 100.02,
+                "bs": 450,
+                "as": 40,
+            },
             {"ev": "T", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 2), "p": 100.02, "s": 400, "side": "buy"},
-            {"ev": "Q", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 4), "bp": 100.04, "ap": 100.08, "bs": 40, "as": 300},
+            {
+                "ev": "Q",
+                "sym": "AAPL",
+                "t": _et_ns(2024, 3, 11, 9, 30, 4),
+                "bp": 100.04,
+                "ap": 100.08,
+                "bs": 40,
+                "as": 300,
+            },
             {"ev": "T", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 5), "p": 100.05, "s": 300, "side": "buy"},
-            {"ev": "Q", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 7), "bp": 100.07, "ap": 100.09, "bs": 420, "as": 60},
+            {
+                "ev": "Q",
+                "sym": "AAPL",
+                "t": _et_ns(2024, 3, 11, 9, 30, 7),
+                "bp": 100.07,
+                "ap": 100.09,
+                "bs": 420,
+                "as": 60,
+            },
             {"ev": "T", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 8), "p": 100.08, "s": 350, "side": "buy"},
-            {"ev": "Q", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 10), "bp": 100.10, "ap": 100.14, "bs": 30, "as": 260},
+            {
+                "ev": "Q",
+                "sym": "AAPL",
+                "t": _et_ns(2024, 3, 11, 9, 30, 10),
+                "bp": 100.10,
+                "ap": 100.14,
+                "bs": 30,
+                "as": 260,
+            },
         ]
     )
 
@@ -93,6 +133,27 @@ def test_artifact_bundle_selector_resolves_latest_complete_run(tmp_path) -> None
     assert second.run_id != first.run_id
 
 
+def test_artifact_bundle_selector_ignores_uncommitted_loose_artifacts(tmp_path) -> None:
+    store = LocalArtifactStore(tmp_path)
+    for artifact_type in ArtifactBundleSelector.REQUIRED_TYPES:
+        store.save(
+            ArtifactMetadata(
+                artifact_id=f"loose-{artifact_type}",
+                artifact_type=artifact_type,
+                version="v1",
+                created_at="2026-01-01T00:00:00+00:00",
+                metadata={"symbol": "AAPL", "run_id": "uncommitted"},
+            ),
+            {"uncommitted": True},
+        )
+
+    selector = ArtifactBundleSelector(store)
+    with pytest.raises(ValueError, match="no complete artifact bundle"):
+        selector.resolve_latest_for_symbol("AAPL")
+    with pytest.raises(ValueError, match="no committed run manifest"):
+        selector.resolve_by_run_id(symbol="AAPL", run_id="uncommitted")
+
+
 def test_source_backed_runner_uses_historical_source_and_resolved_bundle(tmp_path) -> None:
     source = _make_source()
     events = list(source.subscribe_live(LiveSubscriptionRequest(symbols=("AAPL",))))
@@ -154,6 +215,12 @@ def test_artifact_bundle_selector_can_gate_on_execution_quality(tmp_path) -> Non
     )
 
     assert permissive.metadata["run_id"] == result.run_id
+    approved = selector.resolve_passing_by_run_id(
+        symbol="AAPL",
+        run_id=result.run_id,
+        quality_gate=RunQualityGate(maximum_drift_tracking_error_bps=3.5),
+    )
+    assert approved.metadata["run_id"] == result.run_id
     assert selector.list_run_manifests(
         "AAPL",
         passing_only=True,
@@ -163,6 +230,12 @@ def test_artifact_bundle_selector_can_gate_on_execution_quality(tmp_path) -> Non
     with pytest.raises(ValueError):
         selector.resolve_latest_passing_for_symbol(
             "AAPL",
+            quality_gate=RunQualityGate(minimum_fill_rate=0.1),
+        )
+    with pytest.raises(ValueError, match="not committed and validation-approved"):
+        selector.resolve_passing_by_run_id(
+            symbol="AAPL",
+            run_id=result.run_id,
             quality_gate=RunQualityGate(minimum_fill_rate=0.1),
         )
 

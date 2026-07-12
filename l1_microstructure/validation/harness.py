@@ -119,11 +119,15 @@ class RollingValidationHarness:
             return 1.0
         train_edges = {
             (str(record[self.edge_from_column]), str(record[self.edge_to_column]), str(record[self.regime_column]))
-            for record in train_frame[[self.edge_from_column, self.edge_to_column, self.regime_column]].to_dict(orient="records")
+            for record in train_frame[[self.edge_from_column, self.edge_to_column, self.regime_column]].to_dict(
+                orient="records"
+            )
         }
         test_edges = [
             (str(record[self.edge_from_column]), str(record[self.edge_to_column]), str(record[self.regime_column]))
-            for record in test_frame[[self.edge_from_column, self.edge_to_column, self.regime_column]].to_dict(orient="records")
+            for record in test_frame[[self.edge_from_column, self.edge_to_column, self.regime_column]].to_dict(
+                orient="records"
+            )
         ]
         unseen = sum(1 for edge in test_edges if edge not in train_edges)
         return unseen / max(len(test_edges), 1)
@@ -194,14 +198,21 @@ class RollingValidationHarness:
 
         train_abs_mean = float(train_frame[self.drift_column].abs().mean()) if not train_frame.empty else 0.0
         rng = np.random.default_rng(self.bootstrap_random_seed)
-        hit_rates: list[float] = []
-        decay_ratios: list[float] = []
         test_drifts = test_frame[self.drift_column].to_numpy(dtype=float)
-        for _ in range(self.bootstrap_sample_count):
-            sample = rng.choice(test_drifts, size=len(test_drifts), replace=True)
-            hit_rates.append(float(np.mean(sample > 0.0)))
-            sample_abs_mean = float(np.mean(np.abs(sample))) if sample.size else 0.0
-            decay_ratios.append(sample_abs_mean / max(train_abs_mean, 1e-9))
+        # Bound each allocation while moving the bootstrap's inner loop into NumPy.
+        chunk_size = max(1, min(self.bootstrap_sample_count, 1_000_000 // len(test_drifts)))
+        hit_rate_chunks: list[np.ndarray] = []
+        decay_ratio_chunks: list[np.ndarray] = []
+        remaining = self.bootstrap_sample_count
+        while remaining:
+            sample_count = min(chunk_size, remaining)
+            samples = rng.choice(test_drifts, size=(sample_count, len(test_drifts)), replace=True)
+            hit_rate_chunks.append(np.mean(samples > 0.0, axis=1))
+            decay_ratio_chunks.append(np.mean(np.abs(samples), axis=1) / max(train_abs_mean, 1e-9))
+            remaining -= sample_count
+
+        hit_rates = np.concatenate(hit_rate_chunks)
+        decay_ratios = np.concatenate(decay_ratio_chunks)
 
         lower_q = max((1.0 - self.bootstrap_confidence_level) / 2.0, 0.0)
         upper_q = min(1.0 - lower_q, 1.0)
@@ -221,7 +232,9 @@ class RollingValidationHarness:
         if self.execution_timestamp_column not in execution.columns and "timestamp_ns" in execution.columns:
             execution[self.execution_timestamp_column] = pd.to_datetime(execution["timestamp_ns"], unit="ns", utc=True)
         elif self.execution_timestamp_column in execution.columns:
-            execution[self.execution_timestamp_column] = pd.to_datetime(execution[self.execution_timestamp_column], utc=True)
+            execution[self.execution_timestamp_column] = pd.to_datetime(
+                execution[self.execution_timestamp_column], utc=True
+            )
         else:
             raise ValueError("execution validation frame is missing a timestamp column")
         return execution
@@ -231,7 +244,9 @@ class RollingValidationHarness:
             return frame.copy()
         start_ts = pd.Timestamp(start, tz="UTC")
         end_ts = pd.Timestamp(end, tz="UTC")
-        return frame[(frame[self.execution_timestamp_column] >= start_ts) & (frame[self.execution_timestamp_column] <= end_ts)].copy()
+        return frame[
+            (frame[self.execution_timestamp_column] >= start_ts) & (frame[self.execution_timestamp_column] <= end_ts)
+        ].copy()
 
     def _execution_mean(self, frame: pd.DataFrame, column: str) -> float:
         if frame.empty or column not in frame.columns:
@@ -245,10 +260,14 @@ class RollingValidationHarness:
         required = {self.execution_expected_drift_column, self.execution_realized_drift_column}
         if not required.issubset(frame.columns):
             return 0.0
-        paired = frame[[self.execution_expected_drift_column, self.execution_realized_drift_column]].apply(
-            pd.to_numeric,
-            errors="coerce",
-        ).dropna()
+        paired = (
+            frame[[self.execution_expected_drift_column, self.execution_realized_drift_column]]
+            .apply(
+                pd.to_numeric,
+                errors="coerce",
+            )
+            .dropna()
+        )
         if paired.empty:
             return 0.0
         errors = (paired[self.execution_expected_drift_column] - paired[self.execution_realized_drift_column]).abs()

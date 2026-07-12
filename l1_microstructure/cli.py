@@ -130,6 +130,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     return parser
 
+
 def _add_quality_gate_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--min-fill-rate", type=float, default=None)
     parser.add_argument("--max-cancel-rate", type=float, default=None)
@@ -240,6 +241,8 @@ def _run_live_command(args: argparse.Namespace) -> int:
 
 
 def _run_routed_live_command(args: argparse.Namespace) -> int:
+    if bool(getattr(args, "allow_live_broker_routing", False)):
+        raise ValueError("live capital routing requires the supervised trading-daemon runtime")
     source = _live_source()
     selector = ArtifactBundleSelector(LocalArtifactStore(args.artifact_root))
     router = _router_from_args(args)
@@ -339,17 +342,15 @@ def _run_ibkr_live_order_smoke_command(args: argparse.Namespace) -> int:
     return 0
 
 
-def _ibkr_diagnostics(health: dict[str, Any], execution_reports: Sequence[ExecutionReport] = ()) -> dict[str, str] | None:
+def _ibkr_diagnostics(
+    health: dict[str, Any], execution_reports: Sequence[ExecutionReport] = ()
+) -> dict[str, str] | None:
     messages: list[str] = []
     for key in ("last_error", "error"):
         value = health.get(key)
         if isinstance(value, str) and value.strip():
             messages.append(value.strip())
-    messages.extend(
-        str(report.reason).strip()
-        for report in execution_reports
-        if getattr(report, "reason", None)
-    )
+    messages.extend(str(report.reason).strip() for report in execution_reports if getattr(report, "reason", None))
 
     for message in messages:
         normalized = message.lower()
@@ -431,11 +432,7 @@ def _quality_metrics_from_metadata(metadata: dict[str, Any]) -> dict[str, float]
         "mean_unseen_edge_rate",
         "mean_test_hit_rate",
     )
-    return {
-        key: float(metadata[key])
-        for key in keys
-        if key in metadata
-    }
+    return {key: float(metadata[key]) for key in keys if key in metadata}
 
 
 def _build_ibkr_order_smoke_request(

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Deque, Iterable
@@ -17,33 +16,10 @@ from .events import MarketEvent
 from .execution import ExecutionReport, ExecutionRequest, ExecutionSimulator
 from .features import FeatureEngine, ObservedState
 from .portfolio import PortfolioAllocator
+from .recovery import PendingOutcome, StateMachineRecoveryCodec, StateMachineRecoverySnapshot
 from .regime import MicrostructureRegime, RegimeInferencer, RegimePosterior
 from .risk import OpenPosition, RiskDecision, RiskEngine
 from .transitions import EdgeKey, TransitionDiagnostic, TransitionKernel
-
-
-@dataclass(slots=True)
-class PendingOutcome:
-    edge: EdgeKey
-    reference_price: float
-    resolve_timestamp_ns: int
-
-
-@dataclass(frozen=True, slots=True)
-class StateMachineRecoverySnapshot:
-    previous_state: ObservedState | None
-    pending_outcomes: list[PendingOutcome]
-    pending_orders: list[ExecutionRequest]
-    open_positions: dict[str, OpenPosition]
-    execution_history: list[ExecutionReport]
-    signal_expectations: dict[str, float]
-    last_midpoints: dict[str, float]
-    return_history: dict[str, list[float]]
-    realized_volatility_by_symbol: dict[str, float]
-    risk_state: dict[str, float | int | bool]
-    feature_state: dict[str, object]
-    regime_state: dict[str, object]
-    transition_state: dict[str, object]
 
 
 @dataclass(slots=True)
@@ -69,6 +45,18 @@ class L1MicrostructureStateMachine:
         self.config = config or FrameworkConfig()
         self.runtime_artifacts = runtime_artifacts or RuntimeArtifactBundle()
         self.route_orders_externally = route_orders_externally
+        artifact_symbols = {
+            artifact.symbol
+            for artifact in (
+                self.runtime_artifacts.state_calibration,
+                self.runtime_artifacts.regime_calibration,
+                self.runtime_artifacts.execution_calibration,
+            )
+            if artifact is not None
+        }
+        if len(artifact_symbols) > 1:
+            raise ValueError(f"runtime artifacts contain multiple symbols: {sorted(artifact_symbols)}")
+        self.symbol: str | None = next(iter(artifact_symbols), None)
         self.feature_engine = FeatureEngine(self.config.feature, self.runtime_artifacts.state_calibration)
         self.regime_inferencer = RegimeInferencer(
             self.config.regime,
@@ -99,116 +87,16 @@ class L1MicrostructureStateMachine:
         self.realized_volatility_by_symbol: dict[str, float] = {}
 
     def snapshot_state(self) -> StateMachineRecoverySnapshot:
-        return StateMachineRecoverySnapshot(
-            previous_state=deepcopy(self.previous_state),
-            pending_outcomes=deepcopy(list(self.pending_outcomes)),
-            pending_orders=deepcopy(list(self.pending_orders)),
-            open_positions=deepcopy(self.open_positions),
-            execution_history=deepcopy(self.execution_history),
-            signal_expectations=deepcopy(self.signal_expectations),
-            last_midpoints=deepcopy(self.last_midpoints),
-            return_history={symbol: list(history) for symbol, history in self.return_history.items()},
-            realized_volatility_by_symbol=deepcopy(self.realized_volatility_by_symbol),
-            risk_state={
-                "starting_equity": float(self.risk_engine.starting_equity),
-                "peak_equity": float(self.risk_engine.peak_equity),
-                "realized_pnl": float(self.risk_engine.realized_pnl),
-                "trade_count": int(self.risk_engine.trade_count),
-                "halted": bool(self.risk_engine.halted),
-            },
-            feature_state={
-                "current_book": deepcopy(self.feature_engine.current_book),
-                "quote_history": deepcopy(list(self.feature_engine.quote_history)),
-                "microprice_history": deepcopy(list(self.feature_engine.microprice_history)),
-                "trade_pressure_window": deepcopy(list(self.feature_engine.trade_pressure_window)),
-                "spread_norm_history": deepcopy(list(self.feature_engine.spread_norm_history)),
-                "volatility_history": deepcopy(list(self.feature_engine.volatility_history)),
-                "flicker_baseline": float(self.feature_engine.flicker_baseline),
-                "flicker_intensity": float(self.feature_engine.flicker_intensity),
-                "last_quote_ts": self.feature_engine.last_quote_ts,
-                "active_regime_hint": self.feature_engine.active_regime_hint,
-            },
-            regime_state={
-                "state_window": deepcopy(list(self.regime_inferencer.state_window)),
-                "previous_probabilities": (
-                    {regime.value: probability for regime, probability in self.regime_inferencer.previous_probabilities.items()}
-                    if self.regime_inferencer.previous_probabilities is not None
-                    else None
-                ),
-                "previous_timestamp_ns": self.regime_inferencer.previous_timestamp_ns,
-            },
-            transition_state={
-                "edge_stats": deepcopy(self.transition_kernel.edge_stats),
-                "outgoing_counts": deepcopy(dict(self.transition_kernel.outgoing_counts)),
-                "increment_history": deepcopy(list(self.transition_kernel.increment_history)),
-                "observation_index": int(self.transition_kernel.observation_index),
-            },
-        )
+        return StateMachineRecoveryCodec.snapshot(self)
 
     def restore_state(self, snapshot: StateMachineRecoverySnapshot) -> None:
-        self.previous_state = deepcopy(snapshot.previous_state)
-        self.pending_outcomes = deque(deepcopy(snapshot.pending_outcomes))
-        self.pending_orders = deque(deepcopy(snapshot.pending_orders))
-        self.open_positions = deepcopy(snapshot.open_positions)
-        self.execution_history = deepcopy(snapshot.execution_history)
-        self.signal_expectations = deepcopy(snapshot.signal_expectations)
-        self.last_midpoints = deepcopy(snapshot.last_midpoints)
-        self.return_history = {
-            symbol: deque(history, maxlen=self.config.transition.covariance_history)
-            for symbol, history in deepcopy(snapshot.return_history).items()
-        }
-        self.realized_volatility_by_symbol = deepcopy(snapshot.realized_volatility_by_symbol)
-
-        self.risk_engine.starting_equity = float(snapshot.risk_state["starting_equity"])
-        self.risk_engine.peak_equity = float(snapshot.risk_state["peak_equity"])
-        self.risk_engine.realized_pnl = float(snapshot.risk_state["realized_pnl"])
-        self.risk_engine.trade_count = int(snapshot.risk_state["trade_count"])
-        self.risk_engine.halted = bool(snapshot.risk_state["halted"])
-
-        self.feature_engine.current_book = deepcopy(snapshot.feature_state["current_book"])
-        self.feature_engine.quote_history = deque(deepcopy(snapshot.feature_state["quote_history"]), maxlen=self.feature_engine.quote_history.maxlen)
-        self.feature_engine.microprice_history = deque(deepcopy(snapshot.feature_state["microprice_history"]))
-        self.feature_engine.trade_pressure_window = deque(deepcopy(snapshot.feature_state["trade_pressure_window"]))
-        self.feature_engine.spread_norm_history = deque(
-            deepcopy(snapshot.feature_state["spread_norm_history"]),
-            maxlen=self.feature_engine.spread_norm_history.maxlen,
-        )
-        self.feature_engine.volatility_history = deque(
-            deepcopy(snapshot.feature_state["volatility_history"]),
-            maxlen=self.feature_engine.volatility_history.maxlen,
-        )
-        self.feature_engine.flicker_baseline = float(snapshot.feature_state["flicker_baseline"])
-        self.feature_engine.flicker_intensity = float(snapshot.feature_state["flicker_intensity"])
-        self.feature_engine.last_quote_ts = snapshot.feature_state["last_quote_ts"]
-        self.feature_engine.active_regime_hint = snapshot.feature_state["active_regime_hint"]
-
-        self.regime_inferencer.state_window = deque(deepcopy(snapshot.regime_state["state_window"]))
-        self.regime_inferencer.rebuild_context_sums()
-        previous_probabilities = snapshot.regime_state.get("previous_probabilities")
-        self.regime_inferencer.previous_probabilities = (
-            {
-                MicrostructureRegime(key): float(value)
-                for key, value in previous_probabilities.items()
-            }
-            if previous_probabilities is not None
-            else None
-        )
-        self.regime_inferencer.previous_timestamp_ns = snapshot.regime_state.get("previous_timestamp_ns")
-
-        self.transition_kernel.edge_stats = deepcopy(snapshot.transition_state["edge_stats"])
-        self.transition_kernel.outgoing_counts.clear()
-        for key, value in deepcopy(snapshot.transition_state["outgoing_counts"]).items():
-            self.transition_kernel.outgoing_counts[key].update(value)
-        self.transition_kernel.increment_history = deque(
-            deepcopy(snapshot.transition_state["increment_history"]),
-            maxlen=self.transition_kernel.increment_history.maxlen,
-        )
-        self.transition_kernel.observation_index = int(snapshot.transition_state["observation_index"])
-        # Recompute O(1) counters from restored execution history
-        self.fill_count = sum(1 for r in self.execution_history if r.status == "filled")
-        self.cancel_count = sum(1 for r in self.execution_history if r.status == "cancelled")
+        StateMachineRecoveryCodec.restore(self, snapshot)
 
     def on_event(self, event: MarketEvent) -> FrameworkUpdate | None:
+        if self.symbol is None:
+            self.symbol = event.symbol
+        elif event.symbol != self.symbol:
+            raise ValueError(f"state machine for {self.symbol} cannot process event for {event.symbol}")
         state = self.feature_engine.update(event)
         if state is None:
             return None
@@ -229,7 +117,9 @@ class L1MicrostructureStateMachine:
         intent = None
         risk_decision = None
 
-        if self.previous_state is not None and self.transition_kernel.is_transition(self.previous_state.vector, state.vector):
+        if self.previous_state is not None and self.transition_kernel.is_transition(
+            self.previous_state.vector, state.vector
+        ):
             transition_edge = EdgeKey(self.previous_state.label, state.label, regime.dominant_regime)
             edge_stats = self.transition_kernel.observe_transition(
                 transition_edge,
@@ -367,7 +257,9 @@ class L1MicrostructureStateMachine:
             covariance = pd.DataFrame(aligned_returns).cov(min_periods=2)
         elif len(aligned_returns) == 1:
             only_symbol = next(iter(aligned_returns))
-            variance = float(aligned_returns[only_symbol].var(ddof=1)) if len(aligned_returns[only_symbol]) >= 2 else 0.0
+            variance = (
+                float(aligned_returns[only_symbol].var(ddof=1)) if len(aligned_returns[only_symbol]) >= 2 else 0.0
+            )
             covariance = pd.DataFrame([[variance]], index=[only_symbol], columns=[only_symbol])
         else:
             covariance = pd.DataFrame(dtype=float)
@@ -375,7 +267,9 @@ class L1MicrostructureStateMachine:
         covariance = covariance.reindex(index=symbols, columns=symbols, fill_value=0.0).astype(float)
         for current_symbol in symbols:
             fallback_variance = self._fallback_variance(current_symbol)
-            current_variance = float(covariance.at[current_symbol, current_symbol]) if current_symbol in covariance.index else 0.0
+            current_variance = (
+                float(covariance.at[current_symbol, current_symbol]) if current_symbol in covariance.index else 0.0
+            )
             covariance.at[current_symbol, current_symbol] = max(current_variance, fallback_variance)
         return covariance
 
@@ -398,7 +292,9 @@ class L1MicrostructureStateMachine:
         total_signed_notional = 0.0
         for position in self.open_positions.values():
             direction = 1.0 if position.side == TradeAction.BUY else -1.0
-            total_signed_notional += direction * position.quantity * self._mark_price(position.symbol, state.book.midpoint)
+            total_signed_notional += (
+                direction * position.quantity * self._mark_price(position.symbol, state.book.midpoint)
+            )
         return total_signed_notional / equity
 
     def _symbol_exposure_fraction(self, symbol: str, fallback_midpoint: float) -> float:

@@ -3,12 +3,14 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 import pickle
+from types import SimpleNamespace
 
 import pytest
 
 from l1_microstructure.events import QuoteEvent
+from l1_microstructure.live import RouteAcknowledgement, RoutedExecutionService
 from l1_microstructure.artifacts import LocalArtifactStore
-from l1_microstructure.production.config import OperatingMode, ProductionConfig
+from l1_microstructure.production.config import ModelQualityPolicy, OperatingMode, ProductionConfig
 from l1_microstructure.production.ledger import OperationalLedger
 from l1_microstructure.production.lifecycle import LifecycleState, RuntimeLifecycle
 from l1_microstructure.production.runtime import ProductionRuntime
@@ -108,6 +110,9 @@ class _Router:
     def open_order_ids(self):
         return []
 
+    def cancel(self, order_id):
+        return True
+
     def submit(self, request):
         self.requests.append(request)
         raise AssertionError("test runtime should not submit an order")
@@ -145,6 +150,7 @@ class _Alerts:
 
 def test_production_runtime_isolates_symbol_engines(tmp_path) -> None:
     runtime = _Runtime(_config(tmp_path), source=_Source(), router=_Router())
+    assert isinstance(runtime.execution_service, RoutedExecutionService)
     runtime.start()
     timestamp_ns = int(datetime.now(timezone.utc).timestamp() * 1_000_000_000)
     runtime.process_event(QuoteEvent("AAPL", timestamp_ns, 100.0, 100.01, 100, 100))
@@ -164,6 +170,83 @@ def test_production_runtime_halts_on_position_reconciliation_mismatch(tmp_path) 
 
     assert runtime.lifecycle.state is LifecycleState.HALTED
     assert "position reconciliation mismatch" in alerts.messages[0][1]
+    assert runtime.recent_alerts()[0]["category"] == "reconciliation"
+    assert runtime.recent_alerts()[0]["code"] == "reconciliation_failed"
+    runtime.stop()
+
+
+def test_production_runtime_categorizes_broker_disconnect(tmp_path) -> None:
+    class DisconnectedRouter(_Router):
+        def health_check(self):
+            return {"connected": False, "status": "disconnected", "error": "gateway unavailable"}
+
+    alerts = _Alerts()
+    runtime = _Runtime(_config(tmp_path), source=_Source(), router=DisconnectedRouter(), alert_sink=alerts)
+
+    runtime.start()
+
+    alert = runtime.recent_alerts()[0]
+    assert alert["category"] == "broker_connectivity"
+    assert alert["code"] == "broker_disconnected"
+    runtime.stop()
+
+
+def test_production_runtime_emits_typed_stale_data_alert(tmp_path) -> None:
+    runtime = _Runtime(_config(tmp_path, event_stale_after_seconds=1.0), source=_Source(), router=_Router())
+    runtime.start()
+
+    runtime.process_event(QuoteEvent("AAPL", 1, 100.0, 100.01, 100, 100))
+
+    assert runtime.lifecycle.state is LifecycleState.HALTED
+    alert = runtime.recent_alerts()[0]
+    assert alert["category"] == "market_data"
+    assert alert["code"] == "stale_market_data"
+    assert alert["symbol"] == "AAPL"
+    runtime.stop()
+
+
+def test_production_runtime_emits_typed_strategy_risk_halt(tmp_path) -> None:
+    runtime = _Runtime(_config(tmp_path), source=_Source(), router=_Router())
+    runtime.start()
+    runtime.machines["AAPL"].risk_engine = SimpleNamespace(halted=True)
+    timestamp_ns = int(datetime.now(timezone.utc).timestamp() * 1_000_000_000)
+
+    runtime.process_event(QuoteEvent("AAPL", timestamp_ns, 100.0, 100.01, 100, 100))
+
+    assert runtime.lifecycle.state is LifecycleState.HALTED
+    alert = runtime.recent_alerts()[0]
+    assert alert["category"] == "risk"
+    assert alert["code"] == "strategy_risk_halt"
+    runtime.stop()
+
+
+def test_production_runtime_emits_typed_order_rejection_alert(tmp_path) -> None:
+    class RejectingRouter(_Router):
+        def submit(self, request):
+            self.requests.append(request)
+            return RouteAcknowledgement(
+                external_order_id="rejected-1",
+                status="rejected",
+                reason="broker risk check failed",
+            )
+
+    runtime = _Runtime(_config(tmp_path), source=_Source(), router=RejectingRouter())
+    runtime.start()
+    request = SimpleNamespace(
+        symbol="AAPL",
+        action=SimpleNamespace(value="buy"),
+        quantity=1,
+        decision_timestamp_ns=1,
+        client_order_id="client-1",
+    )
+
+    runtime._route(request)
+
+    assert runtime.lifecycle.state is LifecycleState.HALTED
+    alert = runtime.recent_alerts()[0]
+    assert alert["category"] == "order_routing"
+    assert alert["code"] == "order_rejected"
+    assert alert["symbol"] == "AAPL"
     runtime.stop()
 
 
@@ -178,3 +261,46 @@ def test_production_runtime_requires_each_symbol_to_finish_warmup(tmp_path) -> N
 
     assert runtime.lifecycle.state is LifecycleState.RUNNING
     runtime.stop()
+
+
+def test_production_runtime_rejects_router_without_safety_capabilities(tmp_path) -> None:
+    class IncompleteRouter:
+        def submit(self, request):
+            return None
+
+        def poll(self, symbols):
+            return []
+
+        def stop(self):
+            return None
+
+    with pytest.raises(TypeError, match="missing required capabilities"):
+        _Runtime(_config(tmp_path), source=_Source(), router=IncompleteRouter())
+
+
+def test_production_config_validates_model_quality_policy(tmp_path) -> None:
+    with pytest.raises(ValueError, match="minimum_fill_rate"):
+        _config(tmp_path, model_quality=ModelQualityPolicy(minimum_fill_rate=1.1))
+
+
+def test_production_promotion_requires_passing_quality_gate(tmp_path, monkeypatch) -> None:
+    calls = []
+
+    def resolve_passing(self, *, symbol, run_id, quality_gate):
+        calls.append((symbol, run_id, quality_gate))
+        return object()
+
+    monkeypatch.setattr(
+        "l1_microstructure.production.runtime.ArtifactBundleSelector.resolve_passing_by_run_id", resolve_passing
+    )
+    runtime = _Runtime(
+        _config(tmp_path, model_quality=ModelQualityPolicy(minimum_fill_rate=0.5)),
+        source=_Source(),
+        router=_Router(),
+    )
+
+    runtime.promote_model("AAPL", "approved-run")
+
+    assert calls[0][0:2] == ("AAPL", "approved-run")
+    assert calls[0][2].minimum_fill_rate == 0.5
+    assert runtime.promoted_run_ids["AAPL"] == "approved-run"

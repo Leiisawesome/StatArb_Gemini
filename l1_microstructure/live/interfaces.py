@@ -17,7 +17,9 @@ class RunnerConfig:
 
     def __post_init__(self) -> None:
         if len(self.symbols) != 1:
-            raise ValueError("legacy runner supports exactly one symbol; use ProductionRuntime for multi-symbol operation")
+            raise ValueError(
+                "legacy runner supports exactly one symbol; use ProductionRuntime for multi-symbol operation"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,3 +47,17 @@ class OrderRouter(Protocol):
 
     def stop(self) -> None:
         """Stop the route boundary and release any underlying resources."""
+
+
+class ProductionOrderRouter(OrderRouter, Protocol):
+    def cancel(self, order_id: str) -> bool:
+        """Cancel an open external order."""
+
+    def open_order_ids(self) -> list[str]:
+        """Return every externally open order tracked by the router."""
+
+    def health_check(self) -> dict[str, Any]:
+        """Return broker connectivity and account-health information."""
+
+    def reconciliation_snapshot(self) -> dict[str, Any]:
+        """Return broker positions and open orders for startup reconciliation."""
