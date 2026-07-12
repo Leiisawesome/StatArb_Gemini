@@ -52,6 +52,13 @@ class TradeEvent:
 MarketEvent: TypeAlias = QuoteEvent | TradeEvent
 
 
+def event_sort_key(event: MarketEvent) -> tuple[int, int, int]:
+    """Return the deterministic, vendor-neutral ordering key for market events."""
+    sequence_number = event.sequence_number if event.sequence_number is not None else (2**31 - 1)
+    event_priority = 0 if isinstance(event, QuoteEvent) else 1
+    return event.timestamp_ns, sequence_number, event_priority
+
+
 @dataclass(frozen=True, slots=True)
 class BookSnapshot:
     symbol: str
@@ -72,9 +79,7 @@ class BookSnapshot:
     @property
     def microprice(self) -> float:
         total_size = max(self.bid_size + self.ask_size, 1)
-        return (
-            self.bid_price * self.ask_size + self.ask_price * self.bid_size
-        ) / total_size
+        return (self.bid_price * self.ask_size + self.ask_price * self.bid_size) / total_size
 
     @classmethod
     def from_quote(cls, quote: QuoteEvent) -> "BookSnapshot":

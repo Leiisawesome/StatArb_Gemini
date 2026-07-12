@@ -158,6 +158,12 @@ Examples of contract surfaces already used in tests and implementations include:
 
 These interfaces are not theoretical placeholders anymore. They are the package’s internal seams for substitution, testing, and operational hardening.
 
+The root, `ingest`, and `live` package facades resolve exports lazily. Importing
+domain events, replay, research workflows, ingestion contracts, or routing
+contracts therefore does not initialize Massive, IBKR, FastAPI, Textual, or
+keyring integrations. Concrete infrastructure remains available through its
+explicit subpackage exports.
+
 ## Current execution model
 
 The execution stack is now split into three distinct layers:

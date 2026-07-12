@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from typing import Any, Iterable
 from zoneinfo import ZoneInfo
 
-from l1_microstructure.events import MarketEvent, QuoteEvent, TradeEvent, TradeSide
+from l1_microstructure.events import MarketEvent, QuoteEvent, TradeEvent, TradeSide, event_sort_key
 
 from .interfaces import EventNormalizer, SessionFilter
 
@@ -92,15 +92,6 @@ def _coerce_symbol(payload: dict[str, Any]) -> str:
         if value:
             return str(value)
     raise ValueError("payload is missing a symbol field")
-
-
-def _event_priority(event: MarketEvent) -> int:
-    return 0 if isinstance(event, QuoteEvent) else 1
-
-
-def event_sort_key(event: MarketEvent) -> tuple[int, int, int]:
-    sequence_number = event.sequence_number if event.sequence_number is not None else (2**31 - 1)
-    return event.timestamp_ns, sequence_number, _event_priority(event)
 
 
 @dataclass(slots=True)
@@ -403,7 +394,9 @@ class MassiveEventFilterMixin:
         self._register_trade_event(replacement_event, payload, target_index)
         return True
 
-    def _register_trade_event(self, event: MarketEvent, payload: dict[str, Any] | MarketEvent, event_index: int) -> None:
+    def _register_trade_event(
+        self, event: MarketEvent, payload: dict[str, Any] | MarketEvent, event_index: int
+    ) -> None:
         if not isinstance(event, TradeEvent):
             return
         for trade_key in self._trade_keys(payload, event):
@@ -499,10 +492,16 @@ class MassiveEventFilterMixin:
 
         def sort_key(item: dict[str, Any] | MarketEvent) -> tuple[int, int, int]:
             if isinstance(item, (QuoteEvent, TradeEvent)):
-                sequence_number = item.sequence_number if item.sequence_number is not None else (2**31 - 1)
-                return item.timestamp_ns, sequence_number, _event_priority(item)
+                return event_sort_key(item)
             if isinstance(item, dict):
-                timestamp_ns = _coerce_timestamp_ns(item) if any(key in item for key in ("sip_timestamp", "participant_timestamp", "timestamp_ns", "timestamp", "t")) else (2**63 - 1)
+                timestamp_ns = (
+                    _coerce_timestamp_ns(item)
+                    if any(
+                        key in item
+                        for key in ("sip_timestamp", "participant_timestamp", "timestamp_ns", "timestamp", "t")
+                    )
+                    else (2**63 - 1)
+                )
                 sequence_number = int(item.get("sequence_number", item.get("q", item.get("seq", 2**31 - 1))))
                 event_type = str(item.get("ev") or item.get("event_type") or item.get("type") or "").lower()
                 priority = 0 if event_type in {"q", "quote"} else 1 if event_type in {"t", "trade"} else 2
@@ -523,18 +522,37 @@ class MassiveEventFilterMixin:
             str(payload.get("status_reason", "")),
         ]
         status_text = " ".join(value.lower() for value in status_fields if value)
-        has_status_shape = event_type in {"status", "s"} or any(field for field in status_fields) or any(
-            key in payload for key in ("halted", "trading_halted", "trading_status")
+        has_status_shape = (
+            event_type in {"status", "s"}
+            or any(field for field in status_fields)
+            or any(key in payload for key in ("halted", "trading_halted", "trading_status"))
         )
         if not has_status_shape:
             return None
-        if payload.get("halted") in (False, 0, "0", "false", "False") or payload.get("trading_halted") in (False, 0, "0", "false", "False"):
+        if payload.get("halted") in (False, 0, "0", "false", "False") or payload.get("trading_halted") in (
+            False,
+            0,
+            "0",
+            "false",
+            "False",
+        ):
             action = "resume"
-        elif payload.get("halted") in (True, 1, "1", "true", "True") or payload.get("trading_halted") in (True, 1, "1", "true", "True"):
+        elif payload.get("halted") in (True, 1, "1", "true", "True") or payload.get("trading_halted") in (
+            True,
+            1,
+            "1",
+            "true",
+            "True",
+        ):
             action = "halt"
-        elif any(token in status_text for token in ("resume", "resumed", "trading_resumed", "trading resumed", "unhalt")):
+        elif any(
+            token in status_text for token in ("resume", "resumed", "trading_resumed", "trading resumed", "unhalt")
+        ):
             action = "resume"
-        elif any(token in status_text for token in ("halt", "halted", "paused", "pause", "volatility pause", "ludp", "news pending")):
+        elif any(
+            token in status_text
+            for token in ("halt", "halted", "paused", "pause", "volatility pause", "ludp", "news pending")
+        ):
             action = "halt"
         else:
             return None
@@ -557,18 +575,48 @@ class MassiveEventFilterMixin:
             str(payload.get("auction_state", "")),
         ]
         status_text = " ".join(value.lower() for value in status_fields if value)
-        has_status_shape = event_type in {"status", "s"} or any(field for field in status_fields) or any(
-            key in payload for key in ("auction", "auction_active", "auction_state")
+        has_status_shape = (
+            event_type in {"status", "s"}
+            or any(field for field in status_fields)
+            or any(key in payload for key in ("auction", "auction_active", "auction_state"))
         )
-        if not has_status_shape or "auction" not in status_text and not any(key in payload for key in ("auction", "auction_active", "auction_state")):
+        if (
+            not has_status_shape
+            or "auction" not in status_text
+            and not any(key in payload for key in ("auction", "auction_active", "auction_state"))
+        ):
             return None
-        if payload.get("auction") in (False, 0, "0", "false", "False") or payload.get("auction_active") in (False, 0, "0", "false", "False"):
+        if payload.get("auction") in (False, 0, "0", "false", "False") or payload.get("auction_active") in (
+            False,
+            0,
+            "0",
+            "false",
+            "False",
+        ):
             action = "end"
-        elif payload.get("auction") in (True, 1, "1", "true", "True") or payload.get("auction_active") in (True, 1, "1", "true", "True"):
+        elif payload.get("auction") in (True, 1, "1", "true", "True") or payload.get("auction_active") in (
+            True,
+            1,
+            "1",
+            "true",
+            "True",
+        ):
             action = "start"
-        elif any(token in status_text for token in ("auction complete", "auction ended", "cross complete", "resume continuous", "continuous trading resumed")):
+        elif any(
+            token in status_text
+            for token in (
+                "auction complete",
+                "auction ended",
+                "cross complete",
+                "resume continuous",
+                "continuous trading resumed",
+            )
+        ):
             action = "end"
-        elif any(token in status_text for token in ("opening auction", "closing auction", "auction started", "auction imbalance", "cross pending")):
+        elif any(
+            token in status_text
+            for token in ("opening auction", "closing auction", "auction started", "auction imbalance", "cross pending")
+        ):
             action = "start"
         else:
             return None

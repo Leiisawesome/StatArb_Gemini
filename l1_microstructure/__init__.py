@@ -1,25 +1,63 @@
-"""L1 microstructure state machine framework.
+"""Lightweight public facade for the L1 microstructure framework.
 
-This package is intentionally isolated from the legacy ``core_engine`` so the
-successor architecture can be evaluated without inheriting old coupling.
+Exports are resolved lazily so importing the core package does not initialize
+market-data, broker, API, or console integrations.
 """
 
-from .artifacts import ArtifactBundleLoader, ArtifactBundleSelector, LocalArtifactStore, RunManifest, RuntimeArtifactBundle
-from .calibration import EmpiricalRegimeCalibrator, QuantileStateCalibrator
-from .config import FrameworkConfig
-from .datasets import PipelineTransitionDatasetBuilder
-from .events import EventKind, QuoteEvent, TradeEvent, TradeSide
-from .features import FeatureEngine, ObservedState
-from .ingest import MassivePayloadNormalizer, RTHSessionFilter
-from .labeling import ForwardDriftLabeler
-from .live import SimulatorPaperTradingRunner, SourceBackedPaperRunner
-from .monitoring import InMemoryMonitoringSink, JsonlMonitoringSink, RuntimeMonitor
-from .pipeline import L1MicrostructureStateMachine
-from .replay import DeterministicReplayEngine
-from .regime import MicrostructureRegime, RegimeInferencer, RegimePosterior
-from .training import EmpiricalTransitionTrainer
-from .validation import RollingValidationHarness
-from .workflow import ArtifactDrivenResearchWorkflow, WorkflowArtifactIds, WorkflowRunResult
+from importlib import import_module
+from typing import Any
+
+
+_LAZY_EXPORTS: dict[str, tuple[str, str]] = {
+    "ArtifactBundleLoader": (".artifacts", "ArtifactBundleLoader"),
+    "ArtifactBundleSelector": (".artifacts", "ArtifactBundleSelector"),
+    "ArtifactDrivenResearchWorkflow": (".workflow", "ArtifactDrivenResearchWorkflow"),
+    "DeterministicReplayEngine": (".replay", "DeterministicReplayEngine"),
+    "EmpiricalRegimeCalibrator": (".calibration", "EmpiricalRegimeCalibrator"),
+    "EmpiricalTransitionTrainer": (".training", "EmpiricalTransitionTrainer"),
+    "EventKind": (".events", "EventKind"),
+    "FeatureEngine": (".features", "FeatureEngine"),
+    "ForwardDriftLabeler": (".labeling", "ForwardDriftLabeler"),
+    "FrameworkConfig": (".config", "FrameworkConfig"),
+    "InMemoryMonitoringSink": (".monitoring", "InMemoryMonitoringSink"),
+    "JsonlMonitoringSink": (".monitoring", "JsonlMonitoringSink"),
+    "L1MicrostructureStateMachine": (".pipeline", "L1MicrostructureStateMachine"),
+    "LocalArtifactStore": (".artifacts", "LocalArtifactStore"),
+    "MassivePayloadNormalizer": (".ingest", "MassivePayloadNormalizer"),
+    "MicrostructureRegime": (".regime", "MicrostructureRegime"),
+    "ObservedState": (".features", "ObservedState"),
+    "PipelineTransitionDatasetBuilder": (".datasets", "PipelineTransitionDatasetBuilder"),
+    "QuantileStateCalibrator": (".calibration", "QuantileStateCalibrator"),
+    "QuoteEvent": (".events", "QuoteEvent"),
+    "RTHSessionFilter": (".ingest", "RTHSessionFilter"),
+    "RegimeInferencer": (".regime", "RegimeInferencer"),
+    "RegimePosterior": (".regime", "RegimePosterior"),
+    "RollingValidationHarness": (".validation", "RollingValidationHarness"),
+    "RunManifest": (".artifacts", "RunManifest"),
+    "RuntimeArtifactBundle": (".artifacts", "RuntimeArtifactBundle"),
+    "RuntimeMonitor": (".monitoring", "RuntimeMonitor"),
+    "SimulatorPaperTradingRunner": (".live", "SimulatorPaperTradingRunner"),
+    "SourceBackedPaperRunner": (".live", "SourceBackedPaperRunner"),
+    "TradeEvent": (".events", "TradeEvent"),
+    "TradeSide": (".events", "TradeSide"),
+    "WorkflowArtifactIds": (".workflow", "WorkflowArtifactIds"),
+    "WorkflowRunResult": (".workflow", "WorkflowRunResult"),
+}
+
+
+def __getattr__(name: str) -> Any:
+    target = _LAZY_EXPORTS.get(name)
+    if target is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module_name, attribute_name = target
+    value = getattr(import_module(module_name, __name__), attribute_name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(__all__))
+
 
 __all__ = [
     "DeterministicReplayEngine",
