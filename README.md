@@ -11,8 +11,9 @@ Use the repository documents by role:
 1. `README.md` gives the repository-level overview, setup, and main command surface.
 2. `docs/l1_microstructure_operator_guide.md` is the operator runbook for the current CLI.
 3. `docs/l1_microstructure_state_machine.md` explains the model and runtime architecture.
-4. `docs/l1_microstructure_package_plan.md` describes the implemented package structure, contract seams, and remaining roadmap.
-5. `docs/production_operator_guide.md` covers the supervised daemon, terminal console, safety controls, and paper qualification.
+4. `docs/l1_microstructure_thesis_edge_and_state_vector.md` explains how edge comes from the state vector and transitions.
+5. `docs/l1_microstructure_package_plan.md` describes the implemented package structure, contract seams, and remaining roadmap.
+6. `docs/production_operator_guide.md` covers the supervised daemon, terminal console, safety controls, and paper qualification.
 
 ## What `l1_microstructure` is
 
@@ -410,8 +411,9 @@ pytest tests/integration/l1_state_machine/test_ibkr_routed_live_smoke.py -q
 Start with these documents if you want the design rationale or operating context:
 
 1. `docs/l1_microstructure_state_machine.md`
-2. `docs/l1_microstructure_package_plan.md`
-3. `docs/l1_microstructure_operator_guide.md`
+2. `docs/l1_microstructure_thesis_edge_and_state_vector.md`
+3. `docs/l1_microstructure_package_plan.md`
+4. `docs/l1_microstructure_operator_guide.md`
 
 ## Current scope and limitations
 
