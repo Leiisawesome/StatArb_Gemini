@@ -30,6 +30,7 @@ l1_microstructure/
   execution.py
   features.py
   pipeline.py
+  recovery.py
   portfolio.py
   regime.py
   risk.py
@@ -136,6 +137,11 @@ Defines validation contracts and implements the rolling out-of-sample validation
 
 `monitoring/`
 Defines monitoring contracts and implements runtime snapshot publication to in-memory and JSONL sinks.
+
+`recovery.py`
+Defines the typed, versioned state-machine recovery schema and owns validation,
+snapshot capture, and restoration. `pipeline.py` retains compatibility facade
+methods without serializing subordinate engine internals itself.
 
 `live/`
 Defines paper and routed-live runner contracts and implements the simulator-backed paper runner, source-backed paper runner, routed-live runner, and IBKR router boundary.
