@@ -88,3 +88,14 @@ class RoutedExecutionService:
         restore = getattr(self.router, "restore_recovery_state", None)
         if callable(restore):
             restore(state)
+
+    def validate_recovery_state(self, state: Any | None, symbols: tuple[str, ...]) -> None:
+        validate = getattr(self.router, "validate_recovery_state", None)
+        if callable(validate):
+            validate(state, symbols)
+        elif state is not None:
+            raise TypeError("router does not support the supplied recovery state")
+
+    def recovery_reconciliations(self) -> list[Any]:
+        reconciliations = getattr(self.router, "recovery_reconciliations", None)
+        return list(reconciliations()) if callable(reconciliations) else []

@@ -18,6 +18,13 @@ from l1_microstructure.execution import ExecutionReport, ExecutionRequest
 from ._ibkr_native import IBKRNativeBrokerSession
 from .broker_models import BrokerOrderSide, BrokerOrderType, IBKRConnectionConfig
 from .interfaces import RouteAcknowledgement
+from .recovery import (
+    BrokerOpenOrderRecovery,
+    BrokerRecoveryCodec,
+    BrokerRecoveryError,
+    BrokerRecoveryReconciliation,
+    BrokerRouterRecoveryState,
+)
 
 
 def _parse_bool(value: Any, *, default: bool) -> bool:
@@ -54,18 +61,6 @@ def _load_ibkr_connection_config(env_file: str | None) -> IBKRConnectionConfig:
     )
 
 
-@dataclass(frozen=True, slots=True)
-class BrokerOpenOrderRecovery:
-    external_order_id: str
-    request: ExecutionRequest
-    filled_quantity: float = 0.0
-
-
-@dataclass(frozen=True, slots=True)
-class BrokerRouterRecoveryState:
-    open_orders: list[BrokerOpenOrderRecovery]
-
-
 @dataclass(slots=True)
 class IBKRBrokerOrderRouter:
     ibkr_config: IBKRConnectionConfig
@@ -80,6 +75,7 @@ class IBKRBrokerOrderRouter:
     _open_requests: dict[str, ExecutionRequest] = field(default_factory=dict, init=False)
     _filled_quantities: dict[str, float] = field(default_factory=dict, init=False)
     _pending_terminal_reports: list[ExecutionReport] = field(default_factory=list, init=False)
+    _recovery_reconciliations: list[BrokerRecoveryReconciliation] = field(default_factory=list, init=False)
 
     def __post_init__(self) -> None:
         self.broker = self.broker if self.broker is not None else self._build_broker(self.ibkr_config)
@@ -114,7 +110,9 @@ class IBKRBrokerOrderRouter:
 
     def poll(self, symbols: tuple[str, ...]) -> list[ExecutionReport]:
         ready = [report for report in self._pending_terminal_reports if report.symbol in symbols]
-        self._pending_terminal_reports = [report for report in self._pending_terminal_reports if report.symbol not in symbols]
+        self._pending_terminal_reports = [
+            report for report in self._pending_terminal_reports if report.symbol not in symbols
+        ]
 
         for order_id, request in list(self._open_requests.items()):
             if request.symbol not in symbols:
@@ -162,30 +160,81 @@ class IBKRBrokerOrderRouter:
         )
 
     def restore_recovery_state(self, recovery_state: BrokerRouterRecoveryState | None) -> None:
-        self._open_requests = {}
-        self._filled_quantities = {}
-        self._pending_terminal_reports = []
+        self.validate_recovery_state(recovery_state)
         if recovery_state is None:
+            self._open_requests = {}
+            self._filled_quantities = {}
+            self._pending_terminal_reports = []
+            self._recovery_reconciliations = []
             return
 
         self._ensure_connected()
-        open_orders_by_id = self._broker_open_orders_by_id()
+        open_orders_by_id = self._broker_open_orders_by_id(strict=True)
+        staged_open_requests: dict[str, ExecutionRequest] = {}
+        staged_filled_quantities: dict[str, float] = {}
+        staged_reports: list[ExecutionReport] = []
+        reconciliations: list[BrokerRecoveryReconciliation] = []
         for recovered in recovery_state.open_orders:
             order_id = recovered.external_order_id
-            self._filled_quantities[order_id] = float(recovered.filled_quantity)
             order = open_orders_by_id.get(order_id)
             if order is None:
-                order = self._run_async(self.broker.get_order(order_id))
+                try:
+                    order = self._run_async(self.broker.get_order(order_id))
+                except Exception as exc:
+                    raise BrokerRecoveryError(
+                        f"broker lookup failed for recovered order {order_id}: {exc}", reconciliations
+                    ) from exc
             if order is None:
-                self._filled_quantities.pop(order_id, None)
+                reconciliations.append(
+                    BrokerRecoveryReconciliation(
+                        order_id, recovered.request.symbol, "missing", "order not found at broker"
+                    )
+                )
                 continue
 
-            reports, terminal = self._reports_from_order(order, recovered.request, order_id)
-            self._pending_terminal_reports.extend(reports)
+            mismatch = self._recovery_order_mismatch(order, recovered.request)
+            if mismatch is not None:
+                reconciliations.append(
+                    BrokerRecoveryReconciliation(order_id, recovered.request.symbol, "mismatched", mismatch)
+                )
+                raise BrokerRecoveryError(
+                    f"recovered order {order_id} does not match broker state: {mismatch}", reconciliations
+                )
+
+            reports, terminal = self._reports_from_order(
+                order,
+                recovered.request,
+                order_id,
+                seen_quantity=float(recovered.filled_quantity),
+            )
+            staged_reports.extend(reports)
             if terminal:
-                self._filled_quantities.pop(order_id, None)
+                reconciliations.append(
+                    BrokerRecoveryReconciliation(
+                        order_id, recovered.request.symbol, "terminal", "broker order is terminal"
+                    )
+                )
                 continue
-            self._open_requests[order_id] = recovered.request
+            staged_open_requests[order_id] = recovered.request
+            staged_filled_quantities[order_id] = max(
+                float(recovered.filled_quantity), float(getattr(order, "filled_quantity", 0.0) or 0.0)
+            )
+            reconciliations.append(
+                BrokerRecoveryReconciliation(order_id, recovered.request.symbol, "open", "broker order rehydrated")
+            )
+
+        self._open_requests = staged_open_requests
+        self._filled_quantities = staged_filled_quantities
+        self._pending_terminal_reports = staged_reports
+        self._recovery_reconciliations = reconciliations
+
+    def validate_recovery_state(
+        self, recovery_state: BrokerRouterRecoveryState | None, symbols: tuple[str, ...] | None = None
+    ) -> None:
+        BrokerRecoveryCodec.validate(recovery_state, symbols)
+
+    def recovery_reconciliations(self) -> list[BrokerRecoveryReconciliation]:
+        return list(self._recovery_reconciliations)
 
     def health_check(self) -> dict[str, Any]:
         try:
@@ -230,7 +279,7 @@ class IBKRBrokerOrderRouter:
             raise RuntimeError("broker returned an invalid reconciliation snapshot")
         return dict(snapshot)
 
-    def _broker_open_orders_by_id(self) -> dict[str, Any]:
+    def _broker_open_orders_by_id(self, *, strict: bool = False) -> dict[str, Any]:
         get_orders = getattr(self.broker, "get_orders", None)
         if not callable(get_orders):
             adapter = getattr(self.broker, "adapter", None)
@@ -239,9 +288,13 @@ class IBKRBrokerOrderRouter:
             return {}
         try:
             orders = self._run_async(get_orders(status="open"))
-        except Exception:
+        except Exception as exc:
+            if strict:
+                raise RuntimeError(f"failed to query broker open orders: {exc}") from exc
             return {}
         if not isinstance(orders, list):
+            if strict:
+                raise RuntimeError("broker returned an invalid open-order collection")
             return {}
         return {
             str(getattr(order, "order_id", "")): order
@@ -271,18 +324,28 @@ class IBKRBrokerOrderRouter:
             kwargs["client_order_id"] = request.client_order_id
         return self._run_async(submit_order(request.symbol, float(request.quantity), side, **kwargs))
 
-    def _reports_from_order(self, order: Any, request: ExecutionRequest, order_id: str) -> tuple[list[ExecutionReport], bool]:
+    def _reports_from_order(
+        self,
+        order: Any,
+        request: ExecutionRequest,
+        order_id: str,
+        *,
+        seen_quantity: float | None = None,
+    ) -> tuple[list[ExecutionReport], bool]:
         status = self._order_status_value(getattr(order, "status", None))
         reports: list[ExecutionReport] = []
         total_quantity = float(getattr(order, "quantity", request.quantity) or request.quantity)
         filled_quantity = float(getattr(order, "filled_quantity", 0.0) or 0.0)
-        seen_quantity = self._filled_quantities.get(order_id, 0.0)
-        newly_filled = max(filled_quantity - seen_quantity, 0.0)
+        update_live_tracking = seen_quantity is None
+        previously_filled = self._filled_quantities.get(order_id, 0.0) if seen_quantity is None else seen_quantity
+        newly_filled = max(filled_quantity - previously_filled, 0.0)
         timestamp = getattr(order, "timestamp", None)
         timestamp_ns = self._timestamp_ns(timestamp, request.executable_timestamp_ns)
 
         if newly_filled > 0.0:
-            fill_price = float(getattr(order, "average_price", None) or getattr(order, "price", None) or self._touch_price(request))
+            fill_price = float(
+                getattr(order, "average_price", None) or getattr(order, "price", None) or self._touch_price(request)
+            )
             reports.append(
                 ExecutionReport(
                     symbol=request.symbol,
@@ -293,13 +356,16 @@ class IBKRBrokerOrderRouter:
                     alignment_probability=1.0,
                     fill_probability=1.0,
                     slippage_bps=self._slippage_bps(fill_price, request),
-                    reason="broker reported partial fill" if filled_quantity < total_quantity else "broker reported fill",
+                    reason="broker reported partial fill"
+                    if filled_quantity < total_quantity
+                    else "broker reported fill",
                     timestamp_ns=timestamp_ns,
                     client_order_id=request.client_order_id,
                     external_order_id=order_id,
                 )
             )
-            self._filled_quantities[order_id] = filled_quantity
+            if update_live_tracking:
+                self._filled_quantities[order_id] = filled_quantity
 
         terminal = False
         if status in {"cancelled", "rejected"}:
@@ -324,6 +390,20 @@ class IBKRBrokerOrderRouter:
             terminal = True
 
         return reports, terminal
+
+    @staticmethod
+    def _recovery_order_mismatch(order: Any, request: ExecutionRequest) -> str | None:
+        broker_symbol = str(getattr(order, "symbol", ""))
+        if broker_symbol and broker_symbol != request.symbol:
+            return f"symbol {broker_symbol} != {request.symbol}"
+        broker_quantity = float(getattr(order, "quantity", request.quantity) or request.quantity)
+        if not math.isclose(broker_quantity, float(request.quantity)):
+            return f"quantity {broker_quantity} != {request.quantity}"
+        broker_side = str(getattr(getattr(order, "side", None), "value", getattr(order, "side", ""))).lower()
+        expected_side = "buy" if request.action == TradeAction.BUY else "sell"
+        if broker_side and broker_side != expected_side:
+            return f"side {broker_side} != {expected_side}"
+        return None
 
     def _error_report(self, request: ExecutionRequest, reason: str) -> ExecutionReport:
         return ExecutionReport(

@@ -13,19 +13,11 @@ from l1_microstructure.config import FrameworkConfig
 from l1_microstructure.execution import ExecutionReport
 from l1_microstructure.ingest.interfaces import LiveSubscriptionRequest, MarketDataSource
 from l1_microstructure.monitoring import InMemoryMonitoringSink, RuntimeMonitor
-from l1_microstructure.pipeline import FrameworkUpdate, L1MicrostructureStateMachine, StateMachineRecoverySnapshot
+from l1_microstructure.pipeline import FrameworkUpdate, L1MicrostructureStateMachine
 
-from .interfaces import OrderRouter, RouteAcknowledgement, RunnerConfig
 from .execution_session import RoutedExecutionService
-
-
-@dataclass(frozen=True, slots=True)
-class RoutedLiveRecoverySnapshot:
-    machine_snapshot: StateMachineRecoverySnapshot
-    runtime_artifacts: RuntimeArtifactBundle
-    route_acknowledgements: list[RouteAcknowledgement]
-    execution_reports: list[ExecutionReport]
-    router_recovery_state: Any | None = None
+from .interfaces import OrderRouter, RouteAcknowledgement, RunnerConfig
+from .recovery import BrokerRecoveryReconciliation, RoutedLiveRecoveryCodec, RoutedLiveRecoverySnapshot
 
 
 @dataclass(slots=True)
@@ -46,6 +38,7 @@ class RoutedLiveTradingRunner:
     route_acknowledgements: list[RouteAcknowledgement] = field(default_factory=list)
     execution_reports: list[ExecutionReport] = field(default_factory=list)
     execution_service: RoutedExecutionService = field(init=False)
+    _symbols: tuple[str, ...] = field(default_factory=tuple, init=False)
 
     def __post_init__(self) -> None:
         self.framework_config = self.framework_config or FrameworkConfig()
@@ -60,26 +53,37 @@ class RoutedLiveTradingRunner:
         run_id: str | None = None,
         recovery_snapshot: RoutedLiveRecoverySnapshot | None = None,
     ) -> "RoutedLiveTradingRunner":
-        self.is_running = True
-        self.updates = []
-        self.route_acknowledgements = (
+        restored_acknowledgements = (
             [] if recovery_snapshot is None else deepcopy(recovery_snapshot.route_acknowledgements)
         )
-        self.execution_reports = [] if recovery_snapshot is None else deepcopy(recovery_snapshot.execution_reports)
-        self.runtime_artifacts = (
+        restored_reports = [] if recovery_snapshot is None else deepcopy(recovery_snapshot.execution_reports)
+        restored_artifacts = (
             self._resolve_runtime_artifacts(config.symbols, run_id=run_id)
             if recovery_snapshot is None
             else recovery_snapshot.runtime_artifacts
         )
         machine = L1MicrostructureStateMachine(
             self.framework_config,
-            runtime_artifacts=self.runtime_artifacts,
+            runtime_artifacts=restored_artifacts,
             route_orders_externally=True,
         )
         if recovery_snapshot is not None:
-            self.execution_service.restore_recovery_state(recovery_snapshot.router_recovery_state)
+            RoutedLiveRecoveryCodec.validate(
+                machine,
+                recovery_snapshot,
+                config.symbols,
+                self.execution_service.validate_recovery_state,
+            )
             machine.restore_state(recovery_snapshot.machine_snapshot)
+            self.execution_service.restore_recovery_state(recovery_snapshot.router_recovery_state)
+
+        self.is_running = True
+        self.updates = []
+        self.route_acknowledgements = restored_acknowledgements
+        self.execution_reports = restored_reports
+        self.runtime_artifacts = restored_artifacts
         self.machine = machine
+        self._symbols = config.symbols
         monitor = RuntimeMonitor(self.monitoring_sink)
         selected_symbols = set(config.symbols)
 
@@ -112,6 +116,7 @@ class RoutedLiveTradingRunner:
             runtime_artifacts=self.runtime_artifacts,
             route_acknowledgements=deepcopy(self.route_acknowledgements),
             execution_reports=deepcopy(self.execution_reports),
+            symbols=self._symbols,
             router_recovery_state=deepcopy(self.execution_service.snapshot_recovery_state()),
         )
 
@@ -127,6 +132,9 @@ class RoutedLiveTradingRunner:
 
     def router_health(self) -> dict[str, Any] | None:
         return self.execution_service.health()
+
+    def recovery_reconciliations(self) -> list[BrokerRecoveryReconciliation]:
+        return list(self.execution_service.recovery_reconciliations())
 
     def monitoring_frame(self) -> pd.DataFrame:
         return self.monitoring_sink.to_frame()

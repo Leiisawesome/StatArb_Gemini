@@ -86,3 +86,14 @@ def test_live_contracts_and_execution_service_do_not_import_ibkr() -> None:
     )
 
     assert result.returncode == 0, result.stderr
+
+
+def test_cli_import_is_independent_of_prior_module_import_order() -> None:
+    result = subprocess.run(
+        [sys.executable, "-c", "import l1_microstructure.cli"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr

@@ -62,8 +62,10 @@ l1_microstructure/
     __init__.py
     _ibkr_native.py
     broker_models.py
+    execution_session.py
     interfaces.py
     paper.py
+    recovery.py
     routed.py
     router_adapters.py
     source.py
@@ -145,6 +147,12 @@ methods without serializing subordinate engine internals itself.
 
 `live/`
 Defines paper and routed-live runner contracts and implements the simulator-backed paper runner, source-backed paper runner, routed-live runner, and IBKR router boundary.
+
+`live/recovery.py`
+Defines versioned routed-live and broker recovery envelopes. Recovery validates
+the full machine/router snapshot before runner mutation, stages broker lookups
+before replacing tracked orders, and exposes explicit open, missing, terminal,
+and mismatched reconciliation outcomes.
 
 ## Stable contract layer
 
