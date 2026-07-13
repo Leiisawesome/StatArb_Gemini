@@ -146,6 +146,10 @@ created by a trusted local workflow:
 
 ## Qualification
 
+The step-by-step counted-session campaign, PowerShell evidence commands, failure
+rules, and separate external drill procedure are in
+[`paper_trading_qualification_runbook.md`](paper_trading_qualification_runbook.md).
+
 Run the offline safety-drill gate first:
 
 ```bash

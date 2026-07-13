@@ -384,6 +384,11 @@ and in-process infrastructure boundaries. It emits one JSON report and exits `0`
 when every drill passes or `2` when any drill fails. It does not load production
 configuration, credentials, artifacts, market-data clients, or broker clients.
 
+Follow the complete
+[paper-trading qualification runbook](docs/paper_trading_qualification_runbook.md)
+for the frozen ten-session campaign, daily evidence capture, failure rules, and
+separate broker-recovery drills.
+
 After every attempted regular-hours paper session, finalize its durable ledger
 evidence:
 
