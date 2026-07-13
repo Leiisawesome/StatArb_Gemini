@@ -350,6 +350,11 @@ trading-daemon --config config/production.json
 trading-console
 ```
 
+The daemon performs a read-only, redacted configuration preflight before it
+constructs market-data or broker clients. Missing credentials, unavailable or
+unapproved artifacts, unwritable ledger paths, and paper/live account-mode
+mismatches fail startup before any routing boundary is opened.
+
 Production configuration defaults to regular-hours operation, stops entries at
 15:50 ET, flattens at 15:58 ET, and rejects live mode unless the configuration
 contains `"live_risk_acknowledgement": "I_ACCEPT_LIVE_CAPITAL_RISK"`.

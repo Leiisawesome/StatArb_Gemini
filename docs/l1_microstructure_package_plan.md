@@ -75,6 +75,20 @@ l1_microstructure/
     alerts.py
     interfaces.py
     runtime.py
+  production/
+    __init__.py
+    alerts.py
+    api.py
+    config.py
+    console.py
+    daemon.py
+    ledger.py
+    lifecycle.py
+    migrate.py
+    preflight.py
+    runtime.py
+    secret_cli.py
+    secrets.py
   replay/
     __init__.py
     engine.py
@@ -143,6 +157,13 @@ Defines validation contracts and implements the rolling out-of-sample validation
 Defines runtime snapshots plus typed operational alerts with severity,
 categories, bounded history, and time-window deduplication. In-memory, JSONL,
 routed-live, and supervised production paths share this contract.
+
+`production/`
+Defines the supervised operator runtime, durable ledger, authenticated controls,
+local alerts, secrets, and daemon lifecycle. `preflight.py` performs read-only,
+redacted checks for required credentials, promoted artifacts, filesystem
+readiness, broker account mode, and retry configuration before infrastructure
+clients or runtime threads are created.
 
 `recovery.py`
 Defines the typed, versioned state-machine recovery schema and owns validation,

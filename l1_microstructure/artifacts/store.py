@@ -13,9 +13,12 @@ from .interfaces import ArtifactMetadata
 
 
 class LocalArtifactStore:
-    def __init__(self, root_path: str | Path):
+    def __init__(self, root_path: str | Path, *, create: bool = True):
         self.root_path = Path(root_path)
-        self.root_path.mkdir(parents=True, exist_ok=True)
+        if create:
+            self.root_path.mkdir(parents=True, exist_ok=True)
+        elif not self.root_path.is_dir():
+            raise ValueError("artifact root does not exist or is not a directory")
 
     def save(self, metadata: ArtifactMetadata, payload: dict[str, Any]) -> None:
         artifact_dir = self.root_path / metadata.artifact_id

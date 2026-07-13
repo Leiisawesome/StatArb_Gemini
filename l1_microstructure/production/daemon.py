@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 from threading import Thread
-from typing import Sequence
+from typing import Sequence, cast
 
 import uvicorn
 
@@ -13,6 +13,7 @@ from l1_microstructure.live import IBKRBrokerOrderRouter
 
 from .api import create_app
 from .config import ProductionConfig
+from .preflight import ProductionPreflight
 from .runtime import ProductionRuntime
 from .secrets import get_secret
 
@@ -28,10 +29,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     config = ProductionConfig.from_json(args.config)
     massive_key = get_secret("MASSIVE_API_KEY")
     api_token = get_secret("TRADING_CONSOLE_TOKEN")
-    if not massive_key:
-        raise RuntimeError("MASSIVE_API_KEY is missing from Keychain")
-    if not api_token:
-        raise RuntimeError("TRADING_CONSOLE_TOKEN is missing from Keychain")
+    ProductionPreflight(
+        config,
+        secret_lookup={
+            "MASSIVE_API_KEY": massive_key,
+            "TRADING_CONSOLE_TOKEN": api_token,
+        }.get,
+    ).run().raise_for_failure()
+    massive_key = cast(str, massive_key)
+    api_token = cast(str, api_token)
     source = MassiveWebSocketDataSource(MassiveWebSocketConfig(api_key=massive_key))
     router = IBKRBrokerOrderRouter.from_env(
         str(config.broker_env_file) if config.broker_env_file else None,

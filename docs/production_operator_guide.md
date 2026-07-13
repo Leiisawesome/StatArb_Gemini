@@ -55,6 +55,13 @@ Start IBKR Gateway or TWS in paper mode, then run:
 .venv/bin/trading-console
 ```
 
+Before creating market-data or broker clients, the daemon runs a read-only
+preflight. It verifies required secrets by presence only, promoted artifact
+approval and integrity, the database location, broker configuration source and
+paper/live mode, and bounded retry policies. Diagnostics contain configuration
+metadata but never secret values. Any failed check prevents runtime-thread
+startup and broker connectivity.
+
 The terminal console can pause entries, resume after reconciliation, activate the
 durable kill switch, and flatten strategy positions. Halt and flatten operations
 require confirmation at the API boundary. Closing the console does not stop the

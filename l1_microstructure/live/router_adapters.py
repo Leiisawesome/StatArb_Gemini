@@ -43,7 +43,7 @@ def _parse_bool(value: Any, *, default: bool) -> bool:
     return default
 
 
-def _load_ibkr_connection_config(env_file: str | None) -> IBKRConnectionConfig:
+def load_ibkr_connection_config(env_file: str | None) -> IBKRConnectionConfig:
     loaded: dict[str, str] = {}
     if env_file is not None:
         loaded.update({key: str(value) for key, value in dotenv_values(env_file).items() if value is not None})
@@ -62,6 +62,9 @@ def _load_ibkr_connection_config(env_file: str | None) -> IBKRConnectionConfig:
         paper_trading=_parse_bool(loaded.get("IBKR_PAPER_TRADING"), default=True),
         outside_regular_trading_hours=_parse_bool(loaded.get("IBKR_OUTSIDE_RTH"), default=False),
     )
+
+
+_load_ibkr_connection_config = load_ibkr_connection_config
 
 
 @dataclass(slots=True)

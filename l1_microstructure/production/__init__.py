@@ -10,6 +10,7 @@ from .config import (
 )
 from .ledger import OperationalLedger
 from .lifecycle import LifecycleState, RuntimeLifecycle
+from .preflight import PreflightCheck, PreflightStatus, ProductionPreflight, ProductionPreflightReport
 from .runtime import ProductionRuntime
 
 __all__ = [
@@ -19,6 +20,10 @@ __all__ = [
     "OperatingMode",
     "OperationalLedger",
     "ProductionConfig",
+    "PreflightCheck",
+    "PreflightStatus",
+    "ProductionPreflight",
+    "ProductionPreflightReport",
     "ProductionRuntime",
     "RiskLimits",
     "RuntimeLifecycle",
