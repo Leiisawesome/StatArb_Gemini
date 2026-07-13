@@ -161,16 +161,42 @@ and returns `0` only when every scenario passes (`2` otherwise). Use repeated
 than replaces external Massive and IBKR smoke checks or regular-hours paper
 qualification.
 
-Before live routing, complete at least ten consecutive regular-hours paper
-sessions with:
+The daemon appends one session-start marker when a regular-hours attempt begins
+and a session-close marker only after the flatten path reaches `stopped` with its
+closing position and open-order snapshot. After every attempted paper session,
+finalize that date:
 
-1. no duplicate submissions or unreconciled fills;
-2. no unresolved position at 16:00 ET;
-3. successful restart drills during no-order, submitted, partial-fill, and
-   disconnected states;
-4. verified stale-feed, broker-loss, daily-loss, and flatten-timeout halts; and
-5. an immutable audit record for every decision, order, fill, control, incident,
-   and model promotion.
+```bash
+.venv/bin/trading-paper-qualify \
+  --database var/trading.sqlite3 \
+  --finalize YYYY-MM-DD
+```
+
+The command appends an immutable evaluation to the same ledger and emits the
+complete machine-readable gate report. Re-run it without `--finalize` to inspect
+the accumulated result. It returns `0` only after ten trailing evaluations pass;
+until then, or whenever the latest attempted session is missing or failed, it
+returns `2`. Finalize every attempted date: an automatic start marker without a
+recorded evaluation is synthesized as a failed session and breaks the streak.
+
+Each session evaluation requires:
+
+1. matching paper-mode start and regular close markers;
+2. recorded framework activity;
+3. unique client and external order ids;
+4. no nonterminal or open orders at close;
+5. every execution report reconciled to a durable order intent;
+6. no nonzero strategy position at close;
+7. every submitted decision either routed or durably blocked;
+8. every route acknowledgement linked to a durable order intent; and
+9. no runtime-halt incident during the session.
+
+The ten-session gate complements the offline safety drills. Before live-capital
+consideration, also retain successful external paper evidence for restart drills
+during no-order, submitted, partial-fill, and disconnected states and verify the
+stale-feed, broker-loss, daily-loss, and flatten-timeout controls. The offline
+gate covers deterministic safety behavior; external evidence proves the actual
+broker and workstation environment.
 
 Live mode additionally requires `IBKR_PAPER_TRADING=false` and the exact JSON
 value `"live_risk_acknowledgement": "I_ACCEPT_LIVE_CAPITAL_RISK"`. Begin with

@@ -240,6 +240,26 @@ def test_artifact_bundle_selector_can_gate_on_execution_quality(tmp_path) -> Non
         )
 
 
+def test_passing_bundle_requires_matching_approved_validation_report(tmp_path) -> None:
+    source = _make_source()
+    events = list(source.subscribe_live(LiveSubscriptionRequest(symbols=("AAPL",))))
+    config = FrameworkConfig()
+    config.transition.mahalanobis_threshold = 0.0
+    workflow = ArtifactDrivenResearchWorkflow(tmp_path, framework_config=config)
+    result = workflow.run(symbol="AAPL", events=events)
+    validation_id = result.artifact_ids.validation_report_id
+    metadata = workflow.store.load_metadata(validation_id)
+    payload = workflow.store.load(validation_id)
+    payload["passed"] = False
+    workflow.store.save(metadata, payload)
+
+    selector = ArtifactBundleSelector(workflow.store)
+
+    assert selector.list_run_manifests("AAPL", passing_only=True) == []
+    with pytest.raises(ValueError, match="not committed and validation-approved"):
+        selector.resolve_passing_by_run_id(symbol="AAPL", run_id=result.run_id)
+
+
 def test_source_backed_runner_quality_gate_rejects_low_quality_bundle(tmp_path) -> None:
     source = _make_source()
     events = list(source.subscribe_live(LiveSubscriptionRequest(symbols=("AAPL",))))

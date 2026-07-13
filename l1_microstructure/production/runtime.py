@@ -85,6 +85,7 @@ class ProductionRuntime:
                 self._transition(LifecycleState.WARMING, "loading promoted artifacts")
                 self._load_machines()
                 self._transition(LifecycleState.RECONCILING, "reconciling broker and ledger")
+            self._record_session_start()
             failure, snapshot = self._reconciliation_failure()
             if failure is not None:
                 broker_disconnected = failure.startswith("broker is not connected")
@@ -201,6 +202,7 @@ class ProductionRuntime:
             if not any(machine.open_positions for machine in self.machines.values()) and not self.ledger.open_orders():
                 self._transition(LifecycleState.STOPPED, "flatten complete")
                 self._running = False
+                self._record_session_close(event.timestamp_ns)
             elif self._flatten_timed_out(event.timestamp_ns):
                 self._halt("flatten timed out with unresolved positions or orders", code="flatten_timeout")
             return
@@ -228,7 +230,7 @@ class ProductionRuntime:
             LifecycleState.RUNNING,
             LifecycleState.PAUSED,
         }:
-            self.flatten()
+            self.flatten(timestamp_ns=event.timestamp_ns)
             return
         if session_phase == "closed" and any(machine.open_positions for machine in self.machines.values()):
             self._halt(
@@ -248,6 +250,7 @@ class ProductionRuntime:
                 "state": update.state.label,
                 "regime": update.regime.dominant_regime.value,
                 "intent": update.intent.action.value if update.intent is not None else None,
+                "submitted_client_order_ids": [request.client_order_id for request in update.submitted_requests],
             },
         )
         for request in update.submitted_requests:
@@ -290,7 +293,7 @@ class ProductionRuntime:
         self.ledger.append_event("model", "promoted", {"symbol": symbol, "run_id": run_id})
         self.machines = {}
 
-    def flatten(self) -> None:
+    def flatten(self, *, timestamp_ns: int | None = None) -> None:
         if self.lifecycle.state not in {LifecycleState.WARMING, LifecycleState.RUNNING, LifecycleState.PAUSED}:
             raise ValueError("flatten requires a warming, running, or paused runtime")
         self._transition(LifecycleState.FLATTENING, "flatten requested")
@@ -306,6 +309,7 @@ class ProductionRuntime:
         else:
             self._transition(LifecycleState.STOPPED, "flatten complete")
             self._running = False
+            self._record_session_close(timestamp_ns)
 
     def _route_flatten_symbol(self, symbol: str, machine: L1MicrostructureStateMachine) -> None:
         position = machine.open_positions.get(symbol)
@@ -631,23 +635,47 @@ class ProductionRuntime:
         position = machine.open_positions.get(request.symbol)
         is_exit = position is not None and position.side is not request.action
         if not is_exit and not self.lifecycle.permits_entries:
+            self.ledger.append_event(
+                "risk",
+                "order_blocked",
+                {
+                    "reason": f"lifecycle_{self.lifecycle.state.value}",
+                    "symbol": request.symbol,
+                    "client_order_id": request.client_order_id,
+                },
+            )
             return False
         session_phase = self._session_phase(request.decision_timestamp_ns)
         if not is_exit and session_phase != "entries":
-            self.ledger.append_event("risk", "order_blocked", {"reason": session_phase, "symbol": request.symbol})
+            self.ledger.append_event(
+                "risk",
+                "order_blocked",
+                {"reason": session_phase, "symbol": request.symbol, "client_order_id": request.client_order_id},
+            )
             return False
         if not is_exit and self._would_breach_exposure(request):
             self.ledger.append_event(
-                "risk", "order_blocked", {"reason": "production exposure limit", "symbol": request.symbol}
+                "risk",
+                "order_blocked",
+                {
+                    "reason": "production exposure limit",
+                    "symbol": request.symbol,
+                    "client_order_id": request.client_order_id,
+                },
             )
             return False
         if not is_exit and request.action is TradeAction.SELL and not self.config.risk.allow_shorting:
-            self.ledger.append_event("risk", "order_blocked", {"reason": "shorting disabled", "symbol": request.symbol})
+            self.ledger.append_event(
+                "risk",
+                "order_blocked",
+                {"reason": "shorting disabled", "symbol": request.symbol, "client_order_id": request.client_order_id},
+            )
             return False
         return True
 
     def _route(self, request: ExecutionRequest) -> None:
         payload = {
+            "client_order_id": request.client_order_id,
             "symbol": request.symbol,
             "action": request.action.value,
             "quantity": request.quantity,
@@ -727,6 +755,69 @@ class ProductionRuntime:
             direction = 1.0 if position.side is TradeAction.BUY else -1.0
             positions[symbol] = direction * float(position.quantity)
         self.ledger.set_state("strategy_positions", positions)
+
+    def _record_session_close(self, timestamp_ns: int | None = None) -> None:
+        observed_at_ns = (
+            int(datetime.now(timezone.utc).timestamp() * 1_000_000_000) if timestamp_ns is None else int(timestamp_ns)
+        )
+        session_phase = self._session_phase(observed_at_ns)
+        if session_phase not in {"flatten", "closed"}:
+            return
+        local = datetime.fromtimestamp(observed_at_ns / 1_000_000_000, timezone.utc).astimezone(
+            ZoneInfo(self.config.session.timezone)
+        )
+        session_date = local.date().isoformat()
+        if self.ledger.get_state("last_closed_session_date") == session_date:
+            return
+        positions = {
+            symbol: (1.0 if position.side is TradeAction.BUY else -1.0) * float(position.quantity)
+            for symbol, machine in self.machines.items()
+            if (position := machine.open_positions.get(symbol)) is not None
+        }
+        self.ledger.append_event(
+            "session",
+            "closed",
+            {
+                "session_date": session_date,
+                "timestamp_ns": observed_at_ns,
+                "session_phase": session_phase,
+                "mode": self.config.mode.value,
+                "symbols": list(self.config.symbols),
+                "positions": positions,
+                "open_orders": self.ledger.open_orders(),
+            },
+        )
+        self.ledger.set_state("last_closed_session_date", session_date)
+
+    def _record_session_start(self, timestamp_ns: int | None = None) -> None:
+        observed_at_ns = (
+            int(datetime.now(timezone.utc).timestamp() * 1_000_000_000) if timestamp_ns is None else int(timestamp_ns)
+        )
+        local = datetime.fromtimestamp(observed_at_ns / 1_000_000_000, timezone.utc).astimezone(
+            ZoneInfo(self.config.session.timezone)
+        )
+        market_open = datetime.combine(local.date(), time.fromisoformat(self.config.session.market_open), local.tzinfo)
+        warmup_start = market_open - timedelta(seconds=self.config.warmup_seconds)
+        market_close = datetime.combine(
+            local.date(), time.fromisoformat(self.config.session.market_close), local.tzinfo
+        )
+        if local.weekday() >= 5 or not warmup_start <= local < market_close:
+            return
+        session_date = local.date().isoformat()
+        if self.ledger.get_state("last_started_session_date") == session_date:
+            return
+        self.ledger.append_event(
+            "session",
+            "started",
+            {
+                "session_date": session_date,
+                "timestamp_ns": observed_at_ns,
+                "mode": self.config.mode.value,
+                "symbols": list(self.config.symbols),
+            },
+            timestamp=local,
+        )
+        self.ledger.set_state("last_started_session_date", session_date)
 
     def _daily_loss_breach(self) -> str | None:
         health = self._router_health()

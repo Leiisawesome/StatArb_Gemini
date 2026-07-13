@@ -124,8 +124,15 @@ Concrete implementations now exist for:
 13. routed-live execution through an order-router boundary
 14. Interactive Brokers routing and smoke-command support
 15. artifact-producing research workflow and CLI commands
+16. a supervised fail-closed production daemon and authenticated control API
+17. durable operational recovery, alerts, and bounded dependency retries
+18. typed liveness, readiness, and redacted startup preflight
+19. deterministic offline safety qualification
+20. durable regular-hours paper-session qualification
 
-The remaining roadmap is therefore about refinement, extension, and hardening rather than basic scaffolding.
+The package is now at the controlled-paper release-candidate boundary described
+below. Further refinement is justified by qualification evidence, not by a
+standing architecture-cleanup roadmap.
 
 ## Responsibilities by subpackage
 
@@ -179,6 +186,10 @@ separate contracts.
 `qualification.py` runs deterministic offline safety drills against the real
 production lifecycle and audit ledger, emitting a versioned JSON report with
 stable success/failure exit codes and no external infrastructure construction.
+`paper_qualification.py` evaluates append-only regular-hours session evidence
+from the production ledger. Automatic start/close markers make missing sessions
+visible, and a versioned report enforces ten trailing passing paper sessions
+across order, fill, position, incident, and audit-completeness checks.
 
 `recovery.py`
 Defines the typed, versioned state-machine recovery schema and owns validation,
@@ -272,35 +283,34 @@ Two points matter for future documentation and implementation work:
 1. the current CLI is source-backed rather than payload-file based
 2. deterministic test routers exist in tests and lower-level APIs, but are not currently exposed as CLI router flags
 
-## What remains as roadmap
+## Release-candidate boundary
 
-The package is functional, but some work remains before the system can be treated as production-grade beyond controlled operation.
+The current overhaul targets controlled paper-trading qualification, not an
+open-ended production rewrite. Its architectural work is complete when a clean
+installation passes the automated suite, daemon preflight, and deterministic
+offline safety qualification. After that point, the only release gate is
+empirical evidence from ten trailing regular-hours paper sessions plus the
+documented external broker and workstation drills.
 
-The main remaining areas are:
+Do not extend this overhaul to pursue:
 
-1. harden external data-source and broker error handling for live operation
-2. improve documentation around required credentials and environment configuration
-3. deepen validation standards and operating thresholds for real symbol universes
-4. expand artifact metadata and auditability where needed
-5. decide whether deterministic router options should become official CLI surfaces or stay test-only
-6. extend execution realism if more detailed market structure or venue-specific assumptions become available
-7. continue tightening tests around recovery, broker state rehydration, and failure cases
+1. new alpha or improved backtest returns;
+2. venue-specific execution or queue-position realism;
+3. broader symbol-universe optimization;
+4. convenience CLI surfaces that do not close a qualification gap; or
+5. live-capital enablement before paper qualification passes.
 
-## Updated implementation priorities
+Those are separate, evidence-driven projects. A failed paper session may justify
+a narrowly scoped reliability fix, but it does not reopen general architecture
+cleanup.
 
-If the next goal is research hardening, prioritize:
+## Immediate next phase
 
-1. validation thresholds and bundle-selection policy
-2. richer artifact metadata and auditability
-3. reproducible dataset and calibration diagnostics
-4. clearer session, exclusion-window, and data-quality policy documentation
-
-If the next goal is live-ops hardening, prioritize:
-
-1. broker-boundary error handling and recovery behavior
-2. runtime monitoring completeness and operator alerts
-3. documentation of broker and market-data environment requirements
-4. stricter smoke and dress-rehearsal procedures around routed-live flows
+Operate the supervised daemon in paper mode and collect the qualification
+evidence described in `docs/production_operator_guide.md`. Promote a change during
+this phase only when it fixes an observed safety, recovery, audit, or operational
+failure. Reset the ten-session trailing gate after any failed or missing session
+evaluation.
 
 ## Review checklist for future changes
 

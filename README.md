@@ -384,6 +384,23 @@ and in-process infrastructure boundaries. It emits one JSON report and exits `0`
 when every drill passes or `2` when any drill fails. It does not load production
 configuration, credentials, artifacts, market-data clients, or broker clients.
 
+After every attempted regular-hours paper session, finalize its durable ledger
+evidence:
+
+```bash
+trading-paper-qualify --database var/trading.sqlite3 --finalize 2026-07-13
+```
+
+Run the same command without `--finalize` to inspect the accumulated gate. The
+report becomes `qualified` only after ten trailing passing sessions. Automatic
+session-start markers ensure an attempted but unfinalized or incompletely closed
+session breaks the streak. The evaluator checks paper mode, regular close
+evidence, market activity, unique order IDs, terminal orders, reconciled fills,
+flat closing positions, complete decision/acknowledgement audit links, and zero
+runtime-halt incidents. It emits one JSON report and uses exit code `0` only when
+the ten-session gate is qualified; `2` means more evidence or remediation is
+required.
+
 Production configuration defaults to regular-hours operation, stops entries at
 15:50 ET, flattens at 15:58 ET, and rejects live mode unless the configuration
 contains `"live_risk_acknowledgement": "I_ACCEPT_LIVE_CAPITAL_RISK"`.

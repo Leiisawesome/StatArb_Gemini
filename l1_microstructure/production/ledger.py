@@ -29,18 +29,31 @@ class OperationalLedger:
         with self._lock:
             self._connection.close()
 
-    def append_event(self, category: str, event_type: str, payload: dict[str, Any]) -> int:
-        timestamp = datetime.now(timezone.utc).isoformat()
+    def append_event(
+        self,
+        category: str,
+        event_type: str,
+        payload: dict[str, Any],
+        *,
+        timestamp: str | None = None,
+    ) -> int:
+        observed_at = timestamp or datetime.now(timezone.utc).isoformat()
         with self._transaction() as connection:
             cursor = connection.execute(
                 "INSERT INTO audit_events(timestamp, category, event_type, payload_json) VALUES (?, ?, ?, ?)",
-                (timestamp, category, event_type, self._json(payload)),
+                (observed_at, category, event_type, self._json(payload)),
             )
             return int(cursor.lastrowid)
 
-    def record_order_intent(self, payload: dict[str, Any], client_order_id: str | None = None) -> str:
+    def record_order_intent(
+        self,
+        payload: dict[str, Any],
+        client_order_id: str | None = None,
+        *,
+        timestamp: str | None = None,
+    ) -> str:
         order_id = client_order_id or uuid4().hex
-        now = datetime.now(timezone.utc).isoformat()
+        now = timestamp or datetime.now(timezone.utc).isoformat()
         with self._transaction() as connection:
             connection.execute(
                 "INSERT INTO order_ledger(client_order_id, status, created_at, updated_at, payload_json) VALUES (?, ?, ?, ?, ?)",
@@ -55,8 +68,9 @@ class OperationalLedger:
         *,
         external_order_id: str | None = None,
         payload: dict[str, Any] | None = None,
+        timestamp: str | None = None,
     ) -> None:
-        now = datetime.now(timezone.utc).isoformat()
+        now = timestamp or datetime.now(timezone.utc).isoformat()
         with self._transaction() as connection:
             cursor = connection.execute(
                 "UPDATE order_ledger SET status = ?, external_order_id = COALESCE(?, external_order_id), updated_at = ?, payload_json = COALESCE(?, payload_json) WHERE client_order_id = ?",
@@ -104,16 +118,7 @@ class OperationalLedger:
         rows = self._connection.execute(
             f"SELECT * FROM audit_events{where} ORDER BY id DESC LIMIT ?", parameters
         ).fetchall()
-        return [
-            {
-                "id": int(row["id"]),
-                "timestamp": row["timestamp"],
-                "category": row["category"],
-                "event_type": row["event_type"],
-                "payload": json.loads(row["payload_json"]),
-            }
-            for row in rows
-        ]
+        return [self._event_row(row) for row in rows]
 
     def event_count(self, *, category: str | None = None, event_type: str | None = None) -> int:
         clauses: list[str] = []
@@ -127,6 +132,35 @@ class OperationalLedger:
         where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
         row = self._connection.execute(f"SELECT COUNT(*) AS count FROM audit_events{where}", parameters).fetchone()
         return int(row["count"])
+
+    def events_between(
+        self,
+        start_timestamp: str,
+        end_timestamp: str,
+        *,
+        category: str | None = None,
+        event_type: str | None = None,
+    ) -> list[dict[str, Any]]:
+        clauses = ["timestamp >= ?", "timestamp < ?"]
+        parameters: list[Any] = [start_timestamp, end_timestamp]
+        if category is not None:
+            clauses.append("category = ?")
+            parameters.append(category)
+        if event_type is not None:
+            clauses.append("event_type = ?")
+            parameters.append(event_type)
+        rows = self._connection.execute(
+            f"SELECT * FROM audit_events WHERE {' AND '.join(clauses)} ORDER BY id",
+            parameters,
+        ).fetchall()
+        return [self._event_row(row) for row in rows]
+
+    def orders_between(self, start_timestamp: str, end_timestamp: str) -> list[dict[str, Any]]:
+        rows = self._connection.execute(
+            "SELECT * FROM order_ledger WHERE created_at >= ? AND created_at < ? ORDER BY id",
+            (start_timestamp, end_timestamp),
+        ).fetchall()
+        return [self._order_row(row) for row in rows]
 
     def _initialize(self) -> None:
         with self._lock:
@@ -186,5 +220,15 @@ class OperationalLedger:
             "status": row["status"],
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
+            "payload": json.loads(row["payload_json"]),
+        }
+
+    @staticmethod
+    def _event_row(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "id": int(row["id"]),
+            "timestamp": row["timestamp"],
+            "category": row["category"],
+            "event_type": row["event_type"],
             "payload": json.loads(row["payload_json"]),
         }

@@ -563,6 +563,39 @@ def test_production_runtime_requires_each_symbol_to_finish_warmup(tmp_path) -> N
     runtime.stop()
 
 
+def test_production_runtime_records_authoritative_paper_session_close(tmp_path) -> None:
+    runtime = _Runtime(_config(tmp_path), source=_Source(), router=_Router())
+    runtime.start()
+    flatten_timestamp_ns = int(datetime(2026, 7, 13, 19, 58, tzinfo=timezone.utc).timestamp() * 1_000_000_000)
+
+    runtime.flatten(timestamp_ns=flatten_timestamp_ns)
+
+    close_event = runtime.ledger.recent_events(1, category="session", event_type="closed")[0]
+    assert close_event["payload"]["session_date"] == "2026-07-13"
+    assert close_event["payload"]["mode"] == "paper"
+    assert close_event["payload"]["positions"] == {}
+    assert close_event["payload"]["open_orders"] == []
+    runtime.stop()
+
+
+def test_production_runtime_records_one_regular_hours_session_start(tmp_path) -> None:
+    runtime = _Runtime(_config(tmp_path), source=_Source(), router=_Router())
+    session_timestamp_ns = int(datetime(2026, 7, 13, 14, 0, tzinfo=timezone.utc).timestamp() * 1_000_000_000)
+
+    runtime._record_session_start(session_timestamp_ns)
+    runtime._record_session_start(session_timestamp_ns + 1_000_000_000)
+
+    start_events = runtime.ledger.recent_events(5, category="session", event_type="started")
+    assert len(start_events) == 1
+    assert start_events[0]["payload"] == {
+        "session_date": "2026-07-13",
+        "timestamp_ns": session_timestamp_ns,
+        "mode": "paper",
+        "symbols": ["AAPL", "MSFT"],
+    }
+    runtime.stop()
+
+
 def test_production_runtime_rejects_router_without_safety_capabilities(tmp_path) -> None:
     class IncompleteRouter:
         def submit(self, request):

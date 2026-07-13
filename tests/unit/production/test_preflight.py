@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 import pytest
+import keyring
 
 from l1_microstructure.artifacts import LocalArtifactStore
 from l1_microstructure.live.broker_models import IBKRConnectionConfig
@@ -19,6 +20,7 @@ from l1_microstructure.production.preflight import (
     ProductionPreflightError,
     ProductionPreflightReport,
 )
+from l1_microstructure.production.secrets import get_secret
 
 
 def _config(tmp_path, **overrides) -> ProductionConfig:
@@ -47,6 +49,16 @@ def _secrets(**overrides):
 
 def _paper_broker(_env_file):
     return IBKRConnectionConfig(paper_trading=True)
+
+
+def test_secret_lookup_falls_back_to_environment_without_keyring_backend(monkeypatch) -> None:
+    monkeypatch.setenv("MASSIVE_API_KEY", "environment-secret")
+    monkeypatch.setattr(
+        "l1_microstructure.production.secrets.keyring.get_password",
+        lambda *_args: (_ for _ in ()).throw(keyring.errors.NoKeyringError()),
+    )
+
+    assert get_secret("MASSIVE_API_KEY") == "environment-secret"
 
 
 def _write_config(tmp_path) -> str:
