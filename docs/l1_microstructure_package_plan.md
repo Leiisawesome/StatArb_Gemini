@@ -31,6 +31,7 @@ l1_microstructure/
   features.py
   pipeline.py
   recovery.py
+  retry.py
   portfolio.py
   regime.py
   risk.py
@@ -147,6 +148,12 @@ routed-live, and supervised production paths share this contract.
 Defines the typed, versioned state-machine recovery schema and owns validation,
 snapshot capture, and restoration. `pipeline.py` retains compatibility facade
 methods without serializing subordinate engine internals itself.
+
+`retry.py`
+Defines the dependency-free retry policy, exception classification, capped
+exponential backoff with optional jitter, and deterministic executor contracts.
+Infrastructure integrations inject waiting, clocks, and randomness; the retry
+core does not sleep or decide which operations are safe to repeat.
 
 `live/`
 Defines paper and routed-live runner contracts and implements the simulator-backed paper runner, source-backed paper runner, routed-live runner, and IBKR router boundary.
