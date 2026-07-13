@@ -82,7 +82,21 @@ The daemon writes its SQLite/WAL ledger under `var/` by default. Back up the
 database only with a SQLite-aware backup process while the daemon is running.
 Do not edit the ledger manually.
 
-The authenticated localhost API exposes `/health`, `/events`, and `/alerts`.
+The authenticated localhost API separates liveness, trading readiness, and the
+detailed operator snapshot. `/health` returns a typed liveness report and remains
+HTTP `200` when the daemon can respond, using `degraded` to expose ledger or alert
+subsystem failures. `/ready` returns HTTP `200` only when every required safety
+check passes and HTTP `503` with stable check codes otherwise. A ready runtime may
+report `degraded` when only advisory local-notification delivery has failed.
+`/status` provides the detailed lifecycle, positions, orders, broker, and alert
+view used by the terminal console. `/events` and `/alerts` expose bounded audit
+history.
+
+Readiness requires the running lifecycle, a clear kill switch, loaded promoted
+models, complete per-symbol warmup, fresh per-symbol market data, broker
+connectivity, and broker/ledger order and position reconciliation. Alert
+persistence and notification delivery appear as explicit advisory checks.
+
 Alerts use typed severity and category fields and cover broker disconnects,
 reconciliation failures, order rejections, stale market data, strategy risk
 halts, and runtime failures. Repeated alerts with the same category, code, and
@@ -95,7 +109,7 @@ recursively generating more alerts. Accepted alerts and delivery failures are
 also persisted in the SQLite audit ledger. On restart, the daemon restores its
 bounded alert history, deduplication timestamps, and cumulative delivery
 diagnostics without notifying historical alerts again. Alert-store failures are
-non-recursive and appear under `alert_persistence` in `/health`.
+non-recursive and appear under `alert_persistence` in `/status`.
 
 For `launchd`, replace every `REPLACE_WITH_REPOSITORY_PATH` value in
 `ops/macos/com.statarb-gemini.daemon.plist`, create `var/log`, and install the
@@ -131,6 +145,21 @@ created by a trusted local workflow:
 ```
 
 ## Qualification
+
+Run the offline safety-drill gate first:
+
+```bash
+.venv/bin/trading-qualify
+```
+
+It runs deterministic restart fail-closed, broker-disconnect, stale-feed,
+order-rejection, and flatten-timeout scenarios through `ProductionRuntime` with
+temporary SQLite ledgers and in-process source/router boundaries. The command
+contacts no external infrastructure, writes one machine-readable JSON report,
+and returns `0` only when every scenario passes (`2` otherwise). Use repeated
+`--scenario NAME` options to run a selected subset. This gate complements rather
+than replaces external Massive and IBKR smoke checks or regular-hours paper
+qualification.
 
 Before live routing, complete at least ten consecutive regular-hours paper
 sessions with:

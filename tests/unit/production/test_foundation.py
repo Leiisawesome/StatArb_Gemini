@@ -10,6 +10,7 @@ import pytest
 from l1_microstructure.events import QuoteEvent
 from l1_microstructure.ingest.interfaces import LiveSubscriptionRequest
 from l1_microstructure.live import RouteAcknowledgement, RoutedExecutionService
+from l1_microstructure.monitoring import AlertCategory, AlertSeverity
 from l1_microstructure.artifacts import LocalArtifactStore
 from l1_microstructure.production.config import (
     InfrastructureRetryPolicies,
@@ -224,6 +225,59 @@ def test_production_runtime_isolates_symbol_engines(tmp_path) -> None:
     runtime.stop()
 
 
+def test_production_runtime_reports_healthy_liveness_and_readiness(tmp_path) -> None:
+    runtime = _Runtime(_config(tmp_path), source=_Source(), router=_Router())
+    runtime.start()
+    timestamp_ns = int(datetime.now(timezone.utc).timestamp() * 1_000_000_000)
+    for symbol in runtime.config.symbols:
+        runtime.process_event(QuoteEvent(symbol, timestamp_ns, 100.0, 100.01, 100, 100))
+
+    health = runtime.health_report(timestamp_ns=timestamp_ns)
+    readiness = runtime.readiness_report(timestamp_ns=timestamp_ns)
+
+    assert health.status.value == "healthy"
+    assert health.alive is True
+    assert readiness.status.value == "healthy"
+    assert readiness.ready is True
+    assert all(check.passed for check in readiness.checks)
+    runtime.stop()
+
+
+def test_production_readiness_reports_partial_multi_symbol_warmup(tmp_path) -> None:
+    runtime = _Runtime(_config(tmp_path, warmup_seconds=1.0), source=_Source(), router=_Router())
+    runtime.start()
+    timestamp_ns = int(datetime.now(timezone.utc).timestamp() * 1_000_000_000)
+    runtime.process_event(QuoteEvent("AAPL", timestamp_ns, 100.0, 100.01, 100, 100))
+    runtime.process_event(QuoteEvent("AAPL", timestamp_ns + 2_000_000_000, 100.0, 100.01, 100, 100))
+
+    report = runtime.readiness_report(timestamp_ns=timestamp_ns + 2_000_000_000)
+    checks = {check.code: check for check in report.checks}
+
+    assert report.ready is False
+    assert report.status.value == "not_ready"
+    assert checks["runtime.lifecycle_running"].passed is False
+    assert checks["market_data.fresh"].details["missing_symbols"] == ["MSFT"]
+    assert checks["market_data.warmup_complete"].details["incomplete_symbols"] == ["MSFT"]
+    runtime.stop()
+
+
+def test_production_readiness_detects_stale_data_and_kill_switch(tmp_path) -> None:
+    runtime = _Runtime(_config(tmp_path, event_stale_after_seconds=1.0), source=_Source(), router=_Router())
+    runtime.start()
+    timestamp_ns = int(datetime.now(timezone.utc).timestamp() * 1_000_000_000)
+    for symbol in runtime.config.symbols:
+        runtime.process_event(QuoteEvent(symbol, timestamp_ns, 100.0, 100.01, 100, 100))
+    runtime.ledger.set_state("kill_switch", True)
+
+    report = runtime.readiness_report(timestamp_ns=timestamp_ns + 2_000_000_000)
+    checks = {check.code: check for check in report.checks}
+
+    assert report.ready is False
+    assert checks["safety.kill_switch_clear"].passed is False
+    assert checks["market_data.fresh"].details["stale_symbols"] == ["AAPL", "MSFT"]
+    runtime.stop()
+
+
 def test_market_data_subscription_retries_and_records_recovery(tmp_path) -> None:
     waits: list[float] = []
     source = _TransientMarketDataSource([TimeoutError("one"), ConnectionError("two")])
@@ -326,6 +380,34 @@ def test_production_runtime_surfaces_nonfatal_alert_delivery_failure(tmp_path) -
     failure = status["alert_delivery"]["recent_failures"][0]
     assert failure["alert_key"] == "reconciliation:reconciliation_failed:*"
     assert failure["error_type"] == "RuntimeError"
+    health = runtime.health_report()
+    assert health.alive is True
+    assert health.status.value == "degraded"
+    assert {check.code: check for check in health.checks}["alerts.delivery"].passed is False
+    runtime.stop()
+
+
+def test_production_readiness_remains_eligible_but_degraded_after_notification_failure(tmp_path) -> None:
+    runtime = _Runtime(_config(tmp_path), source=_Source(), router=_Router(), alert_sink=_FailingAlerts())
+    runtime.start()
+    timestamp_ns = int(datetime.now(timezone.utc).timestamp() * 1_000_000_000)
+    for symbol in runtime.config.symbols:
+        runtime.process_event(QuoteEvent(symbol, timestamp_ns, 100.0, 100.01, 100, 100))
+    runtime.alerts.emit(
+        AlertSeverity.CRITICAL,
+        AlertCategory.RUNTIME,
+        "notification_test",
+        "notification test",
+        timestamp_ns=timestamp_ns,
+    )
+
+    report = runtime.readiness_report(timestamp_ns=timestamp_ns)
+    delivery = {check.code: check for check in report.checks}["alerts.delivery"]
+
+    assert report.ready is True
+    assert report.status.value == "degraded"
+    assert delivery.required is False
+    assert delivery.passed is False
     runtime.stop()
 
 
@@ -342,6 +424,29 @@ def test_production_runtime_categorizes_broker_disconnect(tmp_path) -> None:
     alert = runtime.recent_alerts()[0]
     assert alert["category"] == "broker_connectivity"
     assert alert["code"] == "broker_disconnected"
+    readiness = runtime.readiness_report()
+    checks = {check.code: check for check in readiness.checks}
+    assert readiness.ready is False
+    assert checks["broker.connected"].passed is False
+    assert checks["broker.reconciled"].passed is False
+    runtime.stop()
+
+
+def test_production_readiness_detects_post_start_reconciliation_mismatch(tmp_path) -> None:
+    router = _Router()
+    runtime = _Runtime(_config(tmp_path), source=_Source(), router=router)
+    runtime.start()
+    timestamp_ns = int(datetime.now(timezone.utc).timestamp() * 1_000_000_000)
+    for symbol in runtime.config.symbols:
+        runtime.process_event(QuoteEvent(symbol, timestamp_ns, 100.0, 100.01, 100, 100))
+    router.positions = {"AAPL": {"quantity": 10, "average_cost": 100.0}}
+
+    report = runtime.readiness_report(timestamp_ns=timestamp_ns)
+    reconciliation = {check.code: check for check in report.checks}["broker.reconciled"]
+
+    assert report.ready is False
+    assert reconciliation.passed is False
+    assert reconciliation.message == "position does not reconcile for AAPL"
     runtime.stop()
 
 

@@ -74,7 +74,7 @@ class TradingConsole(App[None]):
 
     def refresh_status(self) -> None:
         try:
-            status = self._request("GET", "/health")
+            status = self._request("GET", "/status")
         except (HTTPError, URLError, ValueError) as exc:
             self.query_one("#status", Static).update(f"Daemon unavailable: {exc}")
             return

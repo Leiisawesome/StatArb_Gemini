@@ -365,6 +365,25 @@ trading-daemon --config config/production.json --preflight
 The command exits `0` on success or `2` on a failed check and never constructs
 runtime infrastructure.
 
+The authenticated daemon API separates `/health` liveness from `/ready` trading
+eligibility. `/ready` returns HTTP `503` with stable machine-readable check codes
+until lifecycle, kill-switch, model, warmup, market-data, broker, and
+reconciliation requirements pass. `/status` retains the detailed operator view
+used by `trading-console`.
+
+Run the deterministic offline production safety drills before paper-session
+qualification:
+
+```bash
+trading-qualify
+```
+
+The command exercises restart fail-closed behavior, broker disconnect, stale
+feed, order rejection, and flatten timeout handling against temporary ledgers
+and in-process infrastructure boundaries. It emits one JSON report and exits `0`
+when every drill passes or `2` when any drill fails. It does not load production
+configuration, credentials, artifacts, market-data clients, or broker clients.
+
 Production configuration defaults to regular-hours operation, stops entries at
 15:50 ET, flattens at 15:58 ET, and rejects live mode unless the configuration
 contains `"live_risk_acknowledgement": "I_ACCEPT_LIVE_CAPITAL_RISK"`.

@@ -172,6 +172,13 @@ readiness, broker account mode, and retry configuration before infrastructure
 clients or runtime threads are created. The daemon exposes the identical gate as
 `--preflight`, emitting redacted JSON with stable success/failure exit codes and
 returning before all runtime infrastructure construction.
+`readiness.py` defines stable typed liveness and entry-readiness reports.
+Authenticated `/health`, `/ready`, and `/status` endpoints keep daemon
+availability, fail-closed trading eligibility, and the detailed operator view as
+separate contracts.
+`qualification.py` runs deterministic offline safety drills against the real
+production lifecycle and audit ledger, emitting a versioned JSON report with
+stable success/failure exit codes and no external infrastructure construction.
 
 `recovery.py`
 Defines the typed, versioned state-machine recovery schema and owns validation,

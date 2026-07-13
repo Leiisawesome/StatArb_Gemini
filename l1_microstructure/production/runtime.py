@@ -28,6 +28,7 @@ from .config import OperatingMode, ProductionConfig
 from .alerts import LedgerAlertStore, LocalAlertSink
 from .ledger import OperationalLedger
 from .lifecycle import LifecycleState, RuntimeLifecycle
+from .readiness import OperationalCheck, RuntimeHealthReport, RuntimeReadinessReport
 
 
 class ProductionRuntime:
@@ -361,8 +362,174 @@ class ProductionRuntime:
             "alert_persistence": self.alerts.persistence_diagnostics(20),
         }
 
+    def health_report(self, *, timestamp_ns: int | None = None) -> RuntimeHealthReport:
+        observed_at_ns = time_ns() if timestamp_ns is None else int(timestamp_ns)
+        try:
+            self.ledger.get_state("lifecycle_state")
+        except Exception as exc:
+            ledger_check = OperationalCheck(
+                "ledger.readable",
+                False,
+                "operational ledger is unavailable",
+                details={"error_type": type(exc).__name__},
+            )
+        else:
+            ledger_check = OperationalCheck("ledger.readable", True, "operational ledger is readable")
+        persistence = self.alerts.persistence_diagnostics(20)
+        delivery = self.alerts.delivery_diagnostics(20)
+        checks = (
+            OperationalCheck("daemon.responding", True, "daemon control process is responding"),
+            ledger_check,
+            self._alert_diagnostic_check("alerts.persistence", persistence),
+            self._alert_diagnostic_check("alerts.delivery", delivery),
+        )
+        return RuntimeHealthReport.from_checks(observed_at_ns, checks)
+
+    def readiness_report(self, *, timestamp_ns: int | None = None) -> RuntimeReadinessReport:
+        observed_at_ns = time_ns() if timestamp_ns is None else int(timestamp_ns)
+        lifecycle = self.lifecycle.state
+        checks: list[OperationalCheck] = [
+            OperationalCheck(
+                "runtime.lifecycle_running",
+                lifecycle is LifecycleState.RUNNING,
+                "runtime permits new entries"
+                if lifecycle is LifecycleState.RUNNING
+                else "runtime does not permit new entries",
+                details={"lifecycle": lifecycle.value},
+            )
+        ]
+        try:
+            kill_switch = bool(self.ledger.get_state("kill_switch", False))
+        except Exception as exc:
+            checks.append(
+                OperationalCheck(
+                    "safety.kill_switch_clear",
+                    False,
+                    "kill-switch state is unavailable",
+                    details={"error_type": type(exc).__name__},
+                )
+            )
+        else:
+            checks.append(
+                OperationalCheck(
+                    "safety.kill_switch_clear",
+                    not kill_switch,
+                    "persistent kill switch is clear" if not kill_switch else "persistent kill switch is active",
+                )
+            )
+        loaded_symbols = sorted(set(self.machines).intersection(self.config.symbols))
+        models_loaded = set(loaded_symbols) == set(self.config.symbols)
+        checks.append(
+            OperationalCheck(
+                "models.loaded",
+                models_loaded,
+                "promoted models are loaded" if models_loaded else "one or more promoted models are not loaded",
+                details={"loaded_symbols": loaded_symbols, "required_symbols": list(self.config.symbols)},
+            )
+        )
+        checks.extend(self._market_context_checks(observed_at_ns))
+        snapshot = self._reconciliation_snapshot()
+        broker_connected = bool(snapshot.get("connected"))
+        checks.append(
+            OperationalCheck(
+                "broker.connected",
+                broker_connected,
+                "broker is connected" if broker_connected else "broker is not connected",
+                details={"status": snapshot.get("status", "unknown")},
+            )
+        )
+        reconciliation_failure = self._readiness_reconciliation_failure(snapshot)
+        checks.append(
+            OperationalCheck(
+                "broker.reconciled",
+                reconciliation_failure is None,
+                "broker and ledger state reconcile" if reconciliation_failure is None else reconciliation_failure,
+            )
+        )
+        checks.extend(
+            (
+                self._alert_diagnostic_check(
+                    "alerts.persistence", self.alerts.persistence_diagnostics(20), required=False
+                ),
+                self._alert_diagnostic_check("alerts.delivery", self.alerts.delivery_diagnostics(20), required=False),
+            )
+        )
+        return RuntimeReadinessReport.from_checks(observed_at_ns, lifecycle.value, tuple(checks))
+
     def recent_alerts(self, limit: int = 100) -> list[dict[str, Any]]:
         return self.alerts.recent_dicts(limit)
+
+    def _market_context_checks(self, observed_at_ns: int) -> tuple[OperationalCheck, OperationalCheck]:
+        missing_symbols = [symbol for symbol in self.config.symbols if symbol not in self.last_event_timestamp_ns]
+        stale_symbols = [
+            symbol
+            for symbol in self.config.symbols
+            if symbol in self.last_event_timestamp_ns
+            and (observed_at_ns - self.last_event_timestamp_ns[symbol]) / 1_000_000_000
+            > self.config.event_stale_after_seconds
+        ]
+        market_data_fresh = not missing_symbols and not stale_symbols
+        required_ns = int(self.config.warmup_seconds * 1_000_000_000)
+        incomplete_warmup = [
+            symbol
+            for symbol in self.config.symbols
+            if symbol not in self.first_event_timestamp_ns
+            or symbol not in self.last_event_timestamp_ns
+            or self.last_event_timestamp_ns[symbol] - self.first_event_timestamp_ns[symbol] < required_ns
+        ]
+        return (
+            OperationalCheck(
+                "market_data.fresh",
+                market_data_fresh,
+                "market data is fresh for every symbol" if market_data_fresh else "market data is missing or stale",
+                details={"missing_symbols": missing_symbols, "stale_symbols": stale_symbols},
+            ),
+            OperationalCheck(
+                "market_data.warmup_complete",
+                not incomplete_warmup,
+                "market context warmup is complete" if not incomplete_warmup else "market context warmup is incomplete",
+                details={"incomplete_symbols": incomplete_warmup},
+            ),
+        )
+
+    def _readiness_reconciliation_failure(self, snapshot: dict[str, Any]) -> str | None:
+        if not snapshot.get("connected"):
+            return "broker state is unavailable for reconciliation"
+        try:
+            ledger_external_ids = {
+                str(order["external_order_id"]) for order in self.ledger.open_orders() if order.get("external_order_id")
+            }
+            broker_order_ids = {str(value) for value in snapshot.get("open_order_ids", [])}
+            if ledger_external_ids != broker_order_ids:
+                return "open orders do not reconcile"
+            expected_positions = self.ledger.get_state("strategy_positions", {})
+            broker_positions = snapshot.get("positions", {})
+            for symbol in self.config.symbols:
+                expected_quantity = float(expected_positions.get(symbol, 0.0))
+                broker_quantity = float(dict(broker_positions.get(symbol, {})).get("quantity", 0.0))
+                if expected_quantity != broker_quantity:
+                    return f"position does not reconcile for {symbol}"
+        except Exception as exc:
+            return f"reconciliation state is unavailable ({type(exc).__name__})"
+        if self.config.mode is OperatingMode.LIVE and snapshot.get("net_liquidation") is None:
+            return "live broker net liquidation is unavailable"
+        return None
+
+    @staticmethod
+    def _alert_diagnostic_check(
+        code: str,
+        diagnostics: dict[str, Any],
+        *,
+        required: bool = True,
+    ) -> OperationalCheck:
+        failure_count = int(diagnostics.get("failure_count", 0))
+        return OperationalCheck(
+            code,
+            failure_count == 0,
+            "no failures recorded" if failure_count == 0 else f"{failure_count} failure(s) recorded",
+            required=required,
+            details={"failure_count": failure_count},
+        )
 
     def _load_machines(self) -> None:
         selector = ArtifactBundleSelector(LocalArtifactStore(self.config.artifact_root))

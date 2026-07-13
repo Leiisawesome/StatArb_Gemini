@@ -39,6 +39,7 @@ l1-microstructure = "l1_microstructure.cli:main"
 trading-daemon = "l1_microstructure.production.daemon:main"
 trading-console = "l1_microstructure.production.console:main"
 trading-secret = "l1_microstructure.production.secret_cli:main"
+trading-qualify = "l1_microstructure.production.qualification:main"
 artifact-migrate = "l1_microstructure.production.migrate:main"
 
 [tool.hatch.build.targets.wheel]
