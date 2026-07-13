@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from datetime import datetime, time, timedelta, timezone
+from random import random
 from threading import RLock
-from time import sleep
-from typing import Any
+from time import sleep, time_ns
+from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
 from l1_microstructure.artifacts import ArtifactBundleSelector, LocalArtifactStore, RunQualityGate
@@ -20,6 +21,7 @@ from l1_microstructure.live.interfaces import ProductionOrderRouter, RouteAcknow
 from l1_microstructure.monitoring import AlertCategory, AlertSeverity, OperationalAlertManager
 from l1_microstructure.pipeline import L1MicrostructureStateMachine
 from l1_microstructure.risk import OpenPosition
+from l1_microstructure.retry import RetryExecutor, RetryResult
 from l1_microstructure.transitions import EdgeKey
 
 from .config import OperatingMode, ProductionConfig
@@ -40,6 +42,9 @@ class ProductionRuntime:
         framework_config: FrameworkConfig | None = None,
         ledger: OperationalLedger | None = None,
         alert_sink: LocalAlertSink | None = None,
+        wait: Callable[[float], None] = sleep,
+        retry_clock: Callable[[], int] = time_ns,
+        retry_random_source: Callable[[], float] = random,
     ):
         self.config = config
         self.source = source
@@ -50,6 +55,9 @@ class ProductionRuntime:
         self.ledger = ledger or OperationalLedger(config.database_path)
         self.alert_sink = alert_sink or LocalAlertSink()
         self.alerts = OperationalAlertManager(self.alert_sink)
+        self._wait = wait
+        self._retry_clock = retry_clock
+        self._retry_random_source = retry_random_source
         persisted_state = self.ledger.get_state("lifecycle_state", LifecycleState.STOPPED.value)
         initial = LifecycleState.HALTED if persisted_state == LifecycleState.HALTED.value else LifecycleState.STOPPED
         self.lifecycle = RuntimeLifecycle(initial)
@@ -65,6 +73,7 @@ class ProductionRuntime:
         self._shutdown = False
         self._flatten_started_at_ns: int | None = None
         self._flatten_submitted_symbols: set[str] = set()
+        self._recorded_retry_outcomes: set[tuple[str, int, int, bool]] = set()
 
     def start(self) -> None:
         with self._lock:
@@ -78,12 +87,20 @@ class ProductionRuntime:
             failure, snapshot = self._reconciliation_failure()
             if failure is not None:
                 broker_disconnected = failure.startswith("broker is not connected")
+                retry_exhausted = self._retry_exhausted(snapshot)
                 self._halt(
                     failure,
                     category=(
                         AlertCategory.BROKER_CONNECTIVITY if broker_disconnected else AlertCategory.RECONCILIATION
                     ),
-                    code="broker_disconnected" if broker_disconnected else "reconciliation_failed",
+                    code=(
+                        "broker_retry_exhausted"
+                        if retry_exhausted
+                        else "broker_disconnected"
+                        if broker_disconnected
+                        else "reconciliation_failed"
+                    ),
+                    metadata={"retry": snapshot.get("retry", {})},
                 )
                 return
             if not self.machines:
@@ -102,33 +119,66 @@ class ProductionRuntime:
         while not self._shutdown:
             if self.lifecycle.state in {LifecycleState.STOPPED, LifecycleState.HALTED, LifecycleState.ERROR}:
                 if self.ledger.get_state("kill_switch", False):
-                    sleep(self.config.reconnect_backoff_seconds)
+                    self._wait(self.config.reconnect_backoff_seconds)
                     continue
                 if not self._wall_clock_start_allowed():
-                    sleep(self.config.reconnect_backoff_seconds)
+                    self._wait(self.config.reconnect_backoff_seconds)
                     continue
                 try:
                     self.start()
                 except BaseException as exc:
                     self._halt(f"runtime startup failed: {exc}", code="runtime_startup_failed")
             if self.lifecycle.state not in {LifecycleState.WARMING, LifecycleState.RUNNING, LifecycleState.FLATTENING}:
-                sleep(self.config.reconnect_backoff_seconds)
+                self._wait(self.config.reconnect_backoff_seconds)
                 continue
-            try:
-                for event in self.source.subscribe_live(request):
-                    if self._shutdown or not self._running:
-                        break
-                    self.process_event(event)
-            except BaseException as exc:
-                self._halt(
-                    f"market-data loop failed: {exc}",
-                    category=AlertCategory.MARKET_DATA,
-                    code="market_data_loop_failed",
-                )
-            finally:
-                self._poll_reports()
+            self._run_market_data_cycle(request)
             if not self._shutdown:
-                sleep(self.config.reconnect_backoff_seconds)
+                self._wait(self.config.reconnect_backoff_seconds)
+
+    def _run_market_data_cycle(self, request: LiveSubscriptionRequest) -> RetryResult[None]:
+        result = RetryExecutor(
+            self.config.retry.market_data,
+            wait=self._wait,
+            classifier=self._market_data_retryable,
+            clock=self._retry_clock,
+            random_source=self._retry_random_source,
+        ).execute(lambda: self._consume_market_data(request))
+        self.ledger.append_event("retry", "market_data_subscription", result.to_dict())
+        if result.failures and result.succeeded and self._running:
+            self.alerts.emit(
+                AlertSeverity.WARNING,
+                AlertCategory.MARKET_DATA,
+                "market_data_retry_recovered",
+                f"market-data subscription recovered after {result.attempts} attempts",
+                metadata=result.to_dict(),
+            )
+        elif not result.succeeded:
+            failure = result.final_failure
+            detail = "unknown failure" if failure is None else f"{failure.error_type}: {failure.error}"
+            self._halt(
+                f"market-data retry exhausted after {result.attempts} attempts: {detail}",
+                category=AlertCategory.MARKET_DATA,
+                code="market_data_retry_exhausted",
+                metadata=result.to_dict(),
+            )
+        return result
+
+    def _consume_market_data(self, request: LiveSubscriptionRequest) -> None:
+        try:
+            for event in self.source.subscribe_live(request):
+                if self._shutdown or not self._running:
+                    return
+                self.process_event(event)
+        finally:
+            self._poll_reports()
+        if not self._shutdown and self._running:
+            raise ConnectionError("market-data subscription ended unexpectedly")
+
+    @staticmethod
+    def _market_data_retryable(error: Exception) -> bool:
+        if isinstance(error, PermissionError):
+            return False
+        return isinstance(error, (TimeoutError, ConnectionError, OSError))
 
     def process_event(self, event: MarketEvent) -> None:
         if event.symbol not in self.machines:
@@ -331,6 +381,7 @@ class ProductionRuntime:
         if self.ledger.get_state("kill_switch", False):
             return "persistent kill switch is active", {}
         health = self._reconciliation_snapshot()
+        self._record_router_retry_outcomes(health)
         if not health.get("connected"):
             return f"broker is not connected: {health.get('error') or health.get('status')}", health
         ledger_external_ids = {
@@ -395,7 +446,15 @@ class ProductionRuntime:
         self._transition(LifecycleState.RUNNING, "runtime enabled")
 
     def _reconciliation_snapshot(self) -> dict[str, Any]:
-        snapshot = self.execution_service.reconciliation_snapshot()
+        try:
+            snapshot = self.execution_service.reconciliation_snapshot()
+        except Exception as exc:
+            return {
+                "connected": False,
+                "status": "reconciliation_query_failed",
+                "error": str(exc),
+                "retry": self._router_retry_diagnostics(),
+            }
         return snapshot or {"connected": False, "status": "invalid reconciliation snapshot"}
 
     def _may_route(self, request: ExecutionRequest) -> bool:
@@ -455,11 +514,14 @@ class ProductionRuntime:
         if self._shutdown or self.lifecycle.state is LifecycleState.STOPPED:
             return
         health = self._router_health()
+        self._record_router_retry_outcomes(health)
         if not health.get("connected"):
+            retry_exhausted = self._retry_exhausted(health)
             self._halt(
                 f"broker disconnected: {health.get('error') or health.get('status')}",
                 category=AlertCategory.BROKER_CONNECTIVITY,
-                code="broker_disconnected",
+                code="broker_retry_exhausted" if retry_exhausted else "broker_disconnected",
+                metadata={"retry": health.get("retry", {})},
             )
             return
         self.execution_service.poll(
@@ -575,7 +637,50 @@ class ProductionRuntime:
         return warmup_start <= local < stop_entries
 
     def _router_health(self) -> dict[str, Any]:
-        return self.execution_service.health() or {"connected": False, "status": "invalid health response"}
+        try:
+            return self.execution_service.health() or {"connected": False, "status": "invalid health response"}
+        except Exception as exc:
+            return {
+                "connected": False,
+                "status": "health_query_failed",
+                "error": str(exc),
+                "retry": self._router_retry_diagnostics(),
+            }
+
+    def _router_retry_diagnostics(self) -> dict[str, Any]:
+        diagnostics = getattr(self.router, "retry_diagnostics", None)
+        return dict(diagnostics()) if callable(diagnostics) else {}
+
+    def _record_router_retry_outcomes(self, payload: dict[str, Any]) -> None:
+        for operation, raw_outcome in dict(payload.get("retry", {})).items():
+            outcome = dict(raw_outcome)
+            failures = list(outcome.get("failures", []))
+            if not failures:
+                continue
+            final_timestamp_ns = int(dict(failures[-1]).get("timestamp_ns", 0))
+            signature = (
+                str(operation),
+                final_timestamp_ns,
+                int(outcome.get("attempts", 0)),
+                bool(outcome.get("succeeded", False)),
+            )
+            if signature in self._recorded_retry_outcomes:
+                continue
+            self._recorded_retry_outcomes.add(signature)
+            self.ledger.append_event("retry", f"broker_{operation}", outcome)
+            if outcome.get("succeeded"):
+                self.alerts.emit(
+                    AlertSeverity.WARNING,
+                    AlertCategory.BROKER_CONNECTIVITY,
+                    f"broker_{operation}_retry_recovered",
+                    f"broker {operation} recovered after {outcome.get('attempts')} attempts",
+                    metadata={"operation": operation, **outcome},
+                )
+
+    @staticmethod
+    def _retry_exhausted(payload: dict[str, Any]) -> bool:
+        retry = payload.get("retry", {})
+        return any(not bool(result.get("succeeded", False)) for result in dict(retry).values())
 
     def _router_open_order_ids(self) -> list[str]:
         return self.execution_service.open_order_ids()
@@ -603,6 +708,7 @@ class ProductionRuntime:
         category: AlertCategory = AlertCategory.RUNTIME,
         code: str = "runtime_halted",
         symbol: str | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         if self.lifecycle.state is not LifecycleState.HALTED:
             self._transition(LifecycleState.HALTED, reason)
@@ -613,7 +719,7 @@ class ProductionRuntime:
             code,
             reason,
             symbol=symbol,
-            metadata={"lifecycle": self.lifecycle.state.value},
+            metadata={"lifecycle": self.lifecycle.state.value, **dict(metadata or {})},
         )
         self.ledger.append_event(
             "incident",

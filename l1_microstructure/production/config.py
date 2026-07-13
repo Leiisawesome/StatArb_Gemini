@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any
+
+from l1_microstructure.retry import RetryPolicy
 
 
 class OperatingMode(str, Enum):
@@ -41,6 +43,37 @@ class ModelQualityPolicy:
 
 
 @dataclass(frozen=True, slots=True)
+class InfrastructureRetryPolicies:
+    market_data: RetryPolicy = field(
+        default_factory=lambda: RetryPolicy(
+            max_attempts=5,
+            initial_delay_seconds=1.0,
+            backoff_multiplier=2.0,
+            maximum_delay_seconds=15.0,
+            jitter_fraction=0.1,
+        )
+    )
+    broker_connection: RetryPolicy = field(
+        default_factory=lambda: RetryPolicy(
+            max_attempts=3,
+            initial_delay_seconds=0.5,
+            backoff_multiplier=2.0,
+            maximum_delay_seconds=5.0,
+            jitter_fraction=0.1,
+        )
+    )
+    broker_read: RetryPolicy = field(
+        default_factory=lambda: RetryPolicy(
+            max_attempts=3,
+            initial_delay_seconds=0.25,
+            backoff_multiplier=2.0,
+            maximum_delay_seconds=2.0,
+            jitter_fraction=0.1,
+        )
+    )
+
+
+@dataclass(frozen=True, slots=True)
 class ProductionConfig:
     symbols: tuple[str, ...]
     artifact_root: Path
@@ -57,6 +90,7 @@ class ProductionConfig:
     risk: RiskLimits = field(default_factory=RiskLimits)
     session: SessionPolicy = field(default_factory=SessionPolicy)
     model_quality: ModelQualityPolicy = field(default_factory=ModelQualityPolicy)
+    retry: InfrastructureRetryPolicies = field(default_factory=InfrastructureRetryPolicies)
     live_risk_acknowledgement: str | None = None
 
     def __post_init__(self) -> None:
@@ -103,12 +137,25 @@ class ProductionConfig:
         risk = RiskLimits(**dict(payload.pop("risk", {})))
         session = SessionPolicy(**dict(payload.pop("session", {})))
         model_quality = ModelQualityPolicy(**dict(payload.pop("model_quality", {})))
+        retry_payload = dict(payload.pop("retry", {}))
+        default_retry = InfrastructureRetryPolicies()
+
+        def retry_policy(name: str) -> RetryPolicy:
+            values = asdict(getattr(default_retry, name))
+            values.update(dict(retry_payload.get(name, {})))
+            return RetryPolicy(**values)
+
+        retry = InfrastructureRetryPolicies(
+            market_data=retry_policy("market_data"),
+            broker_connection=retry_policy("broker_connection"),
+            broker_read=retry_policy("broker_read"),
+        )
         for key in ("artifact_root", "database_path", "broker_env_file"):
             if payload.get(key) is not None:
                 payload[key] = Path(payload[key]).expanduser()
         payload["symbols"] = tuple(payload["symbols"])
         payload["mode"] = OperatingMode(payload.get("mode", OperatingMode.PAPER.value))
-        return cls(risk=risk, session=session, model_quality=model_quality, **payload)
+        return cls(risk=risk, session=session, model_quality=model_quality, retry=retry, **payload)
 
     def public_dict(self) -> dict[str, Any]:
         return {
@@ -120,6 +167,11 @@ class ProductionConfig:
             "api_port": self.api_port,
             "event_stale_after_seconds": self.event_stale_after_seconds,
             "warmup_seconds": self.warmup_seconds,
+            "retry": {
+                "market_data": asdict(self.retry.market_data),
+                "broker_connection": asdict(self.retry.broker_connection),
+                "broker_read": asdict(self.retry.broker_read),
+            },
             "model_quality": {
                 "minimum_fill_rate": self.model_quality.minimum_fill_rate,
                 "maximum_cancel_rate": self.model_quality.maximum_cancel_rate,

@@ -8,12 +8,19 @@ from types import SimpleNamespace
 import pytest
 
 from l1_microstructure.events import QuoteEvent
+from l1_microstructure.ingest.interfaces import LiveSubscriptionRequest
 from l1_microstructure.live import RouteAcknowledgement, RoutedExecutionService
 from l1_microstructure.artifacts import LocalArtifactStore
-from l1_microstructure.production.config import ModelQualityPolicy, OperatingMode, ProductionConfig
+from l1_microstructure.production.config import (
+    InfrastructureRetryPolicies,
+    ModelQualityPolicy,
+    OperatingMode,
+    ProductionConfig,
+)
 from l1_microstructure.production.ledger import OperationalLedger
 from l1_microstructure.production.lifecycle import LifecycleState, RuntimeLifecycle
 from l1_microstructure.production.runtime import ProductionRuntime
+from l1_microstructure.retry import RetryPolicy
 
 
 def _config(tmp_path, **overrides) -> ProductionConfig:
@@ -40,6 +47,39 @@ def test_production_config_normalizes_symbols_and_requires_live_acknowledgement(
 def test_production_config_rejects_missing_promoted_model(tmp_path) -> None:
     with pytest.raises(ValueError, match="missing promoted run ids"):
         _config(tmp_path, promoted_run_ids={"AAPL": "aapl-v1"})
+
+
+def test_production_config_loads_partial_operation_specific_retry_policy(tmp_path) -> None:
+    path = tmp_path / "production.json"
+    path.write_text(
+        json.dumps(
+            {
+                "symbols": ["AAPL"],
+                "artifact_root": str(tmp_path / "artifacts"),
+                "promoted_run_ids": {"AAPL": "aapl-v1"},
+                "database_path": str(tmp_path / "runtime.sqlite3"),
+                "retry": {"market_data": {"max_attempts": 7}},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    config = ProductionConfig.from_json(path)
+
+    assert config.retry.market_data.max_attempts == 7
+    assert config.retry.market_data.initial_delay_seconds == 1.0
+    assert config.retry.broker_connection.initial_delay_seconds == 0.5
+    assert config.public_dict()["retry"]["market_data"]["max_attempts"] == 7
+
+
+def _retry_policies(*, max_attempts: int = 3) -> InfrastructureRetryPolicies:
+    return InfrastructureRetryPolicies(
+        market_data=RetryPolicy(
+            max_attempts=max_attempts,
+            initial_delay_seconds=1.0,
+            maximum_delay_seconds=2.0,
+        )
+    )
 
 
 def test_operational_ledger_persists_intents_events_and_state(tmp_path) -> None:
@@ -140,6 +180,20 @@ class _Runtime(ProductionRuntime):
         self.machines = {symbol: _Machine() for symbol in self.config.symbols}
 
 
+class _TransientMarketDataSource(_Source):
+    def __init__(self, failures: list[Exception]) -> None:
+        self.failures = list(failures)
+        self.calls = 0
+        self.runtime = None
+
+    def subscribe_live(self, request):
+        self.calls += 1
+        if self.failures:
+            raise self.failures.pop(0)
+        self.runtime._shutdown = True
+        return []
+
+
 class _Alerts:
     def __init__(self):
         self.messages = []
@@ -158,6 +212,81 @@ def test_production_runtime_isolates_symbol_engines(tmp_path) -> None:
     assert len(runtime.machines["AAPL"].events) == 1
     assert runtime.machines["MSFT"].events == []
     assert runtime.lifecycle.state is LifecycleState.RUNNING
+    runtime.stop()
+
+
+def test_market_data_subscription_retries_and_records_recovery(tmp_path) -> None:
+    waits: list[float] = []
+    source = _TransientMarketDataSource([TimeoutError("one"), ConnectionError("two")])
+    runtime = _Runtime(
+        _config(tmp_path, retry=_retry_policies()),
+        source=source,
+        router=_Router(),
+        wait=waits.append,
+        retry_random_source=lambda: 0.5,
+    )
+    source.runtime = runtime
+    runtime.start()
+
+    result = runtime._run_market_data_cycle(LiveSubscriptionRequest(symbols=runtime.config.symbols))
+
+    assert result.succeeded is True
+    assert result.attempts == 3
+    assert source.calls == 3
+    assert waits == [1.0, 2.0]
+    assert runtime.recent_alerts()[0]["code"] == "market_data_retry_recovered"
+    retry_events = [
+        event for event in runtime.ledger.recent_events() if event["event_type"] == "market_data_subscription"
+    ]
+    assert retry_events[0]["payload"]["attempts"] == 3
+    runtime.stop()
+
+
+def test_market_data_retry_exhaustion_halts_with_attempt_metadata(tmp_path) -> None:
+    waits: list[float] = []
+    source = _TransientMarketDataSource([TimeoutError("one"), TimeoutError("two"), TimeoutError("three")])
+    runtime = _Runtime(
+        _config(tmp_path, retry=_retry_policies()),
+        source=source,
+        router=_Router(),
+        wait=waits.append,
+        retry_random_source=lambda: 0.5,
+    )
+    source.runtime = runtime
+    runtime.start()
+
+    result = runtime._run_market_data_cycle(LiveSubscriptionRequest(symbols=runtime.config.symbols))
+
+    assert result.succeeded is False
+    assert result.attempts == 3
+    assert waits == [1.0, 2.0]
+    assert runtime.lifecycle.state is LifecycleState.HALTED
+    alert = runtime.recent_alerts()[0]
+    assert alert["code"] == "market_data_retry_exhausted"
+    assert alert["metadata"]["attempts"] == 3
+    runtime.stop()
+
+
+def test_market_data_permission_failure_is_not_retried(tmp_path) -> None:
+    waits: list[float] = []
+    source = _TransientMarketDataSource([PermissionError("invalid API entitlement")])
+    runtime = _Runtime(
+        _config(tmp_path, retry=_retry_policies()),
+        source=source,
+        router=_Router(),
+        wait=waits.append,
+    )
+    source.runtime = runtime
+    runtime.start()
+
+    result = runtime._run_market_data_cycle(LiveSubscriptionRequest(symbols=runtime.config.symbols))
+
+    assert result.succeeded is False
+    assert result.attempts == 1
+    assert source.calls == 1
+    assert waits == []
+    assert result.final_failure is not None
+    assert result.final_failure.retryable is False
     runtime.stop()
 
 
@@ -188,6 +317,47 @@ def test_production_runtime_categorizes_broker_disconnect(tmp_path) -> None:
     alert = runtime.recent_alerts()[0]
     assert alert["category"] == "broker_connectivity"
     assert alert["code"] == "broker_disconnected"
+    runtime.stop()
+
+
+def test_production_runtime_surfaces_broker_retry_exhaustion_metadata(tmp_path) -> None:
+    class RetryExhaustedRouter(_Router):
+        def reconciliation_snapshot(self):
+            return {
+                "connected": False,
+                "status": "reconciliation_retry_exhausted",
+                "error": "operation failed after 3 attempts",
+                "retry": {
+                    "reconciliation": {
+                        "succeeded": False,
+                        "attempts": 3,
+                        "failures": [
+                            {
+                                "attempt": 3,
+                                "timestamp_ns": 123,
+                                "error_type": "TimeoutError",
+                                "error": "account summary delayed",
+                                "retryable": True,
+                                "will_retry": False,
+                                "delay_seconds": 0.0,
+                            }
+                        ],
+                    }
+                },
+            }
+
+    runtime = _Runtime(_config(tmp_path), source=_Source(), router=RetryExhaustedRouter())
+
+    runtime.start()
+
+    alert = runtime.recent_alerts()[0]
+    assert alert["code"] == "broker_retry_exhausted"
+    assert alert["metadata"]["retry"]["reconciliation"]["attempts"] == 3
+    retry_event = next(event for event in runtime.ledger.recent_events() if event["category"] == "retry")
+    assert retry_event["event_type"] == "broker_reconciliation"
+    assert retry_event["payload"]["attempts"] == 3
+    incident = next(event for event in runtime.ledger.recent_events() if event["event_type"] == "runtime_halted")
+    assert incident["payload"]["alert"]["metadata"]["retry"]["reconciliation"]["attempts"] == 3
     runtime.stop()
 
 

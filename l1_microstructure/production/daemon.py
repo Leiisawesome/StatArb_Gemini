@@ -37,6 +37,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         str(config.broker_env_file) if config.broker_env_file else None,
         prefer_limit_orders=True,
         require_paper=config.mode.value == "paper",
+        connection_retry_policy=config.retry.broker_connection,
+        read_retry_policy=config.retry.broker_read,
     )
     runtime = ProductionRuntime(config, source=source, router=router)
     runtime_thread = Thread(target=runtime.run, name="production-runtime", daemon=True)

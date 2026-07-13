@@ -81,6 +81,12 @@ reconciles. It automatically resumes only when broker positions, open orders,
 net liquidation, durable order records, and promoted models agree. Ambiguous
 in-flight orders or position differences remain halted for operator review.
 
+The `retry` configuration defines separate bounded policies for market-data
+subscriptions, broker connections, and read-only broker queries. Authentication,
+permission, configuration, and validation failures are not retried. Order
+submission and cancellation are never automatically repeated; an ambiguous
+mutation remains halted until broker and ledger state reconcile.
+
 The kill switch survives process and workstation restarts. Clearing it does not
 bypass reconciliation.
 

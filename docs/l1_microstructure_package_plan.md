@@ -155,6 +155,11 @@ exponential backoff with optional jitter, and deterministic executor contracts.
 Infrastructure integrations inject waiting, clocks, and randomness; the retry
 core does not sleep or decide which operations are safe to repeat.
 
+Production applies operation-specific policies only to market-data subscription
+reconnects, broker connections and health checks, and read-only reconciliation
+queries. Order submission and cancellation remain single-attempt operations;
+ambiguous outcomes halt for reconciliation instead of being replayed.
+
 `live/`
 Defines paper and routed-live runner contracts and implements the simulator-backed paper runner, source-backed paper runner, routed-live runner, and IBKR router boundary.
 

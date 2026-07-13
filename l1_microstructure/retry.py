@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from math import isfinite
 from random import random
 from time import time_ns
-from typing import Callable, Generic, TypeVar, cast
+from typing import Any, Callable, Generic, TypeVar, cast
 
 
 T = TypeVar("T")
@@ -87,6 +87,17 @@ class RetryFailure:
     def error_type(self) -> str:
         return type(self.error).__name__
 
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "attempt": self.attempt,
+            "timestamp_ns": self.timestamp_ns,
+            "error_type": self.error_type,
+            "error": str(self.error),
+            "retryable": self.retryable,
+            "will_retry": self.will_retry,
+            "delay_seconds": self.delay_seconds,
+        }
+
 
 class RetryExecutionError(RuntimeError):
     def __init__(self, result: "RetryResult[object]") -> None:
@@ -113,6 +124,13 @@ class RetryResult(Generic[T]):
             cause = self.final_failure.error if self.final_failure is not None else None
             raise error from cause
         return cast(T, self.value)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "succeeded": self.succeeded,
+            "attempts": self.attempts,
+            "failures": [failure.to_dict() for failure in self.failures],
+        }
 
 
 class RetryExecutor:

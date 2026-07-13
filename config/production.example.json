@@ -13,6 +13,29 @@
   "warmup_seconds": 1800.0,
   "reconnect_backoff_seconds": 15.0,
   "flatten_timeout_seconds": 60.0,
+  "retry": {
+    "market_data": {
+      "max_attempts": 5,
+      "initial_delay_seconds": 1.0,
+      "backoff_multiplier": 2.0,
+      "maximum_delay_seconds": 15.0,
+      "jitter_fraction": 0.1
+    },
+    "broker_connection": {
+      "max_attempts": 3,
+      "initial_delay_seconds": 0.5,
+      "backoff_multiplier": 2.0,
+      "maximum_delay_seconds": 5.0,
+      "jitter_fraction": 0.1
+    },
+    "broker_read": {
+      "max_attempts": 3,
+      "initial_delay_seconds": 0.25,
+      "backoff_multiplier": 2.0,
+      "maximum_delay_seconds": 2.0,
+      "jitter_fraction": 0.1
+    }
+  },
   "risk": {
     "daily_loss_fraction": 0.01,
     "max_gross_exposure": 0.25,

@@ -159,14 +159,16 @@ class IBKRNativeBrokerSession:
             self._app.connect(self.config.host, self.config.port, self.config.client_id)
         except Exception as exc:
             self._last_error = str(exc)
-            raise RuntimeError(f"failed to connect to IBKR gateway: {exc}") from exc
+            raise ConnectionError(f"failed to connect to IBKR gateway: {exc}") from exc
 
         self._thread = Thread(target=self._app.run, daemon=True)
         self._thread.start()
         if not self._ready_event.wait(timeout=5.0):
-            message = self._last_error or "timed out waiting for IBKR connection readiness"
+            message = self._last_error
             await self.disconnect()
-            raise RuntimeError(message)
+            if message:
+                raise RuntimeError(message)
+            raise TimeoutError("timed out waiting for IBKR connection readiness")
         return True
 
     async def disconnect(self) -> None:
@@ -278,7 +280,7 @@ class IBKRNativeBrokerSession:
         app.cancelPositions()
         app.cancelAccountSummary(91001)
         if not positions_ready or not account_ready:
-            raise RuntimeError("timed out reconciling IBKR positions or account summary")
+            raise TimeoutError("timed out reconciling IBKR positions or account summary")
         with self._lock:
             return {
                 "connected": self._connected,

@@ -9,11 +9,14 @@ import os
 from dataclasses import dataclass, field
 from datetime import datetime
 from dotenv import dotenv_values
+from random import random
 from threading import Thread
-from typing import Any
+from time import sleep, time_ns
+from typing import Any, Callable
 
 from l1_microstructure.decision import TradeAction
 from l1_microstructure.execution import ExecutionReport, ExecutionRequest
+from l1_microstructure.retry import RetryExecutor, RetryPolicy, RetryResult
 
 from ._ibkr_native import IBKRNativeBrokerSession
 from .broker_models import BrokerOrderSide, BrokerOrderType, IBKRConnectionConfig
@@ -70,12 +73,30 @@ class IBKRBrokerOrderRouter:
     auto_connect: bool = True
     disconnect_on_stop: bool = True
     cancel_open_orders_on_stop: bool = True
+    connection_retry_policy: RetryPolicy = field(
+        default_factory=lambda: RetryPolicy(
+            max_attempts=3,
+            initial_delay_seconds=0.5,
+            maximum_delay_seconds=5.0,
+        )
+    )
+    read_retry_policy: RetryPolicy = field(
+        default_factory=lambda: RetryPolicy(
+            max_attempts=3,
+            initial_delay_seconds=0.25,
+            maximum_delay_seconds=2.0,
+        )
+    )
+    retry_wait: Callable[[float], None] = field(default=sleep, repr=False)
+    retry_clock: Callable[[], int] = field(default=time_ns, repr=False)
+    retry_random_source: Callable[[], float] = field(default=random, repr=False)
     _submission_count: int = field(default=0, init=False)
     _connected: bool = field(default=False, init=False)
     _open_requests: dict[str, ExecutionRequest] = field(default_factory=dict, init=False)
     _filled_quantities: dict[str, float] = field(default_factory=dict, init=False)
     _pending_terminal_reports: list[ExecutionReport] = field(default_factory=list, init=False)
     _recovery_reconciliations: list[BrokerRecoveryReconciliation] = field(default_factory=list, init=False)
+    _retry_results: dict[str, RetryResult[Any]] = field(default_factory=dict, init=False)
 
     def __post_init__(self) -> None:
         self.broker = self.broker if self.broker is not None else self._build_broker(self.ibkr_config)
@@ -179,7 +200,10 @@ class IBKRBrokerOrderRouter:
             order = open_orders_by_id.get(order_id)
             if order is None:
                 try:
-                    order = self._run_async(self.broker.get_order(order_id))
+                    order = self._execute_read(
+                        "recovery_order_lookup",
+                        lambda: self._run_async(self.broker.get_order(order_id)),
+                    )
                 except Exception as exc:
                     raise BrokerRecoveryError(
                         f"broker lookup failed for recovered order {order_id}: {exc}", reconciliations
@@ -240,22 +264,20 @@ class IBKRBrokerOrderRouter:
         try:
             self._ensure_connected()
         except Exception as exc:
-            return {
-                "connected": False,
-                "status": "disconnected",
-                "broker": self._broker_name(),
-                "open_order_count": len(self._open_requests),
-                "error": str(exc),
-            }
+            return self._retry_failure_health("connection_retry_exhausted", exc)
         check_health = getattr(self.broker, "check_health", None)
         if callable(check_health):
-            health = self._run_async(check_health())
+            try:
+                health = self._execute_read("health_check", lambda: self._run_async(check_health()))
+            except Exception as exc:
+                return self._retry_failure_health("health_retry_exhausted", exc)
             if isinstance(health, dict):
                 normalized_health = dict(health)
                 broker_open_order_count = normalized_health.get("open_order_count")
                 normalized_health["open_order_count"] = len(self._open_requests)
                 if broker_open_order_count != normalized_health["open_order_count"]:
                     normalized_health["broker_open_order_count"] = broker_open_order_count
+                normalized_health["retry"] = self.retry_diagnostics()
                 return normalized_health
         is_connected = getattr(self.broker, "is_connected", None)
         connected = bool(is_connected()) if callable(is_connected) else self._connected
@@ -264,9 +286,14 @@ class IBKRBrokerOrderRouter:
             "status": "healthy" if connected else "disconnected",
             "broker": self._broker_name(),
             "open_order_count": len(self._open_requests),
+            "retry": self.retry_diagnostics(),
         }
 
     def reconciliation_snapshot(self) -> dict[str, Any]:
+        try:
+            self._ensure_connected()
+        except Exception as exc:
+            return self._retry_failure_health("connection_retry_exhausted", exc)
         reconcile = getattr(self.broker, "reconciliation_snapshot", None)
         if not callable(reconcile):
             return {
@@ -274,10 +301,16 @@ class IBKRBrokerOrderRouter:
                 "positions": {},
                 "open_order_ids": list(self._open_requests),
             }
-        snapshot = self._run_async(reconcile())
+        try:
+            snapshot = self._execute_read("reconciliation", lambda: self._run_async(reconcile()))
+        except Exception as exc:
+            return self._retry_failure_health("reconciliation_retry_exhausted", exc)
         if not isinstance(snapshot, dict):
             raise RuntimeError("broker returned an invalid reconciliation snapshot")
-        return dict(snapshot)
+        return {**dict(snapshot), "retry": self.retry_diagnostics()}
+
+    def retry_diagnostics(self) -> dict[str, dict[str, Any]]:
+        return {operation: result.to_dict() for operation, result in self._retry_results.items()}
 
     def _broker_open_orders_by_id(self, *, strict: bool = False) -> dict[str, Any]:
         get_orders = getattr(self.broker, "get_orders", None)
@@ -287,7 +320,10 @@ class IBKRBrokerOrderRouter:
         if not callable(get_orders):
             return {}
         try:
-            orders = self._run_async(get_orders(status="open"))
+            orders = self._execute_read(
+                "open_orders",
+                lambda: self._run_async(get_orders(status="open")),
+            )
         except Exception as exc:
             if strict:
                 raise RuntimeError(f"failed to query broker open orders: {exc}") from exc
@@ -309,10 +345,38 @@ class IBKRBrokerOrderRouter:
         if callable(is_connected) and is_connected():
             self._connected = True
             return
-        connected = bool(self._run_async(self.broker.connect()))
-        if not connected:
-            raise RuntimeError("broker connection failed")
+
+        def connect() -> bool:
+            connected = bool(self._run_async(self.broker.connect()))
+            if not connected:
+                raise ConnectionError("broker connection failed")
+            return True
+
+        self._execute_retry("connect", self.connection_retry_policy, connect)
         self._connected = True
+
+    def _execute_read(self, operation: str, callback: Callable[[], Any]) -> Any:
+        return self._execute_retry(operation, self.read_retry_policy, callback)
+
+    def _execute_retry(self, operation: str, policy: RetryPolicy, callback: Callable[[], Any]) -> Any:
+        result = RetryExecutor(
+            policy,
+            wait=self.retry_wait,
+            clock=self.retry_clock,
+            random_source=self.retry_random_source,
+        ).execute(callback)
+        self._retry_results[operation] = result
+        return result.unwrap()
+
+    def _retry_failure_health(self, status: str, error: Exception) -> dict[str, Any]:
+        return {
+            "connected": False,
+            "status": status,
+            "broker": self._broker_name(),
+            "open_order_count": len(self._open_requests),
+            "error": str(error),
+            "retry": self.retry_diagnostics(),
+        }
 
     def _submit_order(self, request: ExecutionRequest) -> Any:
         side = BrokerOrderSide.BUY if request.action == TradeAction.BUY else BrokerOrderSide.SELL
@@ -505,6 +569,11 @@ class IBKRBrokerOrderRouter:
         disconnect_on_stop: bool = True,
         cancel_open_orders_on_stop: bool = True,
         require_paper: bool = True,
+        connection_retry_policy: RetryPolicy | None = None,
+        read_retry_policy: RetryPolicy | None = None,
+        retry_wait: Callable[[float], None] = sleep,
+        retry_clock: Callable[[], int] = time_ns,
+        retry_random_source: Callable[[], float] = random,
     ) -> "IBKRBrokerOrderRouter":
         ibkr_config = _load_ibkr_connection_config(env_file)
         if require_paper and not ibkr_config.paper_trading:
@@ -516,4 +585,19 @@ class IBKRBrokerOrderRouter:
             auto_connect=auto_connect,
             disconnect_on_stop=disconnect_on_stop,
             cancel_open_orders_on_stop=cancel_open_orders_on_stop,
+            connection_retry_policy=connection_retry_policy
+            or RetryPolicy(
+                max_attempts=3,
+                initial_delay_seconds=0.5,
+                maximum_delay_seconds=5.0,
+            ),
+            read_retry_policy=read_retry_policy
+            or RetryPolicy(
+                max_attempts=3,
+                initial_delay_seconds=0.25,
+                maximum_delay_seconds=2.0,
+            ),
+            retry_wait=retry_wait,
+            retry_clock=retry_clock,
+            retry_random_source=retry_random_source,
         )
