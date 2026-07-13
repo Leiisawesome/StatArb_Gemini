@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Barrier, Event, Lock
 
 import pytest
 
@@ -207,6 +209,108 @@ def test_operational_alert_manager_deduplicates_by_category_code_and_symbol() ->
     assert duplicate is None
     assert next_window is not None
     assert [alert.message for alert in sink.alerts] == ["first rejection", "later rejection"]
+
+
+def test_operational_alert_manager_records_sink_failure_without_losing_alert() -> None:
+    class FailingSink:
+        def publish_alert(self, alert) -> None:
+            raise RuntimeError(f"notification unavailable for {alert.code}")
+
+    manager = OperationalAlertManager(FailingSink(), deduplication_window_ns=100, clock=lambda: 2_000)
+
+    first = manager.emit(
+        AlertSeverity.CRITICAL,
+        AlertCategory.RUNTIME,
+        "runtime_halted",
+        "runtime halted safely",
+        timestamp_ns=1_000,
+    )
+    duplicate = manager.emit(
+        AlertSeverity.CRITICAL,
+        AlertCategory.RUNTIME,
+        "runtime_halted",
+        "duplicate halt",
+        timestamp_ns=1_050,
+    )
+
+    assert first is not None
+    assert duplicate is None
+    assert manager.recent_dicts() == [first.to_dict()]
+    assert manager.delivery_diagnostics() == {
+        "failure_count": 1,
+        "recent_failures": [
+            {
+                "timestamp_ns": 2_000,
+                "alert_timestamp_ns": 1_000,
+                "alert_key": "runtime:runtime_halted:*",
+                "sink_type": "FailingSink",
+                "error_type": "RuntimeError",
+                "error": "notification unavailable for runtime_halted",
+            }
+        ],
+    }
+
+
+def test_operational_alert_history_remains_available_while_sink_is_blocked() -> None:
+    class BlockingSink:
+        def __init__(self) -> None:
+            self.started = Event()
+            self.release = Event()
+
+        def publish_alert(self, _alert) -> None:
+            self.started.set()
+            assert self.release.wait(timeout=2)
+
+    sink = BlockingSink()
+    manager = OperationalAlertManager(sink, deduplication_window_ns=0)
+    executor = ThreadPoolExecutor(max_workers=2)
+    future = executor.submit(
+        manager.emit,
+        AlertSeverity.WARNING,
+        AlertCategory.MARKET_DATA,
+        "market_data_delayed",
+        "market data delayed",
+    )
+    try:
+        assert sink.started.wait(timeout=1)
+        assert len(executor.submit(manager.recent).result(timeout=1)) == 1
+    finally:
+        sink.release.set()
+        future.result(timeout=1)
+        executor.shutdown(wait=True)
+
+
+def test_operational_alert_manager_deduplicates_concurrent_emissions() -> None:
+    class ThreadSafeSink:
+        def __init__(self) -> None:
+            self.alerts = []
+            self.lock = Lock()
+
+        def publish_alert(self, alert) -> None:
+            with self.lock:
+                self.alerts.append(alert)
+
+    sink = ThreadSafeSink()
+    manager = OperationalAlertManager(sink, deduplication_window_ns=100)
+    barrier = Barrier(8)
+
+    def emit_once(index: int):
+        barrier.wait(timeout=1)
+        return manager.emit(
+            AlertSeverity.ERROR,
+            AlertCategory.ORDER_ROUTING,
+            "order_rejected",
+            f"rejection {index}",
+            symbol="AAPL",
+            timestamp_ns=1_000,
+        )
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        results = list(executor.map(emit_once, range(8)))
+
+    assert sum(result is not None for result in results) == 1
+    assert len(manager.recent()) == 1
+    assert len(sink.alerts) == 1
 
 
 def test_jsonl_monitoring_sink_writes_typed_alerts(tmp_path) -> None:

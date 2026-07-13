@@ -357,6 +357,7 @@ class ProductionRuntime:
             },
             "broker": self._router_health(),
             "alerts": self.recent_alerts(20),
+            "alert_delivery": self.alerts.delivery_diagnostics(20),
         }
 
     def recent_alerts(self, limit: int = 100) -> list[dict[str, Any]]:

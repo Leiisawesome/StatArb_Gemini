@@ -202,6 +202,11 @@ class _Alerts:
         self.messages.append((title, message))
 
 
+class _FailingAlerts:
+    def critical(self, _title, _message):
+        raise RuntimeError("notification service unavailable")
+
+
 def test_production_runtime_isolates_symbol_engines(tmp_path) -> None:
     runtime = _Runtime(_config(tmp_path), source=_Source(), router=_Router())
     assert isinstance(runtime.execution_service, RoutedExecutionService)
@@ -301,6 +306,22 @@ def test_production_runtime_halts_on_position_reconciliation_mismatch(tmp_path) 
     assert "position reconciliation mismatch" in alerts.messages[0][1]
     assert runtime.recent_alerts()[0]["category"] == "reconciliation"
     assert runtime.recent_alerts()[0]["code"] == "reconciliation_failed"
+    runtime.stop()
+
+
+def test_production_runtime_surfaces_nonfatal_alert_delivery_failure(tmp_path) -> None:
+    router = _Router({"AAPL": {"quantity": 10, "average_cost": 100.0}})
+    runtime = _Runtime(_config(tmp_path), source=_Source(), router=router, alert_sink=_FailingAlerts())
+
+    runtime.start()
+
+    status = runtime.status()
+    assert status["lifecycle"] == "halted"
+    assert status["alerts"][0]["code"] == "reconciliation_failed"
+    assert status["alert_delivery"]["failure_count"] == 1
+    failure = status["alert_delivery"]["recent_failures"][0]
+    assert failure["alert_key"] == "reconciliation:reconciliation_failed:*"
+    assert failure["error_type"] == "RuntimeError"
     runtime.stop()
 
 

@@ -86,7 +86,12 @@ The authenticated localhost API exposes `/health`, `/events`, and `/alerts`.
 Alerts use typed severity and category fields and cover broker disconnects,
 reconciliation failures, order rejections, stale market data, strategy risk
 halts, and runtime failures. Repeated alerts with the same category, code, and
-symbol are suppressed within the deduplication window.
+symbol are suppressed within the deduplication window. Local notification
+delivery is fail-safe: a notification error or timeout cannot interrupt runtime
+control flow or remove the alert from bounded history. The `/health` response
+reports the cumulative delivery-failure count and bounded recent diagnostics
+under `alert_delivery`; delivery failures are recorded directly rather than
+recursively generating more alerts.
 
 For `launchd`, replace every `REPLACE_WITH_REPOSITORY_PATH` value in
 `ops/macos/com.statarb-gemini.daemon.plist`, create `var/log`, and install the

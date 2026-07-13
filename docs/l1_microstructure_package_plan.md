@@ -156,7 +156,9 @@ Defines validation contracts and implements the rolling out-of-sample validation
 `monitoring/`
 Defines runtime snapshots plus typed operational alerts with severity,
 categories, bounded history, and time-window deduplication. In-memory, JSONL,
-routed-live, and supervised production paths share this contract.
+routed-live, and supervised production paths share this contract. Alert history
+and deduplication updates are isolated from potentially slow sink delivery;
+delivery failures remain non-fatal and are exposed as bounded diagnostics.
 
 `production/`
 Defines the supervised operator runtime, durable ledger, authenticated controls,
