@@ -7,11 +7,17 @@ import pytest
 from l1_microstructure.artifacts import LocalArtifactStore
 from l1_microstructure.live.broker_models import IBKRConnectionConfig
 from l1_microstructure.production.config import OperatingMode, ProductionConfig
-from l1_microstructure.production.daemon import main
+from l1_microstructure.production.daemon import (
+    PREFLIGHT_FAILURE_EXIT_CODE,
+    PREFLIGHT_SUCCESS_EXIT_CODE,
+    main,
+)
 from l1_microstructure.production.preflight import (
+    PreflightCheck,
     PreflightStatus,
     ProductionPreflight,
     ProductionPreflightError,
+    ProductionPreflightReport,
 )
 
 
@@ -41,6 +47,60 @@ def _secrets(**overrides):
 
 def _paper_broker(_env_file):
     return IBKRConnectionConfig(paper_trading=True)
+
+
+def _write_config(tmp_path) -> str:
+    artifact_root = tmp_path / "artifacts"
+    artifact_root.mkdir(exist_ok=True)
+    path = tmp_path / "production.json"
+    path.write_text(
+        json.dumps(
+            {
+                "symbols": ["AAPL"],
+                "artifact_root": str(artifact_root),
+                "promoted_run_ids": {"AAPL": "aapl-v1"},
+                "database_path": str(tmp_path / "runtime.sqlite3"),
+                "broker_env_file": None,
+            }
+        ),
+        encoding="utf-8",
+    )
+    return str(path)
+
+
+def _report(status: PreflightStatus) -> ProductionPreflightReport:
+    return ProductionPreflightReport(
+        checks=(
+            PreflightCheck(
+                code="test.check",
+                status=status,
+                message="safe diagnostic",
+            ),
+        )
+    )
+
+
+def _forbid_infrastructure(monkeypatch) -> None:
+    targets = (
+        "MassiveWebSocketConfig",
+        "MassiveWebSocketDataSource",
+        "ProductionRuntime",
+        "Thread",
+        "create_app",
+    )
+    for name in targets:
+        monkeypatch.setattr(
+            f"l1_microstructure.production.daemon.{name}",
+            lambda *_args, _name=name, **_kwargs: pytest.fail(f"{_name} must not be constructed"),
+        )
+    monkeypatch.setattr(
+        "l1_microstructure.production.daemon.IBKRBrokerOrderRouter.from_env",
+        lambda *_args, **_kwargs: pytest.fail("broker router must not be constructed"),
+    )
+    monkeypatch.setattr(
+        "l1_microstructure.production.daemon.uvicorn.run",
+        lambda *_args, **_kwargs: pytest.fail("API server must not start"),
+    )
 
 
 def test_artifact_store_read_only_mode_never_creates_root(tmp_path) -> None:
@@ -209,3 +269,73 @@ def test_daemon_failed_preflight_does_not_construct_infrastructure(tmp_path, mon
 
     with pytest.raises(ProductionPreflightError):
         main(["--config", str(config_path)])
+
+
+def test_daemon_preflight_cli_passes_with_json_and_no_infrastructure(tmp_path, monkeypatch, capsys) -> None:
+    _forbid_infrastructure(monkeypatch)
+    monkeypatch.setattr(
+        "l1_microstructure.production.daemon._run_preflight",
+        lambda _config: (_report(PreflightStatus.PASSED), {}),
+    )
+
+    exit_code = main(["--config", _write_config(tmp_path), "--preflight"])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == PREFLIGHT_SUCCESS_EXIT_CODE == 0
+    assert payload == {
+        "passed": True,
+        "checks": [
+            {
+                "code": "test.check",
+                "status": "passed",
+                "message": "safe diagnostic",
+                "metadata": {},
+            }
+        ],
+    }
+
+
+def test_daemon_preflight_cli_fails_with_stable_exit_and_no_infrastructure(tmp_path, monkeypatch, capsys) -> None:
+    _forbid_infrastructure(monkeypatch)
+    monkeypatch.setattr(
+        "l1_microstructure.production.daemon._run_preflight",
+        lambda _config: (_report(PreflightStatus.FAILED), {}),
+    )
+
+    exit_code = main(["--preflight", "--config", _write_config(tmp_path)])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == PREFLIGHT_FAILURE_EXIT_CODE == 2
+    assert payload["passed"] is False
+    assert payload["checks"][0]["status"] == "failed"
+
+
+def test_daemon_preflight_cli_runs_real_redacted_checks_without_infrastructure(tmp_path, monkeypatch, capsys) -> None:
+    _forbid_infrastructure(monkeypatch)
+    monkeypatch.setattr("l1_microstructure.production.daemon.get_secret", lambda _name: None)
+
+    exit_code = main(["--config", _write_config(tmp_path), "--preflight"])
+
+    payload = json.loads(capsys.readouterr().out)
+    codes = {check["code"] for check in payload["checks"]}
+    assert exit_code == PREFLIGHT_FAILURE_EXIT_CODE
+    assert payload["passed"] is False
+    assert "credential.massive_api_key" in codes
+    assert "credential.trading_console_token" in codes
+    assert "artifact.promoted.aapl" in codes
+
+
+def test_daemon_preflight_cli_reports_malformed_config_as_redacted_json(tmp_path, monkeypatch, capsys) -> None:
+    _forbid_infrastructure(monkeypatch)
+    path = tmp_path / "invalid.json"
+    path.write_text('{"secret": "must-not-appear",', encoding="utf-8")
+
+    exit_code = main(["--config", str(path), "--preflight"])
+
+    output = capsys.readouterr().out
+    payload = json.loads(output)
+    assert exit_code == PREFLIGHT_FAILURE_EXIT_CODE
+    assert payload["passed"] is False
+    assert payload["checks"][0]["code"] == "runtime.configuration"
+    assert payload["checks"][0]["metadata"]["error_type"] == "JSONDecodeError"
+    assert "must-not-appear" not in output

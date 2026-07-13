@@ -62,6 +62,17 @@ paper/live mode, and bounded retry policies. Diagnostics contain configuration
 metadata but never secret values. Any failed check prevents runtime-thread
 startup and broker connectivity.
 
+Run the same gate without starting the daemon:
+
+```bash
+.venv/bin/trading-daemon --config config/production.json --preflight
+```
+
+This mode writes one redacted JSON report to standard output, returns exit code
+`0` when every required check passes, and returns exit code `2` when configuration
+loading or any preflight check fails. It does not construct market-data clients,
+broker clients, the control API, `ProductionRuntime`, or background threads.
+
 The terminal console can pause entries, resume after reconciliation, activate the
 durable kill switch, and flatten strategy positions. Halt and flatten operations
 require confirmation at the API boundary. Closing the console does not stop the

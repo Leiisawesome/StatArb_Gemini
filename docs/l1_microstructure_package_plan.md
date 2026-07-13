@@ -163,7 +163,9 @@ Defines the supervised operator runtime, durable ledger, authenticated controls,
 local alerts, secrets, and daemon lifecycle. `preflight.py` performs read-only,
 redacted checks for required credentials, promoted artifacts, filesystem
 readiness, broker account mode, and retry configuration before infrastructure
-clients or runtime threads are created.
+clients or runtime threads are created. The daemon exposes the identical gate as
+`--preflight`, emitting redacted JSON with stable success/failure exit codes and
+returning before all runtime infrastructure construction.
 
 `recovery.py`
 Defines the typed, versioned state-machine recovery schema and owns validation,

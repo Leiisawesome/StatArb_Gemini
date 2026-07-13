@@ -355,6 +355,15 @@ constructs market-data or broker clients. Missing credentials, unavailable or
 unapproved artifacts, unwritable ledger paths, and paper/live account-mode
 mismatches fail startup before any routing boundary is opened.
 
+Run only that gate with machine-readable JSON output:
+
+```bash
+trading-daemon --config config/production.json --preflight
+```
+
+The command exits `0` on success or `2` on a failed check and never constructs
+runtime infrastructure.
+
 Production configuration defaults to regular-hours operation, stops entries at
 15:50 ET, flattens at 15:58 ET, and rejects live mode unless the configuration
 contains `"live_risk_acknowledgement": "I_ACCEPT_LIVE_CAPITAL_RISK"`.
