@@ -159,6 +159,10 @@ categories, bounded history, and time-window deduplication. In-memory, JSONL,
 routed-live, and supervised production paths share this contract. Alert history
 and deduplication updates are isolated from potentially slow sink delivery;
 delivery failures remain non-fatal and are exposed as bounded diagnostics.
+The monitoring layer accepts an alert-store contract; supervised production
+adapts that contract to the existing SQLite audit ledger so bounded history,
+deduplication state, and delivery diagnostics survive daemon restarts without
+redelivering historical notifications.
 
 `production/`
 Defines the supervised operator runtime, durable ledger, authenticated controls,

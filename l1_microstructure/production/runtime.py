@@ -25,7 +25,7 @@ from l1_microstructure.retry import RetryExecutor, RetryResult
 from l1_microstructure.transitions import EdgeKey
 
 from .config import OperatingMode, ProductionConfig
-from .alerts import LocalAlertSink
+from .alerts import LedgerAlertStore, LocalAlertSink
 from .ledger import OperationalLedger
 from .lifecycle import LifecycleState, RuntimeLifecycle
 
@@ -54,7 +54,7 @@ class ProductionRuntime:
         self.framework_config = framework_config or FrameworkConfig()
         self.ledger = ledger or OperationalLedger(config.database_path)
         self.alert_sink = alert_sink or LocalAlertSink()
-        self.alerts = OperationalAlertManager(self.alert_sink)
+        self.alerts = OperationalAlertManager(self.alert_sink, store=LedgerAlertStore(self.ledger))
         self._wait = wait
         self._retry_clock = retry_clock
         self._retry_random_source = retry_random_source
@@ -358,6 +358,7 @@ class ProductionRuntime:
             "broker": self._router_health(),
             "alerts": self.recent_alerts(20),
             "alert_delivery": self.alerts.delivery_diagnostics(20),
+            "alert_persistence": self.alerts.persistence_diagnostics(20),
         }
 
     def recent_alerts(self, limit: int = 100) -> list[dict[str, Any]]:

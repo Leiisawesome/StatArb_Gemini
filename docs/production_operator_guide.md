@@ -91,7 +91,11 @@ delivery is fail-safe: a notification error or timeout cannot interrupt runtime
 control flow or remove the alert from bounded history. The `/health` response
 reports the cumulative delivery-failure count and bounded recent diagnostics
 under `alert_delivery`; delivery failures are recorded directly rather than
-recursively generating more alerts.
+recursively generating more alerts. Accepted alerts and delivery failures are
+also persisted in the SQLite audit ledger. On restart, the daemon restores its
+bounded alert history, deduplication timestamps, and cumulative delivery
+diagnostics without notifying historical alerts again. Alert-store failures are
+non-recursive and appear under `alert_persistence` in `/health`.
 
 For `launchd`, replace every `REPLACE_WITH_REPOSITORY_PATH` value in
 `ops/macos/com.statarb-gemini.daemon.plist`, create `var/log`, and install the

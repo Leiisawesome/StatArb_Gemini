@@ -94,6 +94,10 @@ def test_operational_ledger_persists_intents_events_and_state(tmp_path) -> None:
     assert reopened.open_orders()[0]["external_order_id"] == "42"
     assert reopened.get_state("kill_switch") is True
     assert reopened.recent_events()[0]["event_type"] == "accepted"
+    assert reopened.recent_events(category="order", event_type="accepted")[0]["payload"] == {
+        "client_order_id": "client-1"
+    }
+    assert reopened.event_count(category="order", event_type="accepted") == 1
     reopened.close()
 
 

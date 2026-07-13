@@ -48,7 +48,14 @@ class OperationalLedger:
             )
         return order_id
 
-    def update_order(self, client_order_id: str, status: str, *, external_order_id: str | None = None, payload: dict[str, Any] | None = None) -> None:
+    def update_order(
+        self,
+        client_order_id: str,
+        status: str,
+        *,
+        external_order_id: str | None = None,
+        payload: dict[str, Any] | None = None,
+    ) -> None:
         now = datetime.now(timezone.utc).isoformat()
         with self._transaction() as connection:
             cursor = connection.execute(
@@ -77,9 +84,25 @@ class OperationalLedger:
         row = self._connection.execute("SELECT value_json FROM runtime_state WHERE key = ?", (key,)).fetchone()
         return default if row is None else json.loads(row["value_json"])
 
-    def recent_events(self, limit: int = 100) -> list[dict[str, Any]]:
+    def recent_events(
+        self,
+        limit: int = 100,
+        *,
+        category: str | None = None,
+        event_type: str | None = None,
+    ) -> list[dict[str, Any]]:
+        clauses: list[str] = []
+        parameters: list[Any] = []
+        if category is not None:
+            clauses.append("category = ?")
+            parameters.append(category)
+        if event_type is not None:
+            clauses.append("event_type = ?")
+            parameters.append(event_type)
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        parameters.append(max(int(limit), 1))
         rows = self._connection.execute(
-            "SELECT * FROM audit_events ORDER BY id DESC LIMIT ?", (max(int(limit), 1),)
+            f"SELECT * FROM audit_events{where} ORDER BY id DESC LIMIT ?", parameters
         ).fetchall()
         return [
             {
@@ -91,6 +114,19 @@ class OperationalLedger:
             }
             for row in rows
         ]
+
+    def event_count(self, *, category: str | None = None, event_type: str | None = None) -> int:
+        clauses: list[str] = []
+        parameters: list[Any] = []
+        if category is not None:
+            clauses.append("category = ?")
+            parameters.append(category)
+        if event_type is not None:
+            clauses.append("event_type = ?")
+            parameters.append(event_type)
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        row = self._connection.execute(f"SELECT COUNT(*) AS count FROM audit_events{where}", parameters).fetchone()
+        return int(row["count"])
 
     def _initialize(self) -> None:
         with self._lock:
