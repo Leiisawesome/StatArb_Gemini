@@ -14,6 +14,7 @@ Use the repository documents by role:
 4. `docs/l1_microstructure_thesis_edge_and_state_vector.md` explains how edge comes from the state vector and transitions.
 5. `docs/l1_microstructure_package_plan.md` describes the implemented package structure, contract seams, and remaining roadmap.
 6. `docs/production_operator_guide.md` covers the supervised daemon, terminal console, safety controls, and paper qualification.
+7. `docs/transparent_engine_v2.md` defines the stronger transparent engine, promotion gates, and frozen paper shadow campaign.
 
 ## What `l1_microstructure` is
 

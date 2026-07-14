@@ -11,6 +11,7 @@ from typing import Any, Callable
 from l1_microstructure.artifacts import ArtifactBundleSelector, LocalArtifactStore, RunQualityGate
 from l1_microstructure.live.broker_models import IBKRConnectionConfig
 from l1_microstructure.live.router_adapters import load_ibkr_connection_config
+from l1_microstructure.transparent.artifacts import TransparentArtifactSelector
 
 from .config import OperatingMode, ProductionConfig
 
@@ -195,6 +196,35 @@ class ProductionPreflight:
                         status=PreflightStatus.PASSED,
                         message="promoted artifact bundle is committed and validation-approved",
                         metadata={"symbol": symbol, "run_id": run_id},
+                    )
+                )
+        for symbol, run_id in self.config.transparent_shadow_run_ids.items():
+            code = f"artifact.transparent_shadow.{symbol.lower()}"
+            if not artifact_root_ready:
+                checks.append(
+                    PreflightCheck(
+                        code=code,
+                        status=PreflightStatus.SKIPPED,
+                        message="transparent artifact validation skipped because the artifact root is unavailable",
+                        metadata={"symbol": symbol, "run_id": run_id},
+                    )
+                )
+                continue
+            try:
+                TransparentArtifactSelector(LocalArtifactStore(self.config.artifact_root)).resolve(
+                    symbol=symbol,
+                    run_id=run_id,
+                    passing_only=True,
+                )
+            except Exception as exc:
+                self._append_failure(checks, code, exc, {"symbol": symbol, "run_id": run_id})
+            else:
+                checks.append(
+                    PreflightCheck(
+                        code=code,
+                        status=PreflightStatus.PASSED,
+                        message="transparent shadow bundle is validation-approved",
+                        metadata={"symbol": symbol, "run_id": run_id, "engine_version": "v2"},
                     )
                 )
 

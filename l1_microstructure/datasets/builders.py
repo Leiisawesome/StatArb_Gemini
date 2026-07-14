@@ -126,6 +126,7 @@ class PipelineTransitionDatasetBuilder:
                             "horizon_ms": int(horizon_ns / 1_000_000),
                             "horizon_label": f"{int(horizon_ns / 1_000_000)}ms",
                             "realized_drift_bps": label.realized_drift_bps,
+                            "end_timestamp_ns": label.end_timestamp_ns,
                             "censored": label.censored,
                             "holding_time_ns": update.state.timestamp_ns - prior_state.timestamp_ns
                             if prior_state is not None
@@ -187,6 +188,7 @@ class PipelineTransitionDatasetBuilder:
                         "horizon_ms": int(horizon_ns / 1_000_000),
                         "horizon_label": f"{int(horizon_ns / 1_000_000)}ms",
                         "realized_drift_bps": label.realized_drift_bps,
+                        "end_timestamp_ns": label.end_timestamp_ns,
                         "censored": label.censored,
                         "holding_time_ns": update.state.timestamp_ns - prior_state.timestamp_ns
                         if prior_state is not None

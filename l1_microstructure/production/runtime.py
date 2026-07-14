@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import asdict
 from datetime import datetime, time, timedelta, timezone
+from hashlib import sha256
+import json
 from random import random
 from threading import RLock
-from time import sleep, time_ns
+from time import perf_counter_ns, sleep, time_ns
 from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
@@ -23,6 +26,8 @@ from l1_microstructure.pipeline import L1MicrostructureStateMachine
 from l1_microstructure.risk import OpenPosition
 from l1_microstructure.retry import RetryExecutor, RetryResult
 from l1_microstructure.transitions import EdgeKey
+from l1_microstructure.transparent.artifacts import TransparentArtifactSelector
+from l1_microstructure.transparent.engine import TransparentStatisticalEngine
 
 from .config import OperatingMode, ProductionConfig
 from .alerts import LedgerAlertStore, LocalAlertSink
@@ -67,6 +72,15 @@ class ProductionRuntime:
             symbol: str(persisted_models.get(symbol, config.promoted_run_ids[symbol])) for symbol in config.symbols
         }
         self.machines: dict[str, L1MicrostructureStateMachine] = {}
+        self.transparent_shadow_engines: dict[str, TransparentStatisticalEngine] = {}
+        self._shadow_baseline_latencies: deque[int] = deque(maxlen=4096)
+        self._shadow_candidate_latencies: deque[int] = deque(maxlen=4096)
+        self._shadow_candidate_updates = 0
+        self._shadow_resolved_outcomes = 0
+        self._shadow_candidate_errors = 0
+        self._shadow_action_disagreements = 0
+        self._shadow_comparisons = 0
+        self._campaign_fingerprint: str | None = None
         self.last_event_timestamp_ns: dict[str, int] = {}
         self.first_event_timestamp_ns: dict[str, int] = {}
         self._lock = RLock()
@@ -214,7 +228,13 @@ class ProductionRuntime:
         if daily_loss_reason is not None:
             self._halt(daily_loss_reason, category=AlertCategory.RISK, code="daily_loss_limit_breached")
             return
-        update = self.machines[event.symbol].on_event(event)
+        if event.symbol in self.transparent_shadow_engines:
+            baseline_started = perf_counter_ns()
+            update = self.machines[event.symbol].on_event(event)
+            self._shadow_baseline_latencies.append(max(perf_counter_ns() - baseline_started, 0))
+            self._process_transparent_shadow(event, update)
+        else:
+            update = self.machines[event.symbol].on_event(event)
         risk_engine = getattr(self.machines[event.symbol], "risk_engine", None)
         if bool(getattr(risk_engine, "halted", False)):
             self._halt(
@@ -549,6 +569,101 @@ class ProductionRuntime:
             )
             for symbol in self.config.symbols
         }
+        self.transparent_shadow_engines = {}
+        artifact_hashes: dict[str, dict[str, str]] = {}
+        store = LocalArtifactStore(self.config.artifact_root)
+        baseline_artifact_hashes = {
+            symbol: {
+                kind: str(store.load_metadata(artifact_id).payload_hash)
+                for kind, artifact_id in machine.runtime_artifacts.artifact_ids.items()
+            }
+            for symbol, machine in self.machines.items()
+        }
+        if self.config.transparent_shadow_run_ids:
+            transparent_selector = TransparentArtifactSelector(store)
+            for symbol, run_id in self.config.transparent_shadow_run_ids.items():
+                artifacts = transparent_selector.resolve(symbol=symbol, run_id=run_id, passing_only=True)
+                self.transparent_shadow_engines[symbol] = TransparentStatisticalEngine(
+                    artifacts,
+                    self.framework_config,
+                )
+                artifact_hashes[symbol] = {
+                    kind: str(store.load_metadata(artifact_id).payload_hash)
+                    for kind, artifact_id in artifacts.artifact_ids.items()
+                }
+        fingerprint_payload = {
+            "engine_version": "v2",
+            "routing_engine_version": "v1",
+            "transparent_shadow_run_ids": self.config.transparent_shadow_run_ids,
+            "artifact_hashes": artifact_hashes,
+            "baseline_artifact_hashes": baseline_artifact_hashes,
+            "framework_config": asdict(self.framework_config),
+            "production_config": self.config.public_dict(),
+        }
+        self._campaign_fingerprint = (
+            sha256(json.dumps(fingerprint_payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+            if self.transparent_shadow_engines
+            else None
+        )
+
+    def _process_transparent_shadow(self, event: MarketEvent, baseline_update) -> None:
+        engine = self.transparent_shadow_engines.get(event.symbol)
+        if engine is None:
+            return
+        started = perf_counter_ns()
+        try:
+            candidate_update = engine.on_event(event)
+        except Exception:
+            self._shadow_candidate_errors += 1
+            candidate_update = None
+        self._shadow_candidate_latencies.append(max(perf_counter_ns() - started, 0))
+        if candidate_update is not None:
+            self._shadow_candidate_updates += 1
+            self._shadow_resolved_outcomes += len(getattr(candidate_update, "resolved_outcomes", ()))
+        if baseline_update is None and candidate_update is None:
+            return
+        baseline_action = (
+            TradeAction.HOLD
+            if baseline_update is None or baseline_update.intent is None
+            else baseline_update.intent.action
+        )
+        candidate_action = TradeAction.HOLD if candidate_update is None else candidate_update.action
+        self._shadow_comparisons += 1
+        self._shadow_action_disagreements += int(baseline_action is not candidate_action)
+
+    @staticmethod
+    def _p95(values: deque[int]) -> float:
+        if not values:
+            return 0.0
+        ordered = sorted(values)
+        return float(ordered[min(int(0.95 * (len(ordered) - 1)), len(ordered) - 1)])
+
+    def _record_transparent_shadow_summary(self, *, timestamp) -> None:
+        if not self.transparent_shadow_engines:
+            return
+        self.ledger.append_event(
+            "model",
+            "transparent_shadow_summary",
+            {
+                "engine_version": "v2",
+                "routing_engine_version": "v1",
+                "validation_passed": True,
+                "campaign_fingerprint": self._campaign_fingerprint,
+                "promoted_run_ids": dict(self.config.transparent_shadow_run_ids),
+                "candidate_update_count": self._shadow_candidate_updates,
+                "resolved_outcome_count": self._shadow_resolved_outcomes,
+                "pending_outcome_count": sum(
+                    int(getattr(getattr(engine, "outcomes", None), "pending_count", 0))
+                    for engine in self.transparent_shadow_engines.values()
+                ),
+                "candidate_error_count": self._shadow_candidate_errors,
+                "comparison_count": self._shadow_comparisons,
+                "action_disagreement_rate": self._shadow_action_disagreements / max(self._shadow_comparisons, 1),
+                "baseline_p95_latency_ns": self._p95(self._shadow_baseline_latencies),
+                "candidate_p95_latency_ns": self._p95(self._shadow_candidate_latencies),
+            },
+            timestamp=timestamp,
+        )
 
     def _reconciliation_failure(self) -> tuple[str | None, dict[str, Any]]:
         if self.ledger.get_state("kill_switch", False):
@@ -774,6 +889,8 @@ class ProductionRuntime:
             for symbol, machine in self.machines.items()
             if (position := machine.open_positions.get(symbol)) is not None
         }
+        event_timestamp = local.astimezone(timezone.utc).isoformat()
+        self._record_transparent_shadow_summary(timestamp=event_timestamp)
         self.ledger.append_event(
             "session",
             "closed",
@@ -782,10 +899,12 @@ class ProductionRuntime:
                 "timestamp_ns": observed_at_ns,
                 "session_phase": session_phase,
                 "mode": self.config.mode.value,
+                **self._campaign_session_metadata(),
                 "symbols": list(self.config.symbols),
                 "positions": positions,
                 "open_orders": self.ledger.open_orders(),
             },
+            timestamp=event_timestamp,
         )
         self.ledger.set_state("last_closed_session_date", session_date)
 
@@ -805,7 +924,24 @@ class ProductionRuntime:
             return
         session_date = local.date().isoformat()
         if self.ledger.get_state("last_started_session_date") == session_date:
+            if self.transparent_shadow_engines:
+                self.ledger.append_event(
+                    "model",
+                    "transparent_shadow_restart",
+                    {
+                        "session_date": session_date,
+                        "campaign_fingerprint": self._campaign_fingerprint,
+                    },
+                    timestamp=local.astimezone(timezone.utc).isoformat(),
+                )
             return
+        self._shadow_baseline_latencies.clear()
+        self._shadow_candidate_latencies.clear()
+        self._shadow_candidate_updates = 0
+        self._shadow_resolved_outcomes = 0
+        self._shadow_candidate_errors = 0
+        self._shadow_action_disagreements = 0
+        self._shadow_comparisons = 0
         self.ledger.append_event(
             "session",
             "started",
@@ -813,11 +949,22 @@ class ProductionRuntime:
                 "session_date": session_date,
                 "timestamp_ns": observed_at_ns,
                 "mode": self.config.mode.value,
+                **self._campaign_session_metadata(),
                 "symbols": list(self.config.symbols),
             },
-            timestamp=local,
+            timestamp=local.astimezone(timezone.utc).isoformat(),
         )
         self.ledger.set_state("last_started_session_date", session_date)
+
+    def _campaign_session_metadata(self) -> dict[str, object]:
+        if not self.transparent_shadow_engines:
+            return {}
+        return {
+            "engine_version": "v2",
+            "routing_engine_version": "v1",
+            "campaign_fingerprint": self._campaign_fingerprint,
+            "promoted_run_ids": dict(self.config.transparent_shadow_run_ids),
+        }
 
     def _daily_loss_breach(self) -> str | None:
         health = self._router_health()

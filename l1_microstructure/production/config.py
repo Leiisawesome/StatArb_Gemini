@@ -78,6 +78,7 @@ class ProductionConfig:
     symbols: tuple[str, ...]
     artifact_root: Path
     promoted_run_ids: dict[str, str]
+    transparent_shadow_run_ids: dict[str, str] = field(default_factory=dict)
     database_path: Path = Path("var/trading.sqlite3")
     mode: OperatingMode = OperatingMode.PAPER
     broker_env_file: Path | None = Path("broker.env")
@@ -100,9 +101,25 @@ class ProductionConfig:
         if len(set(normalized)) != len(normalized):
             raise ValueError("production symbols must be unique")
         object.__setattr__(self, "symbols", normalized)
+        promoted = {str(symbol).strip().upper(): str(run_id) for symbol, run_id in self.promoted_run_ids.items()}
+        shadow = {
+            str(symbol).strip().upper(): str(run_id)
+            for symbol, run_id in self.transparent_shadow_run_ids.items()
+        }
+        if len(promoted) != len(self.promoted_run_ids) or len(shadow) != len(self.transparent_shadow_run_ids):
+            raise ValueError("artifact run-id mappings contain duplicate symbols")
+        object.__setattr__(self, "promoted_run_ids", promoted)
+        object.__setattr__(self, "transparent_shadow_run_ids", shadow)
         missing_models = [symbol for symbol in normalized if not self.promoted_run_ids.get(symbol)]
         if missing_models:
             raise ValueError(f"missing promoted run ids for symbols: {missing_models}")
+        unknown_shadow_symbols = sorted(set(self.transparent_shadow_run_ids).difference(normalized))
+        if unknown_shadow_symbols:
+            raise ValueError(f"transparent shadow runs contain unknown symbols: {unknown_shadow_symbols}")
+        if self.transparent_shadow_run_ids:
+            missing_shadow = [symbol for symbol in normalized if not self.transparent_shadow_run_ids.get(symbol)]
+            if missing_shadow:
+                raise ValueError(f"missing transparent shadow run ids for symbols: {missing_shadow}")
         if self.api_host not in {"127.0.0.1", "::1", "localhost"}:
             raise ValueError("production API must bind to localhost")
         if self.event_stale_after_seconds <= 0:
@@ -163,10 +180,16 @@ class ProductionConfig:
             "artifact_root": str(self.artifact_root),
             "database_path": str(self.database_path),
             "mode": self.mode.value,
+            "promoted_run_ids": dict(self.promoted_run_ids),
+            "transparent_shadow_run_ids": dict(self.transparent_shadow_run_ids),
             "api_host": self.api_host,
             "api_port": self.api_port,
             "event_stale_after_seconds": self.event_stale_after_seconds,
             "warmup_seconds": self.warmup_seconds,
+            "reconnect_backoff_seconds": self.reconnect_backoff_seconds,
+            "flatten_timeout_seconds": self.flatten_timeout_seconds,
+            "risk": asdict(self.risk),
+            "session": asdict(self.session),
             "retry": {
                 "market_data": asdict(self.retry.market_data),
                 "broker_connection": asdict(self.retry.broker_connection),

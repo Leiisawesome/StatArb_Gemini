@@ -1,0 +1,11 @@
+{
+  "brier_score": 0.2525,
+  "calibration_error": 0.04999999999999982,
+  "directional_hit_rate": 0.5,
+  "edge_coverage": 0.8,
+  "log_loss": 0.6981723484866962,
+  "mean_signed_net_drift_bps": -1.0,
+  "p95_latency_ns": 1000.0,
+  "peak_resident_bytes": 10000,
+  "sample_count": 100
+}

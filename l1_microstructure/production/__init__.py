@@ -13,6 +13,12 @@ from .lifecycle import LifecycleState, RuntimeLifecycle
 from .preflight import PreflightCheck, PreflightStatus, ProductionPreflight, ProductionPreflightReport
 from .readiness import OperationalCheck, OperationalStatus, RuntimeHealthReport, RuntimeReadinessReport
 from .runtime import ProductionRuntime
+from .transparent_qualification import (
+    TransparentCampaignEvaluator,
+    TransparentCampaignPolicy,
+    TransparentCampaignReport,
+    TransparentCampaignSession,
+)
 
 __all__ = [
     "LifecycleState",
@@ -33,4 +39,8 @@ __all__ = [
     "RuntimeHealthReport",
     "RuntimeReadinessReport",
     "SessionPolicy",
+    "TransparentCampaignEvaluator",
+    "TransparentCampaignPolicy",
+    "TransparentCampaignReport",
+    "TransparentCampaignSession",
 ]
