@@ -17,6 +17,7 @@ from l1_microstructure.live import (
     BrokerRouterRecoveryState,
     IBKRBrokerOrderRouter,
 )
+from l1_microstructure.live.recovery import BrokerRecoveryCodec
 from l1_microstructure.live.broker_models import (
     BrokerOrder,
     BrokerOrderSide,
@@ -449,6 +450,49 @@ def test_broker_recovery_rejects_unsupported_version_before_mutation() -> None:
         router.restore_recovery_state(invalid_state)
 
     assert router.open_order_ids() == [acknowledgement.external_order_id]
+
+
+def test_broker_recovery_codec_round_trips_complete_request() -> None:
+    state = BrokerRouterRecoveryState(
+        open_orders=[BrokerOpenOrderRecovery(external_order_id="paper-42", request=_request(quantity=12), filled_quantity=5)]
+    )
+
+    recovered = BrokerRecoveryCodec.from_dict(BrokerRecoveryCodec.to_dict(state))
+
+    assert recovered == state
+
+
+def test_broker_recovery_codec_round_trips_infinite_posterior_uncertainty() -> None:
+    request = _request(quantity=1)
+    request = replace(
+        request,
+        intent=replace(request.intent, posterior=replace(request.intent.posterior, std_bps=float("inf"))),
+    )
+    state = BrokerRouterRecoveryState(
+        open_orders=[BrokerOpenOrderRecovery(external_order_id="paper-flatten", request=request)]
+    )
+
+    payload = BrokerRecoveryCodec.to_dict(state)
+    recovered = BrokerRecoveryCodec.from_dict(payload)
+
+    assert payload["open_orders"][0]["request"]["intent"]["posterior"]["std_bps"] == "Infinity"
+    assert recovered == state
+
+
+def test_broker_recovery_codec_rejects_malformed_payload() -> None:
+    with pytest.raises(ValueError, match="malformed"):
+        BrokerRecoveryCodec.from_dict({"version": 1, "open_orders": [{"external_order_id": "paper-42"}]})
+
+
+def test_broker_recovery_codec_rejects_nan() -> None:
+    request = _request(quantity=1)
+    request = replace(
+        request,
+        intent=replace(request.intent, posterior=replace(request.intent.posterior, std_bps=float("nan"))),
+    )
+
+    with pytest.raises(ValueError, match="NaN"):
+        BrokerRecoveryCodec.request_to_dict(request)
 
 
 def test_broker_recovery_rejects_corrupted_order_before_mutation() -> None:

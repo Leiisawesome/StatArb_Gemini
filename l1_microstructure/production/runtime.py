@@ -21,6 +21,11 @@ from l1_microstructure.execution import ExecutionReport, ExecutionRequest
 from l1_microstructure.ingest.interfaces import LiveSubscriptionRequest, MarketDataSource
 from l1_microstructure.live.execution_session import RoutedExecutionService
 from l1_microstructure.live.interfaces import ProductionOrderRouter, RouteAcknowledgement
+from l1_microstructure.live.recovery import (
+    BrokerOpenOrderRecovery,
+    BrokerRecoveryCodec,
+    BrokerRouterRecoveryState,
+)
 from l1_microstructure.monitoring import AlertCategory, AlertSeverity, OperationalAlertManager
 from l1_microstructure.pipeline import L1MicrostructureStateMachine
 from l1_microstructure.risk import OpenPosition
@@ -38,6 +43,8 @@ from .readiness import OperationalCheck, RuntimeHealthReport, RuntimeReadinessRe
 
 class ProductionRuntime:
     """Owns live engines and keeps broker-facing operation fail closed."""
+
+    BROKER_RECOVERY_STATE_KEY = "broker_router_recovery_state"
 
     def __init__(
         self,
@@ -99,7 +106,18 @@ class ProductionRuntime:
                 self._transition(LifecycleState.WARMING, "loading promoted artifacts")
                 self._load_machines()
                 self._transition(LifecycleState.RECONCILING, "reconciling broker and ledger")
+            if not self.machines:
+                self._load_machines()
             self._record_session_start()
+            try:
+                self._restore_router_recovery_state()
+            except Exception as exc:
+                self._halt(
+                    f"broker recovery failed: {exc}",
+                    category=AlertCategory.RECONCILIATION,
+                    code="reconciliation_failed",
+                )
+                return
             failure, snapshot = self._reconciliation_failure()
             if failure is not None:
                 broker_disconnected = failure.startswith("broker is not connected")
@@ -119,9 +137,8 @@ class ProductionRuntime:
                     metadata={"retry": snapshot.get("retry", {})},
                 )
                 return
-            if not self.machines:
-                self._load_machines()
             self._rehydrate_positions(snapshot)
+            self._persist_positions()
             if self.config.warmup_seconds > 0:
                 self._transition(LifecycleState.WARMING, "reconciliation passed; rebuilding market context")
             else:
@@ -789,12 +806,15 @@ class ProductionRuntime:
         return True
 
     def _route(self, request: ExecutionRequest) -> None:
+        recovery_request = BrokerRecoveryCodec.request_to_dict(request)
         payload = {
             "client_order_id": request.client_order_id,
             "symbol": request.symbol,
             "action": request.action.value,
             "quantity": request.quantity,
             "decision_timestamp_ns": request.decision_timestamp_ns,
+            "recovery_request": recovery_request,
+            "recovered_filled_quantity": 0.0,
         }
 
         def record_intent(current: ExecutionRequest) -> None:
@@ -821,6 +841,7 @@ class ProductionRuntime:
             before_submit=record_intent,
             after_submit=record_acknowledgement,
         )
+        self._persist_router_recovery_state()
 
     def _poll_reports(self) -> None:
         if self._shutdown or self.lifecycle.state is LifecycleState.STOPPED:
@@ -842,15 +863,131 @@ class ProductionRuntime:
             after_report=self._record_execution_report,
         )
         self._persist_positions()
+        self._persist_router_recovery_state()
+
+    def _persist_router_recovery_state(self) -> None:
+        state = self.execution_service.snapshot_recovery_state()
+        if state is None:
+            self.ledger.set_state(self.BROKER_RECOVERY_STATE_KEY, None)
+            return
+        if not isinstance(state, BrokerRouterRecoveryState):
+            raise TypeError("production router returned an unsupported recovery state")
+        self.ledger.set_state(self.BROKER_RECOVERY_STATE_KEY, BrokerRecoveryCodec.to_dict(state))
+
+    def _restore_router_recovery_state(self) -> None:
+        payload = self.ledger.get_state(self.BROKER_RECOVERY_STATE_KEY)
+        ledger_orders = self.ledger.open_orders()
+        if any(not order.get("external_order_id") for order in ledger_orders):
+            raise RuntimeError("ledger contains an open order without a broker acknowledgement")
+        ledger_external_ids = {
+            str(order["external_order_id"]) for order in ledger_orders if order.get("external_order_id")
+        }
+        if payload is None and not ledger_orders:
+            return
+        state = None if payload is None else BrokerRecoveryCodec.from_dict(payload)
+        state_external_ids = set() if state is None else {order.external_order_id for order in state.open_orders}
+        if state_external_ids != ledger_external_ids:
+            state = self._recovery_state_from_ledger(ledger_orders)
+        self.execution_service.validate_recovery_state(state, self.config.symbols)
+        restored_position_details = self._restore_position_details_from_ledger()
+        self.execution_service.restore_recovery_state(state)
+        reports = self.execution_service.poll(
+            self.config.symbols,
+            consumer_for_symbol=self.machines.get,
+            after_report=self._record_execution_report,
+        )
+        if reports:
+            expected_positions = self.ledger.get_state("strategy_positions", {})
+            if any(float(quantity) != 0.0 for quantity in expected_positions.values()) and not restored_position_details:
+                raise RuntimeError("recovered fills require durable strategy position details")
+            self._persist_positions()
+        self._persist_router_recovery_state()
+        reconciliations = self.execution_service.recovery_reconciliations()
+        self.ledger.append_event(
+            "reconciliation",
+            "broker_recovery_restored",
+            {
+                "open_order_count": len(self._router_open_order_ids()),
+                "recovered_report_count": len(reports),
+                "orders": [asdict(item) for item in reconciliations],
+            },
+        )
+
+    @staticmethod
+    def _recovery_state_from_ledger(ledger_orders: list[dict[str, Any]]) -> BrokerRouterRecoveryState:
+        recovered_orders = []
+        for order in ledger_orders:
+            external_order_id = order.get("external_order_id")
+            payload = dict(order.get("payload", {}))
+            request_payload = payload.get("recovery_request")
+            if not external_order_id or not isinstance(request_payload, dict):
+                raise RuntimeError("ledger open order is missing durable broker recovery data")
+            recovered_orders.append(
+                BrokerOpenOrderRecovery(
+                    external_order_id=str(external_order_id),
+                    request=BrokerRecoveryCodec.request_from_dict(request_payload),
+                    filled_quantity=float(payload.get("recovered_filled_quantity", 0.0)),
+                )
+            )
+        state = BrokerRouterRecoveryState(open_orders=recovered_orders)
+        BrokerRecoveryCodec.validate(state)
+        return state
+
+    def _restore_position_details_from_ledger(self) -> bool:
+        details = self.ledger.get_state("strategy_position_details", {})
+        if not details:
+            return False
+        expected_positions = {
+            str(symbol): float(quantity)
+            for symbol, quantity in dict(self.ledger.get_state("strategy_positions", {})).items()
+            if float(quantity) != 0.0
+        }
+        detailed_positions = {
+            str(symbol): (1.0 if TradeAction(str(payload["side"])) is TradeAction.BUY else -1.0)
+            * float(payload["quantity"])
+            for symbol, payload in dict(details).items()
+        }
+        if detailed_positions != expected_positions:
+            raise RuntimeError("durable strategy position details do not match ledger quantities")
+        for symbol, payload in dict(details).items():
+            if symbol not in self.machines:
+                continue
+            current = dict(payload)
+            self.machines[symbol].open_positions[symbol] = OpenPosition(
+                symbol=symbol,
+                side=TradeAction(str(current["side"])),
+                quantity=int(current["quantity"]),
+                entry_price=float(current["entry_price"]),
+                entry_timestamp_ns=int(current["entry_timestamp_ns"]),
+            )
+        return True
 
     def _record_execution_report(self, report: ExecutionReport) -> None:
         if report.client_order_id:
             ledger_status = "partial_filled" if report.reason == "broker reported partial fill" else report.status
+            current_order = next(
+                (
+                    order
+                    for order in self.ledger.open_orders()
+                    if order["client_order_id"] == report.client_order_id
+                ),
+                None,
+            )
+            payload = dict((current_order or {}).get("payload", {}))
+            recovered_filled_quantity = float(payload.get("recovered_filled_quantity", 0.0))
+            if report.status == "filled":
+                recovered_filled_quantity += float(report.quantity)
+            payload.update(
+                {
+                    "latest_report": asdict(report),
+                    "recovered_filled_quantity": recovered_filled_quantity,
+                }
+            )
             self.ledger.update_order(
                 report.client_order_id,
                 ledger_status,
                 external_order_id=report.external_order_id,
-                payload=asdict(report),
+                payload=payload,
             )
         self.ledger.append_event("order", "execution_report", asdict(report))
         if report.status == "rejected":
@@ -863,13 +1000,22 @@ class ProductionRuntime:
 
     def _persist_positions(self) -> None:
         positions: dict[str, float] = {}
+        details: dict[str, dict[str, Any]] = {}
         for symbol, machine in self.machines.items():
             position = machine.open_positions.get(symbol)
             if position is None:
                 continue
             direction = 1.0 if position.side is TradeAction.BUY else -1.0
             positions[symbol] = direction * float(position.quantity)
+            details[symbol] = {
+                "symbol": position.symbol,
+                "side": position.side.value,
+                "quantity": position.quantity,
+                "entry_price": position.entry_price,
+                "entry_timestamp_ns": position.entry_timestamp_ns,
+            }
         self.ledger.set_state("strategy_positions", positions)
+        self.ledger.set_state("strategy_position_details", details)
 
     def _record_session_close(self, timestamp_ns: int | None = None) -> None:
         observed_at_ns = (
@@ -1103,7 +1249,19 @@ class ProductionRuntime:
 
     @staticmethod
     def _validate_router_capabilities(router: ProductionOrderRouter) -> None:
-        required = ("submit", "poll", "stop", "cancel", "open_order_ids", "health_check", "reconciliation_snapshot")
+        required = (
+            "submit",
+            "poll",
+            "stop",
+            "cancel",
+            "open_order_ids",
+            "health_check",
+            "reconciliation_snapshot",
+            "snapshot_recovery_state",
+            "validate_recovery_state",
+            "restore_recovery_state",
+            "recovery_reconciliations",
+        )
         missing = [name for name in required if not callable(getattr(router, name, None))]
         if missing:
             raise TypeError(f"production router is missing required capabilities: {missing}")

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timezone
 import json
 import pickle
@@ -7,9 +8,18 @@ from types import SimpleNamespace
 
 import pytest
 
+from l1_microstructure.decision import PosteriorEstimate, TradeAction, TradeIntent
 from l1_microstructure.events import QuoteEvent
+from l1_microstructure.execution import ExecutionSimulator
+from l1_microstructure.features import FeatureEngine
 from l1_microstructure.ingest.interfaces import LiveSubscriptionRequest
-from l1_microstructure.live import RouteAcknowledgement, RoutedExecutionService
+from l1_microstructure.live import (
+    BrokerOpenOrderRecovery,
+    BrokerRouterRecoveryState,
+    RouteAcknowledgement,
+    RoutedExecutionService,
+)
+from l1_microstructure.live.recovery import BrokerRecoveryCodec, BrokerRecoveryReconciliation
 from l1_microstructure.monitoring import AlertCategory, AlertSeverity
 from l1_microstructure.artifacts import LocalArtifactStore
 from l1_microstructure.production.config import (
@@ -22,6 +32,9 @@ from l1_microstructure.production.ledger import OperationalLedger
 from l1_microstructure.production.lifecycle import LifecycleState, RuntimeLifecycle
 from l1_microstructure.production.runtime import ProductionRuntime
 from l1_microstructure.retry import RetryPolicy
+from l1_microstructure.regime import MicrostructureRegime
+from l1_microstructure.risk import OpenPosition
+from l1_microstructure.transitions import EdgeKey
 
 
 def _config(tmp_path, **overrides) -> ProductionConfig:
@@ -152,6 +165,19 @@ class _Router:
     def reconciliation_snapshot(self):
         return {**self.health_check(), "positions": self.positions, "open_order_ids": []}
 
+    def snapshot_recovery_state(self):
+        return None
+
+    def validate_recovery_state(self, state, symbols=None):
+        if state is not None:
+            raise TypeError("test router does not support recovery state")
+
+    def restore_recovery_state(self, state):
+        self.validate_recovery_state(state)
+
+    def recovery_reconciliations(self):
+        return []
+
     def open_order_ids(self):
         return []
 
@@ -167,6 +193,80 @@ class _Router:
 
     def stop(self):
         return None
+
+
+def _execution_request():
+    state = FeatureEngine().update(QuoteEvent("AAPL", 1_000_000_000, 100.0, 100.02, 300, 300))
+    assert state is not None
+    intent = TradeIntent(
+        action=TradeAction.BUY,
+        edge=EdgeKey(state.label, state.label, MicrostructureRegime.EXECUTION_FLOW),
+        posterior=PosteriorEstimate(3.0, 1.0, 0.75, 0.25, 1.0, 12),
+        expected_holding_time_ns=1_000_000_000,
+        reason="production recovery test",
+    )
+    return ExecutionSimulator().build_request(intent, state, 1)
+
+
+class _RecoverableRouter(_Router):
+    def __init__(self, broker_orders, broker_positions=None):
+        super().__init__()
+        self.broker_orders = broker_orders
+        self.broker_positions = broker_positions if broker_positions is not None else {}
+        self.tracked = {}
+        self.submission_count = 0
+        self.reconciliations = []
+
+    def submit(self, request):
+        self.submission_count += 1
+        external_order_id = f"paper-{self.submission_count}"
+        self.broker_orders[external_order_id] = request
+        self.tracked[external_order_id] = request
+        return RouteAcknowledgement(external_order_id=external_order_id, status="accepted")
+
+    def reconciliation_snapshot(self):
+        return {
+            **self.health_check(),
+            "positions": dict(self.broker_positions),
+            "open_order_ids": list(self.broker_orders),
+        }
+
+    def open_order_ids(self):
+        return list(self.tracked)
+
+    def snapshot_recovery_state(self):
+        return BrokerRouterRecoveryState(
+            open_orders=[
+                BrokerOpenOrderRecovery(external_order_id=order_id, request=request)
+                for order_id, request in self.tracked.items()
+            ]
+        )
+
+    def validate_recovery_state(self, state, symbols=None):
+        BrokerRecoveryCodec.validate(state, symbols)
+
+    def restore_recovery_state(self, state):
+        self.validate_recovery_state(state)
+        self.tracked = {}
+        self.reconciliations = []
+        for recovered in state.open_orders:
+            if recovered.external_order_id not in self.broker_orders:
+                continue
+            self.tracked[recovered.external_order_id] = recovered.request
+            self.reconciliations.append(
+                BrokerRecoveryReconciliation(
+                    recovered.external_order_id,
+                    recovered.request.symbol,
+                    "open",
+                    "broker order rehydrated",
+                )
+            )
+
+    def recovery_reconciliations(self):
+        return list(self.reconciliations)
+
+    def stop(self):
+        self.tracked = {}
 
 
 class _Machine:
@@ -532,13 +632,7 @@ def test_production_runtime_emits_typed_order_rejection_alert(tmp_path) -> None:
 
     runtime = _Runtime(_config(tmp_path), source=_Source(), router=RejectingRouter())
     runtime.start()
-    request = SimpleNamespace(
-        symbol="AAPL",
-        action=SimpleNamespace(value="buy"),
-        quantity=1,
-        decision_timestamp_ns=1,
-        client_order_id="client-1",
-    )
+    request = replace(_execution_request(), client_order_id="client-1")
 
     runtime._route(request)
 
@@ -575,6 +669,95 @@ def test_production_runtime_records_authoritative_paper_session_close(tmp_path) 
     assert close_event["payload"]["mode"] == "paper"
     assert close_event["payload"]["positions"] == {}
     assert close_event["payload"]["open_orders"] == []
+    runtime.stop()
+
+
+def test_production_runtime_durably_restores_open_order_without_resubmission(tmp_path) -> None:
+    config = _config(
+        tmp_path,
+        symbols=("AAPL",),
+        promoted_run_ids={"AAPL": "aapl-v1"},
+    )
+    broker_orders = {}
+    first_router = _RecoverableRouter(broker_orders)
+    first = _Runtime(config, source=_Source(), router=first_router)
+    first.start()
+    first._route(_execution_request())
+
+    assert first_router.submission_count == 1
+    assert len(first.ledger.open_orders()) == 1
+    assert "recovery_request" in first.ledger.open_orders()[0]["payload"]
+    first.ledger.set_state(first.BROKER_RECOVERY_STATE_KEY, None)
+    first.stop()
+    first.ledger.close()
+
+    recovered_router = _RecoverableRouter(broker_orders)
+    recovered = _Runtime(config, source=_Source(), router=recovered_router)
+    recovered.start()
+
+    assert recovered.lifecycle.state is LifecycleState.RUNNING
+    assert recovered_router.submission_count == 0
+    assert recovered_router.open_order_ids() == ["paper-1"]
+    assert recovered.ledger.open_orders()[0]["external_order_id"] == "paper-1"
+    event = recovered.ledger.recent_events(1, category="reconciliation", event_type="broker_recovery_restored")[0]
+    assert event["payload"]["open_order_count"] == 1
+    assert event["payload"]["orders"][0]["status"] == "open"
+    recovered.stop()
+
+
+def test_production_runtime_preserves_position_before_open_exit_order_reconciliation(tmp_path) -> None:
+    config = _config(
+        tmp_path,
+        symbols=("AAPL",),
+        promoted_run_ids={"AAPL": "aapl-v1"},
+    )
+    broker_orders = {}
+    broker_positions = {}
+    first_router = _RecoverableRouter(broker_orders, broker_positions)
+    first = _Runtime(config, source=_Source(), router=first_router)
+    first.start()
+    position = OpenPosition("AAPL", TradeAction.BUY, 1, 100.0, 1_000_000_000)
+    first.machines["AAPL"].open_positions["AAPL"] = position
+    first._persist_positions()
+    broker_positions["AAPL"] = {"quantity": 1.0, "average_cost": 100.0}
+    buy_request = _execution_request()
+    sell_request = replace(
+        buy_request,
+        action=TradeAction.SELL,
+        intent=replace(buy_request.intent, action=TradeAction.SELL),
+    )
+    first._route(sell_request)
+    first.stop()
+    first.ledger.close()
+
+    recovered_router = _RecoverableRouter(broker_orders, broker_positions)
+    recovered = _Runtime(config, source=_Source(), router=recovered_router)
+    recovered.start()
+
+    assert recovered.lifecycle.state is LifecycleState.RUNNING
+    assert recovered.ledger.get_state("strategy_positions") == {"AAPL": 1.0}
+    assert recovered.machines["AAPL"].open_positions["AAPL"].quantity == 1
+    assert recovered_router.submission_count == 0
+    recovered.stop()
+
+
+def test_production_runtime_halts_on_unacknowledged_durable_intent(tmp_path) -> None:
+    config = _config(
+        tmp_path,
+        symbols=("AAPL",),
+        promoted_run_ids={"AAPL": "aapl-v1"},
+    )
+    ledger = OperationalLedger(config.database_path)
+    ledger.record_order_intent({"symbol": "AAPL"}, "ambiguous-intent")
+    ledger.close()
+    router = _RecoverableRouter({})
+    runtime = _Runtime(config, source=_Source(), router=router)
+
+    runtime.start()
+
+    assert runtime.lifecycle.state is LifecycleState.HALTED
+    assert runtime.recent_alerts()[0]["code"] == "reconciliation_failed"
+    assert router.submission_count == 0
     runtime.stop()
 
 

@@ -41,6 +41,19 @@ class _Router:
     def reconciliation_snapshot(self):
         return {**self.health_check(), "positions": {}, "open_order_ids": []}
 
+    def snapshot_recovery_state(self):
+        return None
+
+    def validate_recovery_state(self, state, _symbols=None):
+        if state is not None:
+            raise TypeError("shadow test router does not support recovery state")
+
+    def restore_recovery_state(self, state):
+        self.validate_recovery_state(state)
+
+    def recovery_reconciliations(self):
+        return []
+
 
 class _Candidate:
     def __init__(self, *, fails: bool = False) -> None:

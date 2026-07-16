@@ -12,11 +12,15 @@ from time import time_ns
 from types import SimpleNamespace
 from typing import Any
 
-from l1_microstructure.decision import TradeAction
+from l1_microstructure.decision import PosteriorEstimate, TradeAction, TradeIntent
 from l1_microstructure.events import QuoteEvent
+from l1_microstructure.execution import ExecutionSimulator
+from l1_microstructure.features import FeatureEngine
 from l1_microstructure.live import RouteAcknowledgement
 from l1_microstructure.monitoring import OperationalAlert
+from l1_microstructure.regime import MicrostructureRegime
 from l1_microstructure.risk import OpenPosition
+from l1_microstructure.transitions import EdgeKey
 
 from .config import ProductionConfig
 from .lifecycle import LifecycleState
@@ -113,6 +117,19 @@ class _QualificationRouter:
             "open_order_ids": list(self.open_orders),
         }
 
+    def snapshot_recovery_state(self):
+        return None
+
+    def validate_recovery_state(self, state, _symbols=None) -> None:
+        if state is not None:
+            raise TypeError("qualification router does not support recovery state")
+
+    def restore_recovery_state(self, state) -> None:
+        self.validate_recovery_state(state)
+
+    def recovery_reconciliations(self) -> list[Any]:
+        return []
+
     def open_order_ids(self) -> list[str]:
         return list(self.open_orders)
 
@@ -155,6 +172,20 @@ class _QualificationMachine:
 class _QualificationRuntime(ProductionRuntime):
     def _load_machines(self) -> None:
         self.machines = {symbol: _QualificationMachine() for symbol in self.config.symbols}
+
+
+def _qualification_request():
+    state = FeatureEngine().update(QuoteEvent("AAPL", time_ns(), 100.0, 100.01, 100, 100))
+    if state is None:
+        raise RuntimeError("qualification quote did not produce state")
+    intent = TradeIntent(
+        action=TradeAction.BUY,
+        edge=EdgeKey(state.label, state.label, MicrostructureRegime.EXECUTION_FLOW),
+        posterior=PosteriorEstimate(1.0, 1.0, 0.75, 0.25, 0.0, 1),
+        expected_holding_time_ns=1_000_000_000,
+        reason="qualification rejection",
+    )
+    return ExecutionSimulator().build_request(intent, state, 1)
 
 
 Scenario = Callable[[Path], QualificationScenarioResult]
@@ -276,15 +307,7 @@ class ProductionQualification:
         runtime = self._runtime(root / "runtime.sqlite3", router)
         try:
             runtime.start()
-            runtime._route(
-                SimpleNamespace(
-                    symbol="AAPL",
-                    action=TradeAction.BUY,
-                    quantity=1,
-                    decision_timestamp_ns=time_ns(),
-                    client_order_id="qualification-rejection",
-                )
-            )
+            runtime._route(_qualification_request())
             checks = (
                 *self._halt_checks(runtime, "order_rejected"),
                 QualificationCheck(
