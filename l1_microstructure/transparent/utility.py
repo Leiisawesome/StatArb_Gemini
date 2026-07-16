@@ -287,20 +287,39 @@ class ExpectedUtilityDecisionEngine:
         current_risk_fraction: float,
         regime: str | None = None,
     ) -> UtilityDecision:
+        spread_bps = state.book.spread / max(state.book.midpoint, 1e-9) * 10_000.0
+        return self.decide_for_spread(
+            posteriors,
+            spread_bps=spread_bps,
+            alignment_probability=alignment_probability,
+            transition_probability=transition_probability,
+            current_risk_fraction=current_risk_fraction,
+            regime=regime,
+        )
+
+    def decide_for_spread(
+        self,
+        posteriors: Iterable[HierarchicalDriftPosterior],
+        *,
+        spread_bps: float,
+        alignment_probability: float,
+        transition_probability: float,
+        current_risk_fraction: float,
+        regime: str | None = None,
+    ) -> UtilityDecision:
+        """Choose an action from sufficient, serializable execution inputs."""
         if not 0.0 <= alignment_probability <= 1.0 or not 0.0 <= transition_probability <= 1.0:
             raise ValueError("utility decision probabilities must be in [0, 1]")
-        if current_risk_fraction < 0.0:
-            raise ValueError("utility decision risk fraction cannot be negative")
+        if spread_bps < 0.0 or current_risk_fraction < 0.0:
+            raise ValueError("utility decision spread and risk fraction cannot be negative")
         estimates = tuple(posteriors)
         if not estimates:
             raise ValueError("utility decision requires at least one horizon posterior")
-        spread_bps = state.book.spread / max(state.book.midpoint, 1e-9) * 10_000.0
         regime_fill_multiplier = self.model.fill_multiplier_by_regime.get(regime or "", 1.0)
         regime_slippage_multiplier = self.model.slippage_multiplier_by_regime.get(regime or "", 1.0)
         fill_probability = min(
             self._fill_probability(alignment_probability, spread_bps)
-            * regime_fill_multiplier
-            * transition_probability,
+            * regime_fill_multiplier,
             1.0,
         )
         alternatives: list[UtilityAlternative] = []

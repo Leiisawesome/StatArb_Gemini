@@ -163,6 +163,8 @@ def test_comparative_shadow_runner_uses_isolated_engines_and_deterministic_clock
     assert report.baseline_update_count == len(events)
     assert report.candidate_update_count == len(events)
     assert report.candidate_error_count == 0
+    assert report.comparison_count == len(events)
+    assert report.comparison_sampling_stride == 1
     assert report.baseline_p95_latency_ns == 100
     assert report.candidate_p95_latency_ns == 100
     assert runner.baseline.feature_engine is not runner.candidate.feature_engine
@@ -176,3 +178,32 @@ def test_comparative_shadow_runner_uses_isolated_engines_and_deterministic_clock
     failed = failing_runner.run(events[:2])
     assert failed.baseline_update_count == 2
     assert failed.candidate_error_count == 2
+
+
+def test_comparative_shadow_runner_bounds_serialized_comparisons() -> None:
+    artifacts, _ = _artifacts()
+    ticks = count(start=0, step=100)
+    runner = ComparativeShadowRunner(
+        baseline_artifacts=RuntimeArtifactBundle(),
+        candidate_artifacts=artifacts,
+        clock=lambda: next(ticks),
+        max_comparisons=4,
+    )
+    events = [
+        QuoteEvent(
+            "AAPL",
+            1_000 + index * 100,
+            100.0 + index * 0.01,
+            100.01 + index * 0.01,
+            100,
+            100,
+        )
+        for index in range(20)
+    ]
+
+    report = runner.run(events)
+
+    assert report.comparison_count == len(events)
+    assert len(report.comparisons) <= 4
+    assert report.comparison_sampling_stride > 1
+    assert len(report.to_dict()["comparisons"]) <= 4

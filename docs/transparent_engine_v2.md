@@ -24,6 +24,15 @@ Every rolling split rebuilds the feature engine, vector runtime, regime runtime,
 
 V2 state quantization uses one fitted global surface. It does not feed an inferred regime back into feature scaling, avoiding a cyclic train/runtime dependency. OOS comparison uses the union of v1- and v2-detected transitions on the same held-out state stream. A non-triggering engine records HOLD on the shared opportunity; v1 is never evaluated only on transitions selected by v2. Directional scoring is three-way—up, down, or neutral—so low probability of an upward move is not incorrectly treated as a sell forecast.
 
+Calibration and directional hit rate score the probabilistic forecast, while
+net-drift economics score the executable action. These are deliberately
+separate: a conservative utility HOLD must not make a weak forecast look
+well-calibrated. For a detected transition, validation passes all configured
+horizon posteriors to the utility layer once and scores only its selected
+horizon, matching runtime behavior. Shadow disagreement counts are exact;
+serialized comparison examples and latency samples are deterministically
+bounded so a full-day report remains operationally reviewable.
+
 A v2 run contains state and execution calibration, state-vector, semi-Markov regime, hierarchical transition, and utility artifacts. The validation report binds the SHA-256 payload hash of every model artifact. Published run IDs are immutable, and selection fails closed if an artifact, report, version, symbol, or run association changes.
 
 ## Research workflow

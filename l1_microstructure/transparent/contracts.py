@@ -75,6 +75,7 @@ class EnginePredictionRecord:
     latency_ns: int
     resident_bytes: int = 0
     probability_down: float | None = None
+    selected_direction: int | None = None
 
     def __post_init__(self) -> None:
         if not 0.0 <= self.probability_up <= 1.0:
@@ -90,6 +91,8 @@ class EnginePredictionRecord:
             raise ValueError("prediction drift and threshold must be finite")
         if self.latency_ns < 0 or self.resident_bytes < 0:
             raise ValueError("operational measurements cannot be negative")
+        if self.selected_direction not in {None, -1, 0, 1}:
+            raise ValueError("selected prediction direction must be -1, 0, 1, or omitted")
 
     @property
     def target_up(self) -> float:
@@ -112,7 +115,8 @@ class EnginePredictionRecord:
         return max(1.0 - self.probability_up - self.resolved_probability_down, 0.0)
 
     @property
-    def direction(self) -> int:
+    def forecast_direction(self) -> int:
+        """Return the unique most-probable forecast class as a signed direction."""
         probabilities = (
             self.probability_up,
             self.resolved_probability_down,
@@ -123,6 +127,11 @@ class EnginePredictionRecord:
             return 0
         selected = probabilities.index(maximum)
         return 1 if selected == 0 else -1 if selected == 1 else 0
+
+    @property
+    def direction(self) -> int:
+        """Return the executable action when supplied, else the forecast direction."""
+        return self.forecast_direction if self.selected_direction is None else self.selected_direction
 
     @property
     def signed_net_drift_bps(self) -> float:
@@ -144,6 +153,8 @@ class EngineEvaluation:
     mean_signed_net_drift_bps: float
     p95_latency_ns: float
     peak_resident_bytes: int
+    decisive_count: int = 0
+    decision_rate: float = 0.0
 
     def __post_init__(self) -> None:
         if self.sample_count <= 0:
@@ -163,6 +174,9 @@ class EngineEvaluation:
             or not np.isfinite(self.p95_latency_ns)
             or self.p95_latency_ns < 0.0
             or self.peak_resident_bytes < 0
+            or self.decisive_count < 0
+            or self.decisive_count > self.sample_count
+            or not 0.0 <= self.decision_rate <= 1.0
         ):
             raise ValueError("engine evaluation operational metrics are invalid")
 
@@ -195,20 +209,26 @@ def evaluate_prediction_records(
     clipped = np.clip(probabilities, 1e-12, 1.0)
     brier = float(np.mean(np.sum((probabilities - targets) ** 2, axis=1) / 2.0))
     log_loss = float(-np.mean(np.sum(targets * np.log(clipped), axis=1)))
-    directions = np.asarray([record.direction for record in values], dtype=int)
+    forecast_directions = np.asarray([record.forecast_direction for record in values], dtype=int)
     selected = np.asarray(
-        [0 if direction > 0 else 1 if direction < 0 else 2 for direction in directions],
+        [0 if direction > 0 else 1 if direction < 0 else 2 for direction in forecast_directions],
         dtype=int,
     )
     actual = np.argmax(targets, axis=1)
     confidence = probabilities[np.arange(len(values)), selected]
     correct = selected == actual
     calibration_error = _expected_calibration_error(confidence, correct.astype(float), calibration_bins)
-    decisive = directions != 0
-    directional_correct = ((directions > 0) & (targets[:, 0] == 1.0)) | (
-        (directions < 0) & (targets[:, 1] == 1.0)
+    forecast_decisive = forecast_directions != 0
+    directional_correct = ((forecast_directions > 0) & (targets[:, 0] == 1.0)) | (
+        (forecast_directions < 0) & (targets[:, 1] == 1.0)
     )
-    hit_rate = float(np.mean(directional_correct[decisive])) if np.any(decisive) else 0.0
+    hit_rate = (
+        float(np.mean(directional_correct[forecast_decisive]))
+        if np.any(forecast_decisive)
+        else 0.0
+    )
+    action_directions = np.asarray([record.direction for record in values], dtype=int)
+    decisive_count = int(np.count_nonzero(action_directions))
     return EngineEvaluation(
         sample_count=len(values),
         brier_score=brier,
@@ -219,6 +239,8 @@ def evaluate_prediction_records(
         mean_signed_net_drift_bps=float(np.mean([record.signed_net_drift_bps for record in values])),
         p95_latency_ns=float(np.quantile([record.latency_ns for record in values], 0.95)),
         peak_resident_bytes=max(record.resident_bytes for record in values),
+        decisive_count=decisive_count,
+        decision_rate=float(decisive_count / len(values)),
     )
 
 

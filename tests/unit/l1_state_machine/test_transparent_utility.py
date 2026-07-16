@@ -157,3 +157,53 @@ def test_expected_utility_applies_regime_fill_and_slippage_calibration() -> None
     assert shock.alternatives[0].fill_probability < calm.alternatives[0].fill_probability
     assert shock.alternatives[0].expected_cost_bps > calm.alternatives[0].expected_cost_bps
     assert shock.expected_utility_bps <= calm.expected_utility_bps
+
+
+def test_transition_confidence_does_not_distort_execution_fill_probability() -> None:
+    engine = ExpectedUtilityDecisionEngine(_model())
+    low_confidence = engine.decide(
+        (_posterior(3_000, 3.0),),
+        _state(),
+        alignment_probability=0.95,
+        transition_probability=0.05,
+        current_risk_fraction=0.0,
+    )
+    high_confidence = engine.decide(
+        (_posterior(3_000, 3.0),),
+        _state(),
+        alignment_probability=0.95,
+        transition_probability=0.95,
+        current_risk_fraction=0.0,
+    )
+
+    assert low_confidence.alternatives[0].fill_probability == pytest.approx(
+        high_confidence.alternatives[0].fill_probability
+    )
+    assert low_confidence.alternatives[0].transition_probability == 0.05
+    assert high_confidence.alternatives[0].transition_probability == 0.95
+
+
+def test_spread_only_utility_entrypoint_matches_state_entrypoint() -> None:
+    engine = ExpectedUtilityDecisionEngine(_model())
+    state = _state()
+    posteriors = (_posterior(3_000, 3.0), _posterior(15_000, 4.0))
+    spread_bps = state.book.spread / state.book.midpoint * 10_000.0
+
+    from_state = engine.decide(
+        posteriors,
+        state,
+        alignment_probability=0.8,
+        transition_probability=0.7,
+        current_risk_fraction=0.01,
+        regime="calm_liquidity",
+    )
+    from_spread = engine.decide_for_spread(
+        posteriors,
+        spread_bps=spread_bps,
+        alignment_probability=0.8,
+        transition_probability=0.7,
+        current_risk_fraction=0.01,
+        regime="calm_liquidity",
+    )
+
+    assert from_spread == from_state

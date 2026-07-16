@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 import json
 from datetime import datetime
+from types import SimpleNamespace
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
@@ -95,6 +96,72 @@ def test_cli_workflow_command_runs_end_to_end(tmp_path, capsys) -> None:
     assert payload["state_panel_rows"] > 0
     assert payload["artifact_ids"]["transition_model_id"]
     assert "validation_failures" in payload
+
+
+def test_cli_transparent_workflow_reports_validation_and_artifacts(tmp_path, capsys) -> None:
+    report = SimpleNamespace(to_dict=lambda: {"passed": True})
+    manifest = SimpleNamespace(artifact_ids={"state_vector_model": "vector-id"})
+    result = SimpleNamespace(
+        symbol="AAPL",
+        run_id="aapl-v2-approved",
+        split_count=3,
+        manifest=manifest,
+        validation_report=report,
+    )
+    with (
+        _patched_cli_sources(),
+        patch("l1_microstructure.cli.TransparentArtifactDrivenWorkflow") as workflow_type,
+    ):
+        workflow_type.return_value.run.return_value = result
+        exit_code = main(
+            [
+                "transparent-workflow",
+                "--artifact-root",
+                str(tmp_path / "artifacts"),
+                "--symbol",
+                "AAPL",
+                "--trade-date",
+                "2024-03-11",
+                "--run-id",
+                "aapl-v2-approved",
+            ]
+        )
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["run_id"] == "aapl-v2-approved"
+    assert payload["validation"] == {"passed": True}
+    assert payload["artifact_ids"]["state_vector_model"] == "vector-id"
+
+
+def test_cli_lists_only_validation_approved_transparent_runs(tmp_path, capsys) -> None:
+    manifest = SimpleNamespace(
+        run_id="aapl-v2-approved",
+        trade_date="2024-03-11",
+        created_at="2024-03-12T00:00:00+00:00",
+        engine_version="v2",
+        artifact_ids={"state_vector_model": "vector-id"},
+        metadata={"validation_passed": True},
+    )
+    with patch("l1_microstructure.cli.TransparentArtifactSelector") as selector_type:
+        selector_type.return_value.list_manifests.return_value = [manifest]
+        exit_code = main(
+            [
+                "list-transparent-runs",
+                "--artifact-root",
+                str(tmp_path / "artifacts"),
+                "--symbol",
+                "AAPL",
+                "--passing-only",
+            ]
+        )
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["passing_only"] is True
+    assert payload["run_count"] == 1
+    assert payload["runs"][0]["run_id"] == "aapl-v2-approved"
+    selector_type.return_value.list_manifests.assert_called_once_with("AAPL", passing_only=True)
 
 
 def test_cli_paper_historical_uses_latest_artifacts(tmp_path, capsys) -> None:

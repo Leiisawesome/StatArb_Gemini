@@ -164,7 +164,10 @@ class ArtifactDrivenResearchWorkflow:
             execution_calibration_id=execution_calibration_id,
             transition_model_id=transition_model_id,
         )
-        monitoring_sink = InMemoryMonitoringSink()
+        # A full liquid-symbol replay can produce millions of updates. Retain
+        # deterministic, evenly spaced evidence while preserving the exact
+        # publication count and aggregate execution summary.
+        monitoring_sink = InMemoryMonitoringSink(max_snapshots=10_000)
         runner = SimulatorPaperTradingRunner(
             events=normalized_events,
             framework_config=self.framework_config,
@@ -189,7 +192,9 @@ class ArtifactDrivenResearchWorkflow:
             artifact_type="monitored_replay",
             payload={
                 "summary": replay_summary,
-                "snapshot_count": len(monitoring_sink.snapshots),
+                "snapshot_count": monitoring_sink.published_snapshot_count,
+                "sampled_snapshot_count": len(monitoring_sink.snapshots),
+                "sampling_stride": monitoring_sink.sampling_stride,
                 "snapshots": [asdict(snapshot) for snapshot in monitoring_sink.snapshots],
             },
             metadata={"symbol": symbol, "run_id": run_id},

@@ -41,6 +41,8 @@ class ShadowComparison:
 @dataclass(frozen=True, slots=True)
 class ShadowReport:
     comparisons: tuple[ShadowComparison, ...]
+    comparison_count: int
+    comparison_sampling_stride: int
     baseline_update_count: int
     candidate_update_count: int
     candidate_error_count: int
@@ -65,17 +67,26 @@ class ComparativeShadowRunner:
         candidate_artifacts: TransparentEngineArtifacts,
         config: FrameworkConfig | None = None,
         clock: Callable[[], int] = perf_counter_ns,
+        max_comparisons: int = 10_000,
     ) -> None:
+        if max_comparisons <= 0:
+            raise ValueError("shadow comparison bound must be positive")
         self.config = config or FrameworkConfig()
         self.baseline = L1MicrostructureStateMachine(self.config, baseline_artifacts)
         self.candidate = TransparentStatisticalEngine(candidate_artifacts, self.config)
         self.clock = clock
+        self.max_comparisons = max_comparisons
 
     def run(self, events: Iterable[MarketEvent]) -> ShadowReport:
         comparisons: list[ShadowComparison] = []
         baseline_count = 0
         candidate_count = 0
         candidate_errors = 0
+        comparison_count = 0
+        comparison_stride = 1
+        state_disagreements = 0
+        regime_disagreements = 0
+        action_disagreements = 0
         for event in sorted(events, key=lambda item: (item.timestamp_ns, item.symbol)):
             baseline_started = self.clock()
             baseline_update = self.baseline.on_event(event)
@@ -107,25 +118,42 @@ class ComparativeShadowRunner:
                 else baseline_update.intent.action.value
             )
             candidate_action = TradeAction.HOLD.value if candidate_update is None else candidate_update.action.value
-            comparisons.append(
-                ShadowComparison(
-                    timestamp_ns=event.timestamp_ns,
-                    symbol=event.symbol,
-                    baseline_state=baseline_state,
-                    candidate_state=candidate_state,
-                    baseline_regime=baseline_regime,
-                    candidate_regime=candidate_regime,
-                    baseline_action=baseline_action,
-                    candidate_action=candidate_action,
-                    state_disagreement=baseline_state != candidate_state,
-                    regime_disagreement=baseline_regime != candidate_regime,
-                    action_disagreement=baseline_action != candidate_action,
-                    baseline_latency_ns=baseline_latency,
-                    candidate_latency_ns=candidate_latency,
-                    candidate_error_type=candidate_error_type,
-                )
+            comparison = ShadowComparison(
+                timestamp_ns=event.timestamp_ns,
+                symbol=event.symbol,
+                baseline_state=baseline_state,
+                candidate_state=candidate_state,
+                baseline_regime=baseline_regime,
+                candidate_regime=candidate_regime,
+                baseline_action=baseline_action,
+                candidate_action=candidate_action,
+                state_disagreement=baseline_state != candidate_state,
+                regime_disagreement=baseline_regime != candidate_regime,
+                action_disagreement=baseline_action != candidate_action,
+                baseline_latency_ns=baseline_latency,
+                candidate_latency_ns=candidate_latency,
+                candidate_error_type=candidate_error_type,
             )
-        return _shadow_report(comparisons, baseline_count, candidate_count, candidate_errors)
+            state_disagreements += int(comparison.state_disagreement)
+            regime_disagreements += int(comparison.regime_disagreement)
+            action_disagreements += int(comparison.action_disagreement)
+            if comparison_count % comparison_stride == 0:
+                comparisons.append(comparison)
+                if len(comparisons) > self.max_comparisons:
+                    comparisons = comparisons[::2]
+                    comparison_stride *= 2
+            comparison_count += 1
+        return _shadow_report(
+            comparisons,
+            baseline_count,
+            candidate_count,
+            candidate_errors,
+            comparison_count=comparison_count,
+            comparison_stride=comparison_stride,
+            state_disagreements=state_disagreements,
+            regime_disagreements=regime_disagreements,
+            action_disagreements=action_disagreements,
+        )
 
 
 def _shadow_report(
@@ -133,18 +161,26 @@ def _shadow_report(
     baseline_count: int,
     candidate_count: int,
     candidate_errors: int,
+    *,
+    comparison_count: int,
+    comparison_stride: int,
+    state_disagreements: int,
+    regime_disagreements: int,
+    action_disagreements: int,
 ) -> ShadowReport:
-    count = max(len(comparisons), 1)
+    count = max(comparison_count, 1)
     baseline_latencies = [comparison.baseline_latency_ns for comparison in comparisons]
     candidate_latencies = [comparison.candidate_latency_ns for comparison in comparisons]
     return ShadowReport(
         comparisons=tuple(comparisons),
+        comparison_count=comparison_count,
+        comparison_sampling_stride=comparison_stride,
         baseline_update_count=baseline_count,
         candidate_update_count=candidate_count,
         candidate_error_count=candidate_errors,
-        state_disagreement_rate=sum(comparison.state_disagreement for comparison in comparisons) / count,
-        regime_disagreement_rate=sum(comparison.regime_disagreement for comparison in comparisons) / count,
-        action_disagreement_rate=sum(comparison.action_disagreement for comparison in comparisons) / count,
+        state_disagreement_rate=state_disagreements / count,
+        regime_disagreement_rate=regime_disagreements / count,
+        action_disagreement_rate=action_disagreements / count,
         baseline_p95_latency_ns=float(np.quantile(baseline_latencies, 0.95)) if baseline_latencies else 0.0,
         candidate_p95_latency_ns=float(np.quantile(candidate_latencies, 0.95)) if candidate_latencies else 0.0,
     )

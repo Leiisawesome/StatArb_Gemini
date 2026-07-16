@@ -39,7 +39,7 @@ Store secrets interactively in macOS Keychain:
 
 ```bash
 .venv/bin/trading-secret MASSIVE_API_KEY
-.venv/bin/trading-secret TRADING_CONSOLE_TOKEN
+.venv/bin/trading-secret TRADING_CONSOLE_TOKEN --generate
 ```
 
 Copy `config/production.example.json` to the ignored

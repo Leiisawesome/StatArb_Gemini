@@ -108,3 +108,42 @@ def test_vector_calibration_excludes_unresolved_targets_instead_of_marking_them_
 
     assert model.metadata["resolved_target_count"] == 4
     assert model.metadata["censored_target_count"] == 3
+
+
+def test_vector_trainer_learns_selective_threshold_for_rare_targets() -> None:
+    states = [_state(index, shock=index >= 18) for index in range(24)]
+    targets = [False] * 17 + [True] * 6
+
+    model = RobustStateVectorTrainer(calibration_bins=6).fit(
+        states,
+        targets,
+        train_start_ns=states[0].timestamp_ns,
+        train_end_ns=states[-1].timestamp_ns,
+    )
+    runtime = RobustStateVectorRuntime(model)
+    detections = [runtime.update(state).is_transition for state in states]
+
+    assert model.metadata["transition_threshold_strategy"] == "training_f1"
+    assert model.metadata["positive_target_count"] == 6
+    assert model.transition_score_threshold > 0.0
+    assert any(detections)
+    assert not all(detections)
+
+
+def test_vector_trainer_uses_score_gate_without_positive_target() -> None:
+    states = [_state(index) for index in range(8)]
+
+    model = RobustStateVectorTrainer().fit(
+        states,
+        [False] * 7,
+        train_start_ns=states[0].timestamp_ns,
+        train_end_ns=states[-1].timestamp_ns,
+    )
+    runtime = RobustStateVectorRuntime(model)
+    detections = [runtime.update(state).is_transition for state in states]
+
+    assert model.metadata["transition_threshold_strategy"] == "score_quantile_fallback"
+    assert model.metadata["positive_target_count"] == 0
+    assert model.transition_score_threshold > 0.0
+    assert any(detections)
+    assert not all(detections)

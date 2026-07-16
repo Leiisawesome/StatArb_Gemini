@@ -189,56 +189,51 @@ class HierarchicalTransitionTrainer:
         train_start_ns: int,
         train_end_ns: int,
     ) -> HierarchicalTransitionModel:
-        values = tuple(samples)
-        if not values:
-            raise ValueError("hierarchical transition training requires samples")
-        symbols = {sample.symbol for sample in values}
-        if len(symbols) != 1:
-            raise ValueError("hierarchical transition training requires exactly one symbol")
-        for sample in values:
+        symbols: set[str] = set()
+        sample_count = 0
+        statistics: dict[str, dict[str, dict[str, SufficientStatistics]]] = {}
+        for sample in samples:
+            sample_count += 1
+            symbols.add(sample.symbol)
             timestamp_ns = sample.metadata.get("timestamp_ns")
             end_timestamp_ns = sample.metadata.get("end_timestamp_ns", timestamp_ns)
             if timestamp_ns is not None and not train_start_ns <= int(timestamp_ns) <= train_end_ns:
                 raise ValueError("hierarchical transition sample crosses the training boundary")
             if end_timestamp_ns is not None and int(end_timestamp_ns) > train_end_ns:
                 raise ValueError("hierarchical transition outcome resolves after the training boundary")
-
-        horizons = tuple(sorted({int(sample.horizon_ns) for sample in values if int(sample.horizon_ns) > 0}))
+            horizon_ns = int(sample.horizon_ns)
+            if horizon_ns <= 0:
+                continue
+            levels = statistics.setdefault(
+                str(horizon_ns),
+                {level: {} for level in ("global", "regime", "from_state", "edge")},
+            )
+            keys = (
+                ("global", "*"),
+                ("regime", sample.regime),
+                ("from_state", _from_state_key(sample.regime, sample.from_state)),
+                ("edge", _edge_key(sample.regime, sample.from_state, sample.to_state)),
+            )
+            for level, key in keys:
+                levels[level].setdefault(key, SufficientStatistics()).update(
+                    sample.realized_drift_bps,
+                    sample.holding_time_ns,
+                )
+        if sample_count == 0:
+            raise ValueError("hierarchical transition training requires samples")
+        if len(symbols) != 1:
+            raise ValueError("hierarchical transition training requires exactly one symbol")
+        horizons = tuple(sorted(int(value) for value in statistics))
         if not horizons:
             raise ValueError("hierarchical transition samples require positive horizons")
-        statistics: dict[str, dict[str, dict[str, SufficientStatistics]]] = {}
         exact_keys: dict[str, tuple[str, ...]] = {}
         for horizon_ns in horizons:
-            horizon_samples = [sample for sample in values if int(sample.horizon_ns) == horizon_ns]
-            exact_counts: dict[str, int] = {}
-            for sample in horizon_samples:
-                key = _edge_key(sample.regime, sample.from_state, sample.to_state)
-                exact_counts[key] = exact_counts.get(key, 0) + 1
-            retained = {
-                key
-                for key, _ in sorted(exact_counts.items(), key=lambda item: (-item[1], item[0]))[
-                    : self.max_exact_edges_per_horizon
-                ]
-            }
-            levels = {level: {} for level in ("global", "regime", "from_state", "edge")}
-            for sample in horizon_samples:
-                keys = (
-                    ("global", "*"),
-                    ("regime", sample.regime),
-                    ("from_state", _from_state_key(sample.regime, sample.from_state)),
-                )
-                exact = _edge_key(sample.regime, sample.from_state, sample.to_state)
-                for level, key in keys:
-                    levels[level].setdefault(key, SufficientStatistics()).update(
-                        sample.realized_drift_bps,
-                        sample.holding_time_ns,
-                    )
-                if exact in retained:
-                    levels["edge"].setdefault(exact, SufficientStatistics()).update(
-                        sample.realized_drift_bps,
-                        sample.holding_time_ns,
-                    )
-            statistics[str(horizon_ns)] = levels
+            levels = statistics[str(horizon_ns)]
+            retained = sorted(
+                levels["edge"],
+                key=lambda key: (-levels["edge"][key].effective_count, key),
+            )[: self.max_exact_edges_per_horizon]
+            levels["edge"] = {key: levels["edge"][key] for key in retained}
             exact_keys[str(horizon_ns)] = tuple(sorted(retained))
         return HierarchicalTransitionModel(
             symbol=next(iter(symbols)),
@@ -251,7 +246,7 @@ class HierarchicalTransitionTrainer:
             max_exact_edges_per_horizon=self.max_exact_edges_per_horizon,
             train_start_ns=int(train_start_ns),
             train_end_ns=int(train_end_ns),
-            sample_count=len(values),
+            sample_count=sample_count,
             metadata={
                 "trainer": "hierarchical_transition_trainer",
                 "bounded_sufficient_statistics": True,

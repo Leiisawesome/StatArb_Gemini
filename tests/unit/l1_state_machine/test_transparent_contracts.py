@@ -108,3 +108,24 @@ def test_directional_evaluation_scores_neutral_outcomes_as_hold_not_sell() -> No
 
     with pytest.raises(ValueError, match="sum above"):
         replace(neutral, probability_up=0.8, probability_down=0.8)
+
+
+def test_forecast_quality_is_independent_of_executable_hold_action() -> None:
+    record = EnginePredictionRecord(
+        probability_up=0.9,
+        probability_down=0.05,
+        realized_drift_bps=3.0,
+        threshold_bps=1.0,
+        edge_seen=True,
+        latency_ns=10,
+        selected_direction=0,
+    )
+
+    evaluation = evaluate_prediction_records((record,))
+
+    assert record.forecast_direction == 1
+    assert record.direction == 0
+    assert evaluation.directional_hit_rate == 1.0
+    assert evaluation.mean_signed_net_drift_bps == 0.0
+    assert evaluation.decisive_count == 0
+    assert evaluation.decision_rate == 0.0

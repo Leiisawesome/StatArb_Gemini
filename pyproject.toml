@@ -42,6 +42,7 @@ trading-secret = "l1_microstructure.production.secret_cli:main"
 trading-qualify = "l1_microstructure.production.qualification:main"
 trading-paper-qualify = "l1_microstructure.production.paper_qualification:main"
 trading-transparent-qualify = "l1_microstructure.production.transparent_qualification:main"
+trading-paper-ready = "l1_microstructure.production.campaign_readiness:main"
 artifact-migrate = "l1_microstructure.production.migrate:main"
 
 [tool.hatch.build.targets.wheel]

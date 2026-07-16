@@ -4,9 +4,12 @@
   "promoted_run_ids": {
     "AAPL": "replace-with-promoted-run-id"
   },
+  "transparent_shadow_run_ids": {
+    "AAPL": "replace-with-validation-approved-v2-run-id"
+  },
   "database_path": "var/trading.sqlite3",
   "mode": "paper",
-  "broker_env_file": "broker.env",
+  "broker_env_file": "broker.paper.env",
   "api_host": "127.0.0.1",
   "api_port": 8765,
   "event_stale_after_seconds": 5.0,

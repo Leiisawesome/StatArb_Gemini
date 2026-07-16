@@ -29,6 +29,7 @@ from l1_microstructure.monitoring import (
     InMemoryMonitoringSink,
     JsonlMonitoringSink,
     OperationalAlertManager,
+    RuntimeSnapshot,
 )
 from l1_microstructure.training import EmpiricalTransitionTrainer
 from tests.unit.l1_state_machine.support import FixtureMarketDataSource as InMemoryMassiveDataSource
@@ -151,6 +152,34 @@ def test_in_memory_monitoring_sink_collects_runtime_snapshots() -> None:
     assert not frame.empty
     assert "state_label" in frame.columns
     assert "edge_activation_count" in frame.columns
+
+
+def test_in_memory_monitoring_sink_compacts_full_replay_evidence_deterministically() -> None:
+    sink = InMemoryMonitoringSink(max_snapshots=4)
+    snapshots = [
+        RuntimeSnapshot(
+            timestamp_ns=index,
+            state_label="state",
+            dominant_regime="regime",
+            entropy=0.0,
+            alpha_score=0.0,
+            metadata={},
+        )
+        for index in range(1, 34)
+    ]
+
+    for snapshot in snapshots:
+        sink.publish(snapshot)
+
+    assert sink.published_snapshot_count == 33
+    assert sink.sampling_stride == 8
+    assert len(sink.snapshots) <= 4
+    assert [snapshot.timestamp_ns for snapshot in sink.snapshots] == [8, 16, 24, 32]
+
+
+def test_in_memory_monitoring_sink_rejects_non_positive_limit() -> None:
+    with pytest.raises(ValueError, match="max_snapshots must be positive"):
+        InMemoryMonitoringSink(max_snapshots=0)
 
 
 def test_jsonl_monitoring_sink_writes_snapshots(tmp_path) -> None:

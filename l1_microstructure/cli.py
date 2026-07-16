@@ -18,6 +18,7 @@ from l1_microstructure.ingest import (
     HistoricalBatchRequest,
     LiveSubscriptionRequest,
     MassivePayloadNormalizer,
+    MassiveRESTConfig,
     MassiveRESTDataSource,
     MassiveWebSocketConfig,
     MassiveWebSocketDataSource,
@@ -31,6 +32,11 @@ from l1_microstructure.live import (
 )
 from l1_microstructure.regime import MicrostructureRegime
 from l1_microstructure.transitions import EdgeKey
+from l1_microstructure.transparent import (
+    TransparentArtifactDrivenWorkflow,
+    TransparentArtifactSelector,
+)
+from l1_microstructure.production.secrets import get_secret
 from l1_microstructure.workflow import ArtifactDrivenResearchWorkflow
 from l1_microstructure.artifacts import ArtifactBundleSelector, LocalArtifactStore, RunQualityGate
 
@@ -45,8 +51,12 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "workflow":
         return _run_workflow_command(args)
+    if args.command == "transparent-workflow":
+        return _run_transparent_workflow_command(args)
     if args.command == "list-runs":
         return _run_list_runs_command(args)
+    if args.command == "list-transparent-runs":
+        return _run_list_transparent_runs_command(args)
     if args.command == "paper-historical":
         return _run_historical_command(args)
     if args.command == "paper-live":
@@ -71,12 +81,25 @@ def build_parser() -> argparse.ArgumentParser:
     workflow_parser.add_argument("--trade-date", required=True)
     workflow_parser.add_argument("--transition-threshold", type=float, default=None)
 
+    transparent_workflow_parser = subparsers.add_parser("transparent-workflow")
+    transparent_workflow_parser.add_argument("--artifact-root", required=True)
+    transparent_workflow_parser.add_argument("--symbol", required=True)
+    transparent_workflow_parser.add_argument("--trade-date", required=True)
+    transparent_workflow_parser.add_argument("--run-id", default=None)
+    transparent_workflow_parser.add_argument("--transition-threshold", type=float, default=None)
+
     list_runs_parser = subparsers.add_parser("list-runs")
     list_runs_parser.add_argument("--artifact-root", required=True)
     list_runs_parser.add_argument("--symbol", required=True)
     list_runs_parser.add_argument("--trade-date", default=None)
     list_runs_parser.add_argument("--passing-only", action="store_true")
     _add_quality_gate_arguments(list_runs_parser)
+
+    list_transparent_runs_parser = subparsers.add_parser("list-transparent-runs")
+    list_transparent_runs_parser.add_argument("--artifact-root", required=True)
+    list_transparent_runs_parser.add_argument("--symbol", required=True)
+    list_transparent_runs_parser.add_argument("--trade-date", default=None)
+    list_transparent_runs_parser.add_argument("--passing-only", action="store_true")
 
     historical_parser = subparsers.add_parser("paper-historical")
     historical_parser.add_argument("--artifact-root", required=True)
@@ -146,11 +169,15 @@ def _framework_config(transition_threshold: float | None) -> FrameworkConfig:
 
 
 def _historical_source() -> MassiveRESTDataSource:
-    return MassiveRESTDataSource()
+    return MassiveRESTDataSource(
+        MassiveRESTConfig(api_key=get_secret("MASSIVE_API_KEY"))
+    )
 
 
 def _live_source() -> MassiveWebSocketDataSource:
-    return MassiveWebSocketDataSource(MassiveWebSocketConfig())
+    return MassiveWebSocketDataSource(
+        MassiveWebSocketConfig(api_key=get_secret("MASSIVE_API_KEY"))
+    )
 
 
 def _run_workflow_command(args: argparse.Namespace) -> int:
@@ -166,6 +193,33 @@ def _run_workflow_command(args: argparse.Namespace) -> int:
     )
     result = workflow.run(symbol=args.symbol, events=events)
     print(json.dumps(_workflow_result_to_json(result), sort_keys=True))
+    return 0
+
+
+def _run_transparent_workflow_command(args: argparse.Namespace) -> int:
+    source = _historical_source()
+    events = list(
+        source.load_historical(
+            HistoricalBatchRequest(symbols=(args.symbol,), trade_date=date.fromisoformat(args.trade_date))
+        )
+    )
+    workflow = TransparentArtifactDrivenWorkflow(
+        args.artifact_root,
+        framework_config=_framework_config(args.transition_threshold),
+    )
+    result = workflow.run(symbol=args.symbol, events=events, run_id=args.run_id)
+    print(
+        json.dumps(
+            {
+                "symbol": result.symbol,
+                "run_id": result.run_id,
+                "split_count": result.split_count,
+                "artifact_ids": dict(result.manifest.artifact_ids),
+                "validation": result.validation_report.to_dict(),
+            },
+            sort_keys=True,
+        )
+    )
     return 0
 
 
@@ -191,6 +245,37 @@ def _run_list_runs_command(args: argparse.Namespace) -> int:
                         "created_at": manifest.created_at,
                         "artifact_ids": manifest.artifact_ids,
                         "quality_metrics": _quality_metrics_from_metadata(manifest.metadata),
+                        "metadata": manifest.metadata,
+                    }
+                    for manifest in manifests
+                ],
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+def _run_list_transparent_runs_command(args: argparse.Namespace) -> int:
+    selector = TransparentArtifactSelector(LocalArtifactStore(args.artifact_root))
+    manifests = selector.list_manifests(args.symbol, passing_only=args.passing_only)
+    if args.trade_date is not None:
+        manifests = [manifest for manifest in manifests if manifest.trade_date == args.trade_date]
+    manifests.sort(key=lambda manifest: (manifest.created_at, manifest.run_id), reverse=True)
+    print(
+        json.dumps(
+            {
+                "symbol": args.symbol,
+                "trade_date": args.trade_date,
+                "passing_only": args.passing_only,
+                "run_count": len(manifests),
+                "runs": [
+                    {
+                        "run_id": manifest.run_id,
+                        "trade_date": manifest.trade_date,
+                        "created_at": manifest.created_at,
+                        "engine_version": manifest.engine_version,
+                        "artifact_ids": manifest.artifact_ids,
                         "metadata": manifest.metadata,
                     }
                     for manifest in manifests
@@ -467,7 +552,7 @@ def _latest_observed_state_from_rest(symbol: str) -> ObservedState:
     except ImportError as exc:
         raise RuntimeError("massive client is required for IBKR smoke request construction") from exc
 
-    api_key = _resolve_massive_api_key(None)
+    api_key = _resolve_massive_api_key(None) or get_secret("MASSIVE_API_KEY")
     if api_key is None:
         raise RuntimeError("MASSIVE_API_KEY is required for IBKR smoke request construction")
 

@@ -1,6 +1,8 @@
 {
   "brier_score": 0.2525,
   "calibration_error": 0.04999999999999982,
+  "decisive_count": 100,
+  "decision_rate": 1.0,
   "directional_hit_rate": 0.5,
   "edge_coverage": 0.8,
   "log_loss": 0.6981723484866962,

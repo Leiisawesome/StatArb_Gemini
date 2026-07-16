@@ -115,7 +115,9 @@ Current commands implemented by `l1_microstructure/cli.py` are:
 | Command | Purpose |
 | --- | --- |
 | `workflow` | Load historical data, build artifacts, validate, replay, and persist a run manifest |
+| `transparent-workflow` | Build and validate a transparent v2 shadow candidate from historical data |
 | `list-runs` | Inspect saved run manifests and filter by date, pass/fail, or quality gates |
+| `list-transparent-runs` | Inspect transparent v2 manifests and filter to validation-approved runs |
 | `paper-historical` | Load a stored artifact bundle and run the paper path against historical data |
 | `paper-live` | Load a stored artifact bundle and run the paper path against the live subscription flow |
 | `live-routed` | Exercise the lightweight routed boundary against a paper broker account |
@@ -341,7 +343,8 @@ Initial setup:
 ```bash
 uv sync --extra dev
 trading-secret MASSIVE_API_KEY
-trading-secret TRADING_CONSOLE_TOKEN
+trading-secret MASSIVE_API_KEY --validate
+trading-secret TRADING_CONSOLE_TOKEN --generate
 cp config/production.example.json config/production.json
 ```
 
@@ -390,15 +393,21 @@ Follow the complete
 for the frozen ten-session campaign, daily evidence capture, failure rules, and
 separate broker-recovery drills.
 
+Before session 1, the read-only `trading-paper-ready` command combines the
+production preflight with clean-commit, fresh-ledger, pinned v1/v2 artifact,
+conservative-risk, and counted/drill isolation checks. Its JSON freeze record
+contains only a hash of the configured paper account.
+
 After every attempted regular-hours paper session, finalize its durable ledger
 evidence:
 
 ```bash
 trading-paper-qualify --database var/trading.sqlite3 --finalize 2026-07-13
+trading-transparent-qualify --database var/trading.sqlite3 --finalize 2026-07-13
 ```
 
 Run the same command without `--finalize` to inspect the accumulated gate. The
-report becomes `qualified` only after ten trailing passing sessions. Automatic
+reports become `qualified` only after ten trailing passing sessions. Automatic
 session-start markers ensure an attempted but unfinalized or incompletely closed
 session breaks the streak. The evaluator checks paper mode, regular close
 evidence, market activity, unique order IDs, terminal orders, reconciled fills,
@@ -406,6 +415,10 @@ flat closing positions, complete decision/acknowledgement audit links, and zero
 runtime-halt incidents. It emits one JSON report and uses exit code `0` only when
 the ten-session gate is qualified; `2` means more evidence or remediation is
 required.
+
+The transparent report additionally requires a frozen validation-approved v2
+shadow bundle, resolved candidate outcomes, zero candidate errors or restarts,
+and bounded shadow latency. The v1 engine remains the only routing authority.
 
 Production configuration defaults to regular-hours operation, stops entries at
 15:50 ET, flattens at 15:58 ET, and rejects live mode unless the configuration

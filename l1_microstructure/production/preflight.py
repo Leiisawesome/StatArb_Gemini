@@ -261,6 +261,20 @@ class ProductionPreflight:
                     message="broker mode validation skipped because broker configuration is unavailable",
                 )
             )
+            checks.append(
+                PreflightCheck(
+                    code="broker.account",
+                    status=PreflightStatus.SKIPPED,
+                    message="broker account validation skipped because broker configuration is unavailable",
+                )
+            )
+            checks.append(
+                PreflightCheck(
+                    code="broker.outside_rth",
+                    status=PreflightStatus.SKIPPED,
+                    message="outside-RTH validation skipped because broker configuration is unavailable",
+                )
+            )
             return
         checks.append(
             PreflightCheck(
@@ -276,6 +290,20 @@ class ProductionPreflight:
                 raise TypeError("broker configuration loader returned an invalid result")
         except Exception as exc:
             self._append_failure(checks, "broker.mode", exc)
+            checks.append(
+                PreflightCheck(
+                    code="broker.account",
+                    status=PreflightStatus.SKIPPED,
+                    message="broker account validation skipped because broker configuration is invalid",
+                )
+            )
+            checks.append(
+                PreflightCheck(
+                    code="broker.outside_rth",
+                    status=PreflightStatus.SKIPPED,
+                    message="outside-RTH validation skipped because broker configuration is invalid",
+                )
+            )
             return
         expected_paper = self.config.mode is OperatingMode.PAPER
         if broker.paper_trading != expected_paper:
@@ -303,6 +331,36 @@ class ProductionPreflight:
                     "port": broker.port,
                     "client_id": broker.client_id,
                 },
+            )
+        )
+        account_configured = bool(broker.account_id and broker.account_id.strip())
+        checks.append(
+            PreflightCheck(
+                code="broker.account",
+                status=PreflightStatus.PASSED if account_configured else PreflightStatus.FAILED,
+                message=(
+                    "a broker account is explicitly configured"
+                    if account_configured
+                    else "IBKR_ACCOUNT_ID is not configured"
+                ),
+                metadata={"configured": account_configured},
+            )
+        )
+        outside_rth_disabled = not broker.outside_regular_trading_hours
+        checks.append(
+            PreflightCheck(
+                code="broker.outside_rth",
+                status=(
+                    PreflightStatus.PASSED
+                    if outside_rth_disabled
+                    else PreflightStatus.FAILED
+                ),
+                message=(
+                    "outside-RTH order routing is disabled"
+                    if outside_rth_disabled
+                    else "IBKR_OUTSIDE_RTH must be disabled for the paper campaign"
+                ),
+                metadata={"enabled": broker.outside_regular_trading_hours},
             )
         )
 

@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from bisect import bisect_left
+from itertools import groupby
 from time import perf_counter_ns
 from typing import Callable, Iterable, Mapping
 from sys import getsizeof
 
 from l1_microstructure.calibration.interfaces import RegimeCalibrationArtifact
 from l1_microstructure.config import FrameworkConfig
-from l1_microstructure.decision import DecisionEngine
+from l1_microstructure.decision import DecisionEngine, TradeAction
 from l1_microstructure.features import ObservedState
 from l1_microstructure.regime import RegimeInferencer
 from l1_microstructure.training.interfaces import TransitionTrainingSample
@@ -27,6 +28,7 @@ from .contracts import (
 from .edges import HierarchicalTransitionModel, HierarchicalTransitionRuntime
 from .regime import SemiMarkovRegimeModel, SemiMarkovRegimeRuntime
 from .shadow import ShadowReport
+from .utility import ExpectedUtilityDecisionEngine, UtilityModel
 from .vector import RobustStateVectorRuntime, StateVectorModel
 
 
@@ -98,8 +100,11 @@ class TransparentOOSValidator:
         *,
         baseline_transition_payload: dict[str, object] | None = None,
         candidate_model: HierarchicalTransitionModel | None = None,
+        candidate_utility_model: UtilityModel | None = None,
         models_by_split: Mapping[
-            str, tuple[dict[str, object], HierarchicalTransitionModel]
+            str,
+            tuple[dict[str, object], HierarchicalTransitionModel]
+            | tuple[dict[str, object], HierarchicalTransitionModel, UtilityModel],
         ] | None = None,
         splits: Iterable[ValidationSplitEvidence],
         config: FrameworkConfig | None = None,
@@ -115,67 +120,120 @@ class TransparentOOSValidator:
         for split in evidence:
             if models_by_split is not None:
                 try:
-                    split_baseline, split_candidate = models_by_split[split.label]
+                    split_models = models_by_split[split.label]
                 except KeyError as exc:
                     raise ValueError(f"validation models are missing split {split.label}") from exc
+                split_baseline, split_candidate = split_models[:2]
+                split_utility = split_models[2] if len(split_models) == 3 else None
             else:
                 if baseline_transition_payload is None or candidate_model is None:
                     raise ValueError("validation requires global models or models_by_split")
                 split_baseline, split_candidate = baseline_transition_payload, candidate_model
+                split_utility = candidate_utility_model
             candidate_runtime = HierarchicalTransitionRuntime(split_candidate)
+            utility_engine = (
+                None if split_utility is None else ExpectedUtilityDecisionEngine(split_utility)
+            )
             baseline_bytes = _deep_size(split_baseline)
-            candidate_bytes = _deep_size(split_candidate.to_dict())
-            for sample in split.samples:
-                threshold = float(
-                    sample.metadata.get(
-                        "threshold_bps",
-                        framework_config.decision.transaction_cost_bps,
+            candidate_bytes = _deep_size(
+                {
+                    "transition": split_candidate.to_dict(),
+                    "utility": None if split_utility is None else split_utility.to_dict(),
+                }
+            )
+            grouped_samples = groupby(split.samples, key=_opportunity_key)
+            for _, opportunity in grouped_samples:
+                candidate_items = []
+                for sample in opportunity:
+                    threshold = float(
+                        sample.metadata.get(
+                            "threshold_bps",
+                            framework_config.decision.transaction_cost_bps,
+                        )
                     )
-                )
-                started = self.clock()
-                baseline_up, baseline_down, baseline_seen = _baseline_probability(
-                    split_baseline,
-                    sample,
-                    threshold,
-                    framework_config,
-                )
-                baseline_latency = max(self.clock() - started, 0)
-                started = self.clock()
-                candidate_detected = bool(sample.metadata.get("candidate_detected", True))
-                posterior = (
-                    candidate_runtime.posterior(
+                    started = self.clock()
+                    baseline_up, baseline_down, baseline_seen = _baseline_probability(
+                        split_baseline,
+                        sample,
+                        threshold,
+                        framework_config,
+                    )
+                    baseline_latency = max(self.clock() - started, 0)
+                    started = self.clock()
+                    posterior = candidate_runtime.posterior(
                         from_state=sample.from_state,
                         to_state=sample.to_state,
                         regime=sample.regime,
                         horizon_ns=sample.horizon_ns,
                         threshold_bps=threshold,
                     )
-                    if candidate_detected
-                    else None
-                )
-                candidate_latency = max(self.clock() - started, 0)
-                baseline_records.append(
-                    EnginePredictionRecord(
-                        probability_up=baseline_up,
-                        probability_down=baseline_down,
-                        realized_drift_bps=sample.realized_drift_bps,
-                        threshold_bps=threshold,
-                        edge_seen=baseline_seen,
-                        latency_ns=baseline_latency,
-                        resident_bytes=baseline_bytes,
+                    candidate_latency = max(self.clock() - started, 0)
+                    baseline_records.append(
+                        EnginePredictionRecord(
+                            probability_up=baseline_up,
+                            probability_down=baseline_down,
+                            realized_drift_bps=sample.realized_drift_bps,
+                            threshold_bps=threshold,
+                            edge_seen=baseline_seen,
+                            latency_ns=baseline_latency,
+                            resident_bytes=baseline_bytes,
+                            selected_direction=(
+                                0 if sample.metadata.get("baseline_detected") is False else None
+                            ),
+                        )
                     )
-                )
-                candidate_records.append(
-                    EnginePredictionRecord(
-                        probability_up=0.0 if posterior is None else posterior.probability_up,
-                        probability_down=0.0 if posterior is None else posterior.probability_down,
-                        realized_drift_bps=sample.realized_drift_bps,
-                        threshold_bps=threshold,
-                        edge_seen=False if posterior is None else posterior.exact_edge_seen,
-                        latency_ns=candidate_latency,
-                        resident_bytes=candidate_bytes,
+                    candidate_items.append((sample, posterior, threshold, candidate_latency))
+
+                selected_action = None
+                selected_horizon = None
+                first_sample = candidate_items[0][0]
+                candidate_detected = bool(first_sample.metadata.get("candidate_detected", True))
+                if any(
+                    bool(sample.metadata.get("candidate_detected", True)) != candidate_detected
+                    for sample, _, _, _ in candidate_items
+                ):
+                    raise ValueError("candidate detection changed within one validation opportunity")
+                if utility_engine is not None and candidate_detected:
+                    started = self.clock()
+                    decision = utility_engine.decide_for_spread(
+                        (posterior for _, posterior, _, _ in candidate_items),
+                        spread_bps=float(first_sample.metadata["spread_bps"]),
+                        alignment_probability=1.0,
+                        transition_probability=float(
+                            first_sample.metadata.get("candidate_transition_probability", 1.0)
+                        ),
+                        current_risk_fraction=0.0,
+                        regime=first_sample.regime,
                     )
-                )
+                    decision_latency = max(self.clock() - started, 0)
+                    selected_action = {
+                        TradeAction.BUY: 1,
+                        TradeAction.SELL: -1,
+                        TradeAction.HOLD: 0,
+                    }[decision.action]
+                    selected_horizon = decision.horizon_ns
+                else:
+                    decision_latency = 0
+                    if not candidate_detected:
+                        selected_action = 0
+
+                for sample, posterior, threshold, candidate_latency in candidate_items:
+                    selected_direction = selected_action
+                    if selected_action not in {None, 0} and sample.horizon_ns != selected_horizon:
+                        selected_direction = 0
+                    candidate_records.append(
+                        EnginePredictionRecord(
+                            probability_up=posterior.probability_up,
+                            probability_down=posterior.probability_down,
+                            realized_drift_bps=sample.realized_drift_bps,
+                            threshold_bps=threshold,
+                            edge_seen=posterior.exact_edge_seen,
+                            latency_ns=candidate_latency
+                            + (decision_latency if sample.horizon_ns == selected_horizon else 0),
+                            resident_bytes=candidate_bytes,
+                            selected_direction=selected_direction,
+                        )
+                    )
         baseline = evaluate_prediction_records(baseline_records)
         candidate = evaluate_prediction_records(candidate_records)
         promotion = TransparentPromotionGate(self.thresholds).evaluate(baseline, candidate)
@@ -213,8 +271,6 @@ def _baseline_probability(
     threshold_bps: float,
     config: FrameworkConfig,
 ) -> tuple[float, float, bool]:
-    if not bool(sample.metadata.get("baseline_detected", True)):
-        return 0.0, 0.0, False
     horizon_models = payload.get("horizon_models", {})
     horizon_payload = dict(horizon_models).get(str(int(sample.horizon_ns)), {})
     baseline_regime = str(sample.metadata.get("baseline_regime", sample.regime))
@@ -268,7 +324,8 @@ def build_common_opportunity_samples(
     for index, state in enumerate(observations[1:], start=1):
         candidate_regime_posterior = candidate_regime.update(state)
         baseline_regime_posterior = baseline_regime.update(state)
-        candidate_detected = candidate_vector.update(state).is_transition
+        candidate_transition = candidate_vector.update(state)
+        candidate_detected = candidate_transition.is_transition
         baseline_detected = baseline_transition.is_transition(previous.vector, state.vector)
         if candidate_detected or baseline_detected:
             threshold_bps = framework_config.decision.transaction_cost_bps + (
@@ -298,8 +355,15 @@ def build_common_opportunity_samples(
                             "end_timestamp_ns": end_state.timestamp_ns,
                             "threshold_bps": threshold_bps,
                             "candidate_detected": candidate_detected,
+                            "candidate_transition_probability": candidate_transition.probability,
                             "baseline_detected": baseline_detected,
                             "baseline_regime": baseline_regime_posterior.dominant_regime.value,
+                            "opportunity_index": index,
+                            "spread_bps": (
+                                state.book.spread
+                                / max(state.book.midpoint, 1e-9)
+                                * 10_000.0
+                            ),
                         },
                     )
                 )
@@ -307,6 +371,18 @@ def build_common_opportunity_samples(
     if not samples:
         raise ValueError("held-out window produced no common v1/v2 transition opportunities")
     return tuple(samples)
+
+
+def _opportunity_key(sample: TransitionTrainingSample) -> tuple[object, ...]:
+    metadata = sample.metadata
+    return (
+        metadata.get("opportunity_index", metadata.get("timestamp_ns")),
+        metadata.get("timestamp_ns"),
+        sample.from_state,
+        sample.to_state,
+        sample.regime,
+        sample.holding_time_ns,
+    )
 
 
 def _deep_size(value: object, seen: set[int] | None = None) -> int:

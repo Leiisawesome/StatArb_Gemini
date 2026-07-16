@@ -1,4 +1,4 @@
-"""macOS Keychain-backed production secret resolution."""
+"""System-keyring-backed production secret resolution."""
 
 from __future__ import annotations
 

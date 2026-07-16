@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from bisect import bisect_left
-from typing import Iterable
+from typing import Iterable, Iterator
 
 from l1_microstructure.calibration.interfaces import ExecutionCalibrationArtifact, StateCalibrationArtifact
 from l1_microstructure.config import FrameworkConfig
@@ -73,8 +73,6 @@ class TransparentModelTrainer:
             regime_model,
             framework_config,
         )
-        if not transition_samples:
-            raise ValueError("transparent training produced no resolved candidate transitions")
         transition_model = self.transition_trainer.fit(
             transition_samples,
             train_start_ns=train_start_ns,
@@ -110,7 +108,7 @@ class TransparentModelTrainer:
                 "trainer": "transparent_model_trainer",
                 "train_start_ns": int(train_start_ns),
                 "train_end_ns": int(train_end_ns),
-                "candidate_transition_sample_count": len(transition_samples),
+                "candidate_transition_sample_count": transition_model.sample_count,
             },
         )
 
@@ -141,15 +139,14 @@ def candidate_transition_samples(
     vector_model,
     regime_model,
     config: FrameworkConfig,
-) -> tuple[TransitionTrainingSample, ...]:
+) -> Iterator[TransitionTrainingSample]:
     timestamps = tuple(state.timestamp_ns for state in states)
     vector_runtime = RobustStateVectorRuntime(vector_model)
     regime_runtime = SemiMarkovRegimeRuntime(regime_model, vector_model)
-    samples: list[TransitionTrainingSample] = []
     for index, state in enumerate(states):
         regime = regime_runtime.update(state)
         transition = vector_runtime.update(state)
-        if index == 0 or not transition.is_transition:
+        if index == 0:
             continue
         previous = states[index - 1]
         for horizon_ns in config.transition.drift_horizon_ns_values:
@@ -158,24 +155,22 @@ def candidate_transition_samples(
                 continue
             end_state = states[end_index]
             drift_bps = (end_state.book.microprice - state.book.microprice) / state.book.microprice * 10_000.0
-            samples.append(
-                TransitionTrainingSample(
-                    symbol=state.symbol,
-                    from_state=previous.label,
-                    to_state=state.label,
-                    regime=regime.dominant_regime,
-                    horizon_ns=horizon_ns,
-                    holding_time_ns=state.timestamp_ns - previous.timestamp_ns,
-                    realized_drift_bps=float(drift_bps),
-                    metadata={
-                        "timestamp_ns": state.timestamp_ns,
-                        "end_timestamp_ns": end_state.timestamp_ns,
-                        "threshold_bps": config.decision.transaction_cost_bps
-                        + config.decision.risk_premium_bps
-                        * max(state.realized_volatility * 10_000.0, 0.1),
-                        "transition_probability": transition.probability,
-                        "transition_score": transition.score,
-                    },
-                )
+            yield TransitionTrainingSample(
+                symbol=state.symbol,
+                from_state=previous.label,
+                to_state=state.label,
+                regime=regime.dominant_regime,
+                horizon_ns=horizon_ns,
+                holding_time_ns=state.timestamp_ns - previous.timestamp_ns,
+                realized_drift_bps=float(drift_bps),
+                metadata={
+                    "timestamp_ns": state.timestamp_ns,
+                    "end_timestamp_ns": end_state.timestamp_ns,
+                    "threshold_bps": config.decision.transaction_cost_bps
+                    + config.decision.risk_premium_bps
+                    * max(state.realized_volatility * 10_000.0, 0.1),
+                    "vector_transition_detected": transition.is_transition,
+                    "transition_probability": transition.probability,
+                    "transition_score": transition.score,
+                },
             )
-    return tuple(samples)

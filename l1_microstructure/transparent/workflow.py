@@ -94,7 +94,7 @@ class TransparentArtifactDrivenWorkflow:
         timestamps = tuple(event.timestamp_ns for event in normalized)
         effective_splits = splits or self._default_splits(timestamps)
         evidence: list[ValidationSplitEvidence] = []
-        split_models: dict[str, tuple[dict[str, object], object]] = {}
+        split_models: dict[str, tuple[dict[str, object], object, object]] = {}
         shadow_reports: list[ShadowReport] = []
         seen_labels: set[str] = set()
         for split in effective_splits:
@@ -141,6 +141,7 @@ class TransparentArtifactDrivenWorkflow:
             split_models[split.label] = (
                 fitted.baseline_transition_payload,
                 fitted.candidate.hierarchical_transition_model,
+                fitted.candidate.utility_model,
             )
             shadow_reports.append(
                 ComparativeShadowRunner(

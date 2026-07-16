@@ -48,7 +48,7 @@ def _secrets(**overrides):
 
 
 def _paper_broker(_env_file):
-    return IBKRConnectionConfig(paper_trading=True)
+    return IBKRConnectionConfig(account_id="DU123456", paper_trading=True)
 
 
 def test_secret_lookup_falls_back_to_environment_without_keyring_backend(monkeypatch) -> None:
@@ -142,6 +142,8 @@ def test_production_preflight_returns_typed_passing_diagnostics(tmp_path) -> Non
         "credential.trading_console_token",
         "artifact.promoted.aapl",
         "broker.mode",
+        "broker.account",
+        "broker.outside_rth",
         "filesystem.database",
         "runtime.retry_policies",
     }
@@ -239,6 +241,26 @@ def test_production_preflight_rejects_broker_mode_mismatch(tmp_path) -> None:
     assert broker_check.metadata == {"production_mode": "live", "broker_mode": "paper"}
 
 
+def test_production_preflight_requires_explicit_account_and_disables_outside_rth(tmp_path) -> None:
+    report = ProductionPreflight(
+        _config(tmp_path),
+        secret_lookup=_secrets(),
+        artifact_validator=lambda _symbol, _run_id: None,
+        broker_config_loader=lambda _env_file: IBKRConnectionConfig(
+            paper_trading=True,
+            outside_regular_trading_hours=True,
+        ),
+    ).run()
+
+    account = next(check for check in report.checks if check.code == "broker.account")
+    outside_rth = next(check for check in report.checks if check.code == "broker.outside_rth")
+    assert report.passed is False
+    assert account.status is PreflightStatus.FAILED
+    assert account.metadata == {"configured": False}
+    assert outside_rth.status is PreflightStatus.FAILED
+    assert outside_rth.metadata == {"enabled": True}
+
+
 def test_production_preflight_fails_missing_explicit_broker_environment(tmp_path) -> None:
     report = ProductionPreflight(
         _config(tmp_path, broker_env_file=tmp_path / "missing.env"),
@@ -249,8 +271,12 @@ def test_production_preflight_fails_missing_explicit_broker_environment(tmp_path
 
     environment = next(check for check in report.checks if check.code == "broker.environment")
     mode = next(check for check in report.checks if check.code == "broker.mode")
+    account = next(check for check in report.checks if check.code == "broker.account")
+    outside_rth = next(check for check in report.checks if check.code == "broker.outside_rth")
     assert environment.status is PreflightStatus.FAILED
     assert mode.status is PreflightStatus.SKIPPED
+    assert account.status is PreflightStatus.SKIPPED
+    assert outside_rth.status is PreflightStatus.SKIPPED
 
 
 def test_daemon_failed_preflight_does_not_construct_infrastructure(tmp_path, monkeypatch) -> None:

@@ -11,6 +11,7 @@ from l1_microstructure.config import FrameworkConfig
 from l1_microstructure.datasets import PipelineTransitionDatasetBuilder
 from l1_microstructure.ingest import LiveSubscriptionRequest
 from l1_microstructure.live import IBKRBrokerOrderRouter, RoutedLiveTradingRunner, RunnerConfig
+from l1_microstructure.monitoring import RuntimeMonitor
 from l1_microstructure.training import EmpiricalTransitionTrainer
 from tests.unit.l1_state_machine.support import FixtureMarketDataSource
 
@@ -38,7 +39,21 @@ def _framework_config() -> FrameworkConfig:
     config.decision.entry_probability_threshold = 0.5
     config.decision.transaction_cost_bps = 0.0
     config.decision.risk_premium_bps = 0.0
+    config.risk.max_position_fraction = 0.0002
+    config.risk.confidence_size_floor = 1.0
     return config
+
+
+class _StopAfterFirstOrderSource(FixtureMarketDataSource):
+    def __init__(self, payloads, router: IBKRBrokerOrderRouter):
+        super().__init__(payloads)
+        self.router = router
+
+    def subscribe_live(self, request):
+        for event in super().subscribe_live(request):
+            if self.router.open_order_ids():
+                break
+            yield event
 
 
 def _runtime_artifacts(config: FrameworkConfig) -> RuntimeArtifactBundle:
@@ -80,7 +95,7 @@ def test_ibkr_router_can_drive_bounded_routed_live_cancel_cycle(tmp_path: Path) 
             pytest.skip(f"IBKR routed-live smoke requires a healthy broker connection: {health}")
 
         runner = RoutedLiveTradingRunner(
-            source=FixtureMarketDataSource(_payloads()),
+            source=_StopAfterFirstOrderSource(_payloads(), router),
             router=router,
             framework_config=config,
             runtime_artifacts=_runtime_artifacts(config),
@@ -91,7 +106,13 @@ def test_ibkr_router_can_drive_bounded_routed_live_cancel_cycle(tmp_path: Path) 
         )
 
         assert result.route_acknowledgements
+        assert len(result.route_acknowledgements) == 1
         assert any(ack.status == "accepted" for ack in result.route_acknowledgements)
+        assert all(
+            request.quantity == 1
+            for update in result.updates
+            for request in update.submitted_requests
+        )
 
         open_order_ids = result.open_route_order_ids()
         assert open_order_ids, "expected at least one open routed IBKR order to cancel"
@@ -99,9 +120,10 @@ def test_ibkr_router_can_drive_bounded_routed_live_cancel_cycle(tmp_path: Path) 
             assert result.cancel_route_order(order_id) is True
 
         if result.machine is not None:
+            monitor = RuntimeMonitor(result.monitoring_sink)
             for _ in range(8):
                 time.sleep(0.5)
-                result._ingest_router_reports(result.machine, ("AAPL",))
+                result._ingest_router_reports(result.machine, ("AAPL",), monitor)
                 if not result.open_route_order_ids():
                     break
 

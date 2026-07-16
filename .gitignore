@@ -216,6 +216,9 @@ config/api_keys.py
 .env.local
 .env.production
 config/production.json
+config/production.drill.json
+broker.paper.env
+broker.drill.env
 var/
 
 # Temporary development and validation files
