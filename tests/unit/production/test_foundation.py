@@ -657,6 +657,37 @@ def test_production_runtime_requires_each_symbol_to_finish_warmup(tmp_path) -> N
     runtime.stop()
 
 
+def test_production_runtime_blocks_premarket_entry_after_context_ingest(tmp_path) -> None:
+    runtime = _Runtime(
+        _config(
+            tmp_path,
+            symbols=("AAPL",),
+            promoted_run_ids={"AAPL": "aapl-v1"},
+        ),
+        source=_Source(),
+        router=_Router(),
+    )
+    runtime.start()
+    premarket_timestamp_ns = int(
+        datetime(2026, 7, 13, 13, 15, tzinfo=timezone.utc).timestamp() * 1_000_000_000
+    )
+    request = replace(
+        _execution_request(),
+        decision_timestamp_ns=premarket_timestamp_ns,
+        executable_timestamp_ns=premarket_timestamp_ns + 100_000_000,
+    )
+
+    assert runtime._may_route(request) is False
+    blocked = runtime.ledger.recent_events(1, category="risk", event_type="order_blocked")[0]
+    assert blocked["payload"] == {
+        "reason": "closed",
+        "symbol": "AAPL",
+        "client_order_id": request.client_order_id,
+    }
+    assert runtime.router.requests == []
+    runtime.stop()
+
+
 def test_production_runtime_records_authoritative_paper_session_close(tmp_path) -> None:
     runtime = _Runtime(_config(tmp_path), source=_Source(), router=_Router())
     runtime.start()

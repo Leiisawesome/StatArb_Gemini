@@ -11,6 +11,7 @@ from l1_microstructure.production.config import OperatingMode, ProductionConfig
 from l1_microstructure.production.daemon import (
     PREFLIGHT_FAILURE_EXIT_CODE,
     PREFLIGHT_SUCCESS_EXIT_CODE,
+    _build_market_data_source,
     main,
 )
 from l1_microstructure.production.preflight import (
@@ -59,6 +60,15 @@ def test_secret_lookup_falls_back_to_environment_without_keyring_backend(monkeyp
     )
 
     assert get_secret("MASSIVE_API_KEY") == "environment-secret"
+
+
+def test_daemon_market_data_source_admits_premarket_warmup_only() -> None:
+    source = _build_market_data_source("test-key")
+    session_filter = source.session_filter
+
+    assert session_filter.include_premarket is True
+    assert session_filter.include_rth is True
+    assert session_filter.include_after_hours is False
 
 
 def _write_config(tmp_path) -> str:

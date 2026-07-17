@@ -9,7 +9,11 @@ from typing import Sequence, cast
 
 import uvicorn
 
-from l1_microstructure.ingest import MassiveWebSocketConfig, MassiveWebSocketDataSource
+from l1_microstructure.ingest import (
+    ExtendedHoursSessionFilter,
+    MassiveWebSocketConfig,
+    MassiveWebSocketDataSource,
+)
 from l1_microstructure.live import IBKRBrokerOrderRouter
 
 from .api import create_app
@@ -58,7 +62,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     report.raise_for_failure()
     massive_key = cast(str, secrets["MASSIVE_API_KEY"])
     api_token = cast(str, secrets["TRADING_CONSOLE_TOKEN"])
-    source = MassiveWebSocketDataSource(MassiveWebSocketConfig(api_key=massive_key))
+    source = _build_market_data_source(massive_key)
     router = IBKRBrokerOrderRouter.from_env(
         str(config.broker_env_file) if config.broker_env_file else None,
         prefer_limit_orders=True,
@@ -76,6 +80,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         runtime.stop()
         runtime_thread.join(timeout=10)
     return 0
+
+
+def _build_market_data_source(api_key: str) -> MassiveWebSocketDataSource:
+    return MassiveWebSocketDataSource(
+        MassiveWebSocketConfig(api_key=api_key),
+        session_filter=ExtendedHoursSessionFilter(
+            include_rth=True,
+            include_premarket=True,
+            include_after_hours=False,
+        ),
+    )
 
 
 def _run_preflight(config: ProductionConfig) -> tuple[ProductionPreflightReport, dict[str, str | None]]:
