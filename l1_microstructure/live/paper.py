@@ -24,8 +24,12 @@ class SimulatorPaperTradingRunner:
     runtime_artifacts: RuntimeArtifactBundle | None = None
     monitoring_sink: InMemoryMonitoringSink | None = None
     replay_engine: DeterministicReplayEngine | None = None
+    retain_updates: bool = True
     is_running: bool = False
     updates: list[FrameworkUpdate] = field(default_factory=list)
+    _update_count: int = field(default=0, init=False)
+    _fill_count: int = field(default=0, init=False)
+    _cancel_count: int = field(default=0, init=False)
 
     def __post_init__(self) -> None:
         self.framework_config = self.framework_config or FrameworkConfig()
@@ -36,6 +40,9 @@ class SimulatorPaperTradingRunner:
     def start(self, config: RunnerConfig) -> None:
         self.is_running = True
         self.updates = []
+        self._update_count = 0
+        self._fill_count = 0
+        self._cancel_count = 0
         machine = L1MicrostructureStateMachine(self.framework_config, runtime_artifacts=self.runtime_artifacts)
         monitor = RuntimeMonitor(self.monitoring_sink)
         selected_symbols = set(config.symbols)
@@ -48,7 +55,12 @@ class SimulatorPaperTradingRunner:
             update = machine.on_event(event)
             if update is None:
                 continue
-            self.updates.append(update)
+            self._update_count += 1
+            for report in update.execution_reports:
+                self._fill_count += int(report.status == "filled")
+                self._cancel_count += int(report.status == "cancelled")
+            if self.retain_updates:
+                self.updates.append(update)
             monitor.publish_update(update, machine)
 
         self.is_running = False
@@ -60,13 +72,20 @@ class SimulatorPaperTradingRunner:
         return self.monitoring_sink.to_frame()
 
     def execution_summary(self) -> dict[str, float]:
-        if not self.updates:
-            return {"update_count": 0.0, "fill_count": 0.0, "cancel_count": 0.0}
-        reports = [report for update in self.updates for report in update.execution_reports]
-        fill_count = sum(1 for report in reports if report.status == "filled")
-        cancel_count = sum(1 for report in reports if report.status == "cancelled")
+        if self.retain_updates:
+            reports = (report for update in self.updates for report in update.execution_reports)
+            fill_count = 0
+            cancel_count = 0
+            for report in reports:
+                fill_count += int(report.status == "filled")
+                cancel_count += int(report.status == "cancelled")
+            return {
+                "update_count": float(len(self.updates)),
+                "fill_count": float(fill_count),
+                "cancel_count": float(cancel_count),
+            }
         return {
-            "update_count": float(len(self.updates)),
-            "fill_count": float(fill_count),
-            "cancel_count": float(cancel_count),
+            "update_count": float(self._update_count),
+            "fill_count": float(self._fill_count),
+            "cancel_count": float(self._cancel_count),
         }

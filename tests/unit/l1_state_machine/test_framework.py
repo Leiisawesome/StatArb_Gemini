@@ -126,6 +126,88 @@ def test_regime_inferencer_filters_marginal_one_step_flips() -> None:
     assert filtered.probabilities[MicrostructureRegime.EXECUTION_FLOW] < emission[MicrostructureRegime.EXECUTION_FLOW]
 
 
+def test_regime_scalar_filter_matches_matrix_reference() -> None:
+    from l1_microstructure.calibration.interfaces import RegimeCalibrationArtifact
+
+    calibration = RegimeCalibrationArtifact(
+        symbol="AAPL",
+        regime_priors={
+            "calm_liquidity": 0.52,
+            "execution_flow": 0.23,
+            "liquidity_shock": 0.17,
+            "competitive_liquidity": 0.08,
+        },
+        holding_time_seconds={
+            "calm_liquidity": 14.0,
+            "execution_flow": 3.0,
+            "liquidity_shock": 0.75,
+            "competitive_liquidity": 5.5,
+        },
+    )
+    inferencer = RegimeInferencer(regime_calibration=calibration)
+    regimes = inferencer.REGIME_ORDER
+    floor = inferencer.config.posterior_floor
+    scores = dict(zip(regimes, (1.4, -0.2, 2.1, 0.3)))
+
+    score_values = np.asarray([scores[regime] for regime in regimes], dtype=float)
+    emission_reference = np.exp(score_values - np.max(score_values))
+    emission_reference /= np.sum(emission_reference)
+    emission_reference = np.maximum(emission_reference, floor)
+    emission = inferencer._emission_probabilities(scores)
+    np.testing.assert_allclose(
+        [emission[regime] for regime in regimes],
+        emission_reference,
+        rtol=0.0,
+        atol=1e-15,
+    )
+
+    inferencer.previous_probabilities = dict(zip(regimes, (0.61, 0.14, 0.19, 0.06)))
+    inferencer.previous_timestamp_ns = 7_000_000_000
+    timestamp_ns = 9_350_000_000
+    dt_ns = timestamp_ns - inferencer.previous_timestamp_ns
+    base_prior = np.asarray([calibration.regime_priors[regime.value] for regime in regimes], dtype=float)
+    holding_times = np.asarray(
+        [calibration.holding_time_seconds[regime.value] * 1_000_000_000 for regime in regimes],
+        dtype=float,
+    )
+    transition_reference = np.zeros((len(regimes), len(regimes)), dtype=float)
+    for row_index in range(len(regimes)):
+        stay_probability = np.clip(np.exp(-dt_ns / holding_times[row_index]), floor, 1.0)
+        off_diagonal = base_prior.copy()
+        off_diagonal[row_index] = 0.0
+        transition_reference[row_index] = (1.0 - stay_probability) * (
+            off_diagonal / np.sum(off_diagonal)
+        )
+        transition_reference[row_index, row_index] = stay_probability
+
+    np.testing.assert_allclose(
+        inferencer._transition_matrix(dt_ns),
+        transition_reference,
+        rtol=0.0,
+        atol=1e-15,
+    )
+    previous = np.asarray([inferencer.previous_probabilities[regime] for regime in regimes], dtype=float)
+    predicted_reference = np.maximum(previous @ transition_reference, floor)
+    predicted_reference /= np.sum(predicted_reference)
+    predicted = inferencer._predicted_probabilities(timestamp_ns)
+    np.testing.assert_allclose(
+        [predicted[regime] for regime in regimes],
+        predicted_reference,
+        rtol=0.0,
+        atol=1e-15,
+    )
+
+    filtered_reference = np.maximum(predicted_reference * emission_reference, floor)
+    filtered_reference /= np.sum(filtered_reference)
+    filtered = inferencer._filtered_probabilities(predicted, emission)
+    np.testing.assert_allclose(
+        [filtered[regime] for regime in regimes],
+        filtered_reference,
+        rtol=0.0,
+        atol=1e-15,
+    )
+
+
 def test_regime_slow_context_uses_incremental_window_sums() -> None:
     engine = FeatureEngine()
     inferencer = RegimeInferencer()

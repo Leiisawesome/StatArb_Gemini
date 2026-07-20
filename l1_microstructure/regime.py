@@ -64,15 +64,16 @@ class RegimeInferencer:
         self._imbalance_sum = 0.0
         self.previous_probabilities: dict[MicrostructureRegime, float] | None = None
         self.previous_timestamp_ns: int | None = None
-        # Precompute transition-matrix constants — these only depend on calibration (set once)
-        self._cached_base_prior = np.array(
-            [self._base_prior(r) for r in self.REGIME_ORDER], dtype=float
+        # The state space is fixed at four regimes. Keep its transition constants
+        # as scalar tuples so the per-event filter does not allocate tiny NumPy
+        # arrays and matrices.
+        self._cached_base_prior = tuple(self._base_prior(r) for r in self.REGIME_ORDER)
+        self._cached_holding_times_ns = tuple(
+            self._expected_holding_time_ns(r) for r in self.REGIME_ORDER
         )
-        self._cached_holding_times_ns = np.array(
-            [self._expected_holding_time_ns(r) for r in self.REGIME_ORDER], dtype=np.int64
+        self._transition_leave_weights = tuple(
+            self._leave_weights(row_index) for row_index in range(len(self.REGIME_ORDER))
         )
-        n = len(self.REGIME_ORDER)
-        self._off_diagonal_masks = np.ones((n, n), dtype=float) - np.eye(n, dtype=float)
 
     def update(self, state: ObservedState) -> RegimePosterior:
         self.state_window.append(state)
@@ -182,13 +183,13 @@ class RegimeInferencer:
         return score
 
     def _emission_probabilities(self, scores: dict[MicrostructureRegime, float]) -> dict[MicrostructureRegime, float]:
-        values = np.array([scores[regime] for regime in self.REGIME_ORDER], dtype=float)
-        shifted = values - np.max(values)
-        probabilities = np.exp(shifted)
-        probabilities /= np.sum(probabilities)
+        values = tuple(scores[regime] for regime in self.REGIME_ORDER)
+        maximum = max(values)
+        weights = tuple(exp(value - maximum) for value in values)
+        total = sum(weights)
         return {
-            regime: float(max(probability, self.config.posterior_floor))
-            for regime, probability in zip(self.REGIME_ORDER, probabilities)
+            regime: max(weight / total, self.config.posterior_floor)
+            for regime, weight in zip(self.REGIME_ORDER, weights)
         }
 
     def _predicted_probabilities(self, timestamp_ns: int) -> dict[MicrostructureRegime, float]:
@@ -199,13 +200,21 @@ class RegimeInferencer:
         if dt_ns <= 0:
             return dict(self.previous_probabilities)
 
-        transition = self._transition_matrix(dt_ns)
-        previous = np.array([self.previous_probabilities.get(regime, self.config.posterior_floor) for regime in self.REGIME_ORDER], dtype=float)
-        predicted = previous @ transition
-        predicted = np.maximum(predicted, self.config.posterior_floor)
-        predicted /= np.sum(predicted)
+        floor = self.config.posterior_floor
+        previous = tuple(self.previous_probabilities.get(regime, floor) for regime in self.REGIME_ORDER)
+        predicted = [0.0] * len(self.REGIME_ORDER)
+        for row_index, previous_probability in enumerate(previous):
+            holding_time_ns = max(self._cached_holding_times_ns[row_index], 1)
+            stay_probability = min(max(exp(-dt_ns / holding_time_ns), floor), 1.0)
+            predicted[row_index] += previous_probability * stay_probability
+            leave_mass = previous_probability * max(1.0 - stay_probability, 0.0)
+            for column_index, weight in enumerate(self._transition_leave_weights[row_index]):
+                predicted[column_index] += leave_mass * weight
+
+        predicted = [max(probability, floor) for probability in predicted]
+        total = sum(predicted)
         return {
-            regime: float(probability)
+            regime: probability / total
             for regime, probability in zip(self.REGIME_ORDER, predicted)
         }
 
@@ -214,52 +223,54 @@ class RegimeInferencer:
         predicted: dict[MicrostructureRegime, float],
         emission: dict[MicrostructureRegime, float],
     ) -> dict[MicrostructureRegime, float]:
-        unnormalized = np.array(
-            [
-                max(predicted.get(regime, self.config.posterior_floor), self.config.posterior_floor)
-                * max(emission.get(regime, self.config.posterior_floor), self.config.posterior_floor)
-                for regime in self.REGIME_ORDER
-            ],
-            dtype=float,
+        floor = self.config.posterior_floor
+        unnormalized = tuple(
+            max(predicted.get(regime, floor), floor)
+            * max(emission.get(regime, floor), floor)
+            for regime in self.REGIME_ORDER
         )
-        total = float(np.sum(unnormalized))
+        total = sum(unnormalized)
         if total <= 0:
             return self._initial_probabilities()
-        filtered = np.maximum(unnormalized / total, self.config.posterior_floor)
-        filtered /= np.sum(filtered)
+        filtered = tuple(max(probability / total, floor) for probability in unnormalized)
+        filtered_total = sum(filtered)
         return {
-            regime: float(probability)
+            regime: probability / filtered_total
             for regime, probability in zip(self.REGIME_ORDER, filtered)
         }
 
     def _transition_matrix(self, dt_ns: int) -> np.ndarray:
-        base_prior = self._cached_base_prior
-        n = len(self.REGIME_ORDER)
-        matrix = np.zeros((n, n), dtype=float)
-        for row_index in range(n):
-            holding_time_ns = max(int(self._cached_holding_times_ns[row_index]), 1)
-            stay_probability = exp(-dt_ns / holding_time_ns)
-            stay_probability = min(max(stay_probability, self.config.posterior_floor), 1.0)
+        rows: list[list[float]] = []
+        for row_index, leave_weights in enumerate(self._transition_leave_weights):
+            holding_time_ns = max(self._cached_holding_times_ns[row_index], 1)
+            stay_probability = min(
+                max(exp(-dt_ns / holding_time_ns), self.config.posterior_floor),
+                1.0,
+            )
             leave_mass = max(1.0 - stay_probability, 0.0)
-
-            off_diagonal = base_prior * self._off_diagonal_masks[row_index]
-            off_diagonal_total = float(np.sum(off_diagonal))
-            if off_diagonal_total <= 0:
-                off_diagonal = self._off_diagonal_masks[row_index] / max(n - 1, 1)
-                off_diagonal_total = float(np.sum(off_diagonal))
-
-            matrix[row_index, :] = leave_mass * (off_diagonal / off_diagonal_total)
-            matrix[row_index, row_index] = stay_probability
-        return matrix
+            row = [leave_mass * weight for weight in leave_weights]
+            row[row_index] = stay_probability
+            rows.append(row)
+        return np.asarray(rows, dtype=float)
 
     def _initial_probabilities(self) -> dict[MicrostructureRegime, float]:
-        priors = np.array([self._base_prior(regime) for regime in self.REGIME_ORDER], dtype=float)
-        priors = np.maximum(priors, self.config.posterior_floor)
-        priors /= np.sum(priors)
+        priors = tuple(max(prior, self.config.posterior_floor) for prior in self._cached_base_prior)
+        total = sum(priors)
         return {
-            regime: float(probability)
+            regime: probability / total
             for regime, probability in zip(self.REGIME_ORDER, priors)
         }
+
+    def _leave_weights(self, row_index: int) -> tuple[float, ...]:
+        weights = tuple(
+            0.0 if index == row_index else prior
+            for index, prior in enumerate(self._cached_base_prior)
+        )
+        total = sum(weights)
+        if total <= 0:
+            denominator = max(len(self.REGIME_ORDER) - 1, 1)
+            return tuple(0.0 if index == row_index else 1.0 / denominator for index in range(len(weights)))
+        return tuple(weight / total for weight in weights)
 
     def _base_prior(self, regime: MicrostructureRegime) -> float:
         if self.regime_calibration is not None:

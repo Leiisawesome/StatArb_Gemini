@@ -386,6 +386,28 @@ def test_simulator_paper_runner_produces_update_and_execution_summary() -> None:
     assert summary["fill_count"] >= 0.0
 
 
+def test_simulator_paper_runner_can_discard_updates_without_losing_summary() -> None:
+    source = InMemoryMassiveDataSource(
+        [
+            {"ev": "Q", "sym": "AAPL", "t": 1710163800000000000, "bp": 100.0, "ap": 100.02, "bs": 100, "as": 100},
+            {"ev": "Q", "sym": "AAPL", "t": 1710163801000000000, "bp": 100.01, "ap": 100.03, "bs": 200, "as": 80},
+            {"ev": "T", "sym": "AAPL", "t": 1710163802000000000, "p": 100.03, "s": 50, "side": "buy"},
+        ]
+    )
+    events = list(source.subscribe_live(LiveSubscriptionRequest(symbols=("AAPL",))))
+    config = RunnerConfig(symbols=("AAPL",), mode="paper", latency_ms=100)
+    retaining_runner = SimulatorPaperTradingRunner(events=events)
+    compact_runner = SimulatorPaperTradingRunner(events=events, retain_updates=False)
+
+    retaining_runner.start(config)
+    compact_runner.start(config)
+
+    assert retaining_runner.updates
+    assert compact_runner.updates == []
+    assert compact_runner.execution_summary() == retaining_runner.execution_summary()
+    assert compact_runner.monitoring_frame().equals(retaining_runner.monitoring_frame())
+
+
 def test_routed_live_runner_submits_requests_and_ingests_external_reports() -> None:
     class FakeRouter:
         def __init__(self) -> None:

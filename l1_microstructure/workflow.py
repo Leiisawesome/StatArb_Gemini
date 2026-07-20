@@ -173,6 +173,7 @@ class ArtifactDrivenResearchWorkflow:
             framework_config=self.framework_config,
             runtime_artifacts=bundle,
             monitoring_sink=monitoring_sink,
+            retain_updates=False,
         )
         runner.start(validation_runner_config)
         replay_summary = runner.execution_summary()
@@ -455,6 +456,7 @@ class ArtifactDrivenResearchWorkflow:
                 framework_config=self.framework_config,
                 runtime_artifacts=bundle,
                 monitoring_sink=split_sink,
+                retain_updates=False,
             )
             runner.start(runner_config)
             split_frame = runner.monitoring_frame()
