@@ -285,6 +285,75 @@ class _Runtime(ProductionRuntime):
         self.machines = {symbol: _Machine() for symbol in self.config.symbols}
 
 
+def test_production_runtime_batches_framework_evidence_without_losing_order_links(tmp_path) -> None:
+    runtime = _Runtime(_config(tmp_path), source=_Source(), router=_Router())
+    state = SimpleNamespace(label="state")
+    regime = SimpleNamespace(dominant_regime=SimpleNamespace(value="calm_liquidity"))
+    update = SimpleNamespace(
+        state=state,
+        regime=regime,
+        intent=None,
+        submitted_requests=[],
+    )
+    base_timestamp_ns = 1_000_000_000
+
+    for index in range(10_000):
+        event = QuoteEvent("AAPL", base_timestamp_ns + index * 1_000_000, 100.0, 100.01, 100, 100)
+        runtime._record_framework_activity(event, update)
+
+    order_update = SimpleNamespace(
+        state=state,
+        regime=regime,
+        intent=SimpleNamespace(action=SimpleNamespace(value="buy")),
+        submitted_requests=[SimpleNamespace(client_order_id="client-1")],
+    )
+    runtime._record_framework_activity(
+        QuoteEvent("AAPL", base_timestamp_ns + 9_999_500_000, 100.0, 100.01, 100, 100),
+        order_update,
+    )
+
+    evidence = runtime.ledger.recent_events(100, category="market", event_type="framework_update")
+
+    assert len(evidence) <= 12
+    assert sum(event["payload"]["update_count"] for event in evidence) == 10_001
+    assert {
+        client_order_id
+        for event in evidence
+        for client_order_id in event["payload"]["submitted_client_order_ids"]
+    } == {"client-1"}
+    runtime._flush_framework_activity()
+    assert runtime.ledger.event_count(category="market", event_type="framework_update") == len(evidence)
+    runtime.stop()
+
+
+def test_production_runtime_persists_broker_state_only_after_reports(tmp_path) -> None:
+    runtime = _Runtime(_config(tmp_path), source=_Source(), router=_Router())
+    runtime.start()
+    persistence_calls: list[str] = []
+    runtime._persist_positions = lambda: persistence_calls.append("positions")
+    runtime._persist_router_recovery_state = lambda: persistence_calls.append("recovery")
+    healthy = lambda: {"connected": True, "status": "healthy"}
+    runtime.execution_service = SimpleNamespace(
+        health=healthy,
+        poll=lambda *args, **kwargs: [],
+        stop=lambda: None,
+    )
+
+    runtime._poll_reports()
+
+    assert persistence_calls == []
+
+    runtime.execution_service = SimpleNamespace(
+        health=healthy,
+        poll=lambda *args, **kwargs: [object()],
+        stop=lambda: None,
+    )
+    runtime._poll_reports()
+
+    assert persistence_calls == ["positions", "recovery"]
+    runtime.stop()
+
+
 class _TransientMarketDataSource(_Source):
     def __init__(self, failures: list[Exception]) -> None:
         self.failures = list(failures)

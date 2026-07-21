@@ -102,8 +102,12 @@ class TransparentStatisticalEngine:
         self.outcomes = MultiHorizonOutcomeTracker(artifacts.hierarchical_transition_model.horizons_ns)
         self.utility_engine = ExpectedUtilityDecisionEngine(artifacts.utility_model)
         self.previous_state: ObservedState | None = None
+        self.late_event_count = 0
 
     def on_event(self, event: MarketEvent) -> TransparentFrameworkUpdate | None:
+        if self.previous_state is not None and event.timestamp_ns < self.previous_state.timestamp_ns:
+            self.late_event_count += 1
+            return None
         state = self.feature_engine.update(event)
         return None if state is None else self.on_state(state)
 

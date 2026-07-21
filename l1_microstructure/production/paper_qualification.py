@@ -141,6 +141,9 @@ class PaperSessionEvaluator:
         framework_events = [
             event for event in events if event["category"] == "market" and event["event_type"] == "framework_update"
         ]
+        framework_update_count = sum(
+            max(int(event["payload"].get("update_count", 1)), 1) for event in framework_events
+        )
         blocked_events = [
             event for event in events if event["category"] == "risk" and event["event_type"] == "order_blocked"
         ]
@@ -220,7 +223,7 @@ class PaperSessionEvaluator:
                 "market framework activity is recorded"
                 if framework_events
                 else "no market framework activity is recorded",
-                {"framework_update_count": len(framework_events)},
+                {"framework_update_count": framework_update_count},
             ),
             PaperSessionCheck(
                 "orders.unique_client_ids",
@@ -276,7 +279,7 @@ class PaperSessionEvaluator:
         )
         metrics = {
             "audit_event_count": len(events),
-            "framework_update_count": len(framework_events),
+            "framework_update_count": framework_update_count,
             "order_count": len(orders),
             "acknowledgement_count": len(acknowledgement_events),
             "execution_report_count": len(report_events),

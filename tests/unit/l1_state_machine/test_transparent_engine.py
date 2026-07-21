@@ -132,6 +132,22 @@ def test_transparent_engine_integrates_transition_horizons_and_online_outcomes()
     assert all(outcome.horizon_ns in HORIZONS for outcome in resolved.resolved_outcomes)
 
 
+def test_transparent_engine_ignores_late_events_before_mutating_features() -> None:
+    artifacts, _ = _artifacts()
+    engine = TransparentStatisticalEngine(artifacts)
+    latest = QuoteEvent("AAPL", 2_000, 100.0, 100.01, 100, 100)
+    late = QuoteEvent("AAPL", 1_900, 99.0, 99.01, 100, 100)
+
+    first = engine.on_event(latest)
+    assert first is not None
+    original_book = engine.feature_engine.current_book
+
+    assert engine.on_event(late) is None
+    assert engine.previous_state is first.state
+    assert engine.feature_engine.current_book is original_book
+    assert engine.late_event_count == 1
+
+
 def test_transparent_engine_outcome_recovery_validates_horizons() -> None:
     artifacts, states = _artifacts()
     engine = TransparentStatisticalEngine(artifacts)

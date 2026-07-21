@@ -42,6 +42,21 @@ def test_feature_engine_projects_observable_state() -> None:
     assert state.label.count("|") == 4
 
 
+def test_state_machine_ignores_late_events_before_mutating_features() -> None:
+    machine = L1MicrostructureStateMachine()
+    latest = _quote(2_000_000_000, 100.00, 100.02, 200, 100)
+    late = _quote(1_900_000_000, 99.00, 99.02, 100, 200)
+
+    first = machine.on_event(latest)
+    assert first is not None
+    original_book = machine.feature_engine.current_book
+
+    assert machine.on_event(late) is None
+    assert machine.previous_state is first.state
+    assert machine.feature_engine.current_book is original_book
+    assert machine.late_event_count == 1
+
+
 def test_transition_kernel_regularizes_probabilities() -> None:
     kernel = TransitionKernel()
     edge = EdgeKey("a", "b", MicrostructureRegime.CALM_LIQUIDITY)

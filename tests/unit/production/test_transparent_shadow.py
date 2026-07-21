@@ -58,6 +58,7 @@ class _Router:
 class _Candidate:
     def __init__(self, *, fails: bool = False) -> None:
         self.fails = fails
+        self.late_event_count = 0
 
     def on_event(self, _event):
         if self.fails:
@@ -109,6 +110,7 @@ def test_runtime_records_bounded_failure_isolated_transparent_shadow_summary(tmp
     )[0]["payload"]
     assert payload["candidate_update_count"] == 1
     assert payload["candidate_error_count"] == 1
+    assert payload["candidate_late_event_count"] == 0
     assert payload["routing_engine_version"] == "v1"
     assert payload["campaign_fingerprint"] == "frozen"
     assert len(runtime._shadow_candidate_latencies) <= 4096

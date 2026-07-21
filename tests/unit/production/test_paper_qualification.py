@@ -99,6 +99,34 @@ def test_paper_qualification_requires_ten_trailing_passing_sessions(tmp_path) ->
     ledger.close()
 
 
+def test_paper_qualification_counts_batched_and_legacy_framework_evidence(tmp_path) -> None:
+    ledger = OperationalLedger(tmp_path / "runtime.sqlite3")
+    day = _business_days()[0]
+    _seed_session(ledger, day)
+    ledger.append_event(
+        "market",
+        "framework_update",
+        {
+            "symbol": "AAPL",
+            "timestamp_ns": 2,
+            "state": "state",
+            "regime": "neutral",
+            "intent": None,
+            "submitted_client_order_ids": [],
+            "update_count": 249,
+        },
+        timestamp=_timestamp(day, 14, 1),
+    )
+
+    evaluation = PaperSessionEvaluator(ledger).evaluate_and_record(day)
+
+    assert evaluation.passed is True
+    assert evaluation.metrics["framework_update_count"] == 250
+    activity_check = {check.code: check for check in evaluation.checks}["market.activity_recorded"]
+    assert activity_check.details["framework_update_count"] == 250
+    ledger.close()
+
+
 def test_failed_or_unfinalized_attempt_breaks_trailing_streak(tmp_path) -> None:
     ledger = OperationalLedger(tmp_path / "runtime.sqlite3")
     evaluator = PaperSessionEvaluator(ledger, PaperQualificationPolicy(required_consecutive_sessions=2))

@@ -27,7 +27,7 @@ from l1_microstructure.live.recovery import (
     BrokerRouterRecoveryState,
 )
 from l1_microstructure.monitoring import AlertCategory, AlertSeverity, OperationalAlertManager
-from l1_microstructure.pipeline import L1MicrostructureStateMachine
+from l1_microstructure.pipeline import FrameworkUpdate, L1MicrostructureStateMachine
 from l1_microstructure.risk import OpenPosition
 from l1_microstructure.retry import RetryExecutor, RetryResult
 from l1_microstructure.transitions import EdgeKey
@@ -45,6 +45,7 @@ class ProductionRuntime:
     """Owns live engines and keeps broker-facing operation fail closed."""
 
     BROKER_RECOVERY_STATE_KEY = "broker_router_recovery_state"
+    FRAMEWORK_EVIDENCE_INTERVAL_NS = 1_000_000_000
 
     def __init__(
         self,
@@ -90,6 +91,9 @@ class ProductionRuntime:
         self._campaign_fingerprint: str | None = None
         self.last_event_timestamp_ns: dict[str, int] = {}
         self.first_event_timestamp_ns: dict[str, int] = {}
+        self._pending_framework_update_counts: dict[str, int] = {}
+        self._pending_framework_update_payloads: dict[str, dict[str, Any]] = {}
+        self._last_framework_evidence_timestamp_ns: dict[str, int] = {}
         self._lock = RLock()
         self._running = False
         self._shutdown = False
@@ -278,18 +282,7 @@ class ProductionRuntime:
             return
         if update is None:
             return
-        self.ledger.append_event(
-            "market",
-            "framework_update",
-            {
-                "symbol": event.symbol,
-                "timestamp_ns": event.timestamp_ns,
-                "state": update.state.label,
-                "regime": update.regime.dominant_regime.value,
-                "intent": update.intent.action.value if update.intent is not None else None,
-                "submitted_client_order_ids": [request.client_order_id for request in update.submitted_requests],
-            },
-        )
+        self._record_framework_activity(event, update)
         for request in update.submitted_requests:
             if self._may_route(request):
                 self._route(request)
@@ -368,6 +361,7 @@ class ProductionRuntime:
     def stop(self) -> None:
         self._shutdown = True
         self._running = False
+        self._flush_framework_activity()
         if self.lifecycle.state is LifecycleState.RUNNING:
             self.pause("runtime stopping")
         self.execution_service.stop()
@@ -674,6 +668,10 @@ class ProductionRuntime:
                     for engine in self.transparent_shadow_engines.values()
                 ),
                 "candidate_error_count": self._shadow_candidate_errors,
+                "candidate_late_event_count": sum(
+                    int(getattr(engine, "late_event_count", 0))
+                    for engine in self.transparent_shadow_engines.values()
+                ),
                 "comparison_count": self._shadow_comparisons,
                 "action_disagreement_rate": self._shadow_action_disagreements / max(self._shadow_comparisons, 1),
                 "baseline_p95_latency_ns": self._p95(self._shadow_baseline_latencies),
@@ -857,13 +855,14 @@ class ProductionRuntime:
                 metadata={"retry": health.get("retry", {})},
             )
             return
-        self.execution_service.poll(
+        reports = self.execution_service.poll(
             self.config.symbols,
             consumer_for_symbol=self.machines.get,
             after_report=self._record_execution_report,
         )
-        self._persist_positions()
-        self._persist_router_recovery_state()
+        if reports:
+            self._persist_positions()
+            self._persist_router_recovery_state()
 
     def _persist_router_recovery_state(self) -> None:
         state = self.execution_service.snapshot_recovery_state()
@@ -1030,6 +1029,7 @@ class ProductionRuntime:
         session_date = local.date().isoformat()
         if self.ledger.get_state("last_closed_session_date") == session_date:
             return
+        self._flush_framework_activity()
         positions = {
             symbol: (1.0 if position.side is TradeAction.BUY else -1.0) * float(position.quantity)
             for symbol, machine in self.machines.items()
@@ -1081,6 +1081,9 @@ class ProductionRuntime:
                     timestamp=local.astimezone(timezone.utc).isoformat(),
                 )
             return
+        self._pending_framework_update_counts.clear()
+        self._pending_framework_update_payloads.clear()
+        self._last_framework_evidence_timestamp_ns.clear()
         self._shadow_baseline_latencies.clear()
         self._shadow_candidate_latencies.clear()
         self._shadow_candidate_updates = 0
@@ -1275,6 +1278,7 @@ class ProductionRuntime:
         symbol: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> None:
+        self._flush_framework_activity()
         if self.lifecycle.state is not LifecycleState.HALTED:
             self._transition(LifecycleState.HALTED, reason)
         self._running = False
@@ -1291,6 +1295,41 @@ class ProductionRuntime:
             "runtime_halted",
             {"reason": reason, "alert": alert.to_dict() if alert is not None else None},
         )
+
+    def _record_framework_activity(self, event: MarketEvent, update: FrameworkUpdate) -> None:
+        """Persist bounded activity evidence without a FULL SQLite commit per market event."""
+        symbol = event.symbol
+        payload = {
+            "symbol": symbol,
+            "timestamp_ns": event.timestamp_ns,
+            "state": update.state.label,
+            "regime": update.regime.dominant_regime.value,
+            "intent": update.intent.action.value if update.intent is not None else None,
+            "submitted_client_order_ids": [request.client_order_id for request in update.submitted_requests],
+        }
+        pending_count = self._pending_framework_update_counts.get(symbol, 0) + 1
+        self._pending_framework_update_counts[symbol] = pending_count
+        self._pending_framework_update_payloads[symbol] = payload
+        previous_timestamp_ns = self._last_framework_evidence_timestamp_ns.get(symbol)
+        interval_elapsed = (
+            previous_timestamp_ns is None
+            or event.timestamp_ns - previous_timestamp_ns >= self.FRAMEWORK_EVIDENCE_INTERVAL_NS
+        )
+        if interval_elapsed or update.submitted_requests:
+            self._persist_framework_activity(symbol)
+
+    def _flush_framework_activity(self) -> None:
+        for symbol in tuple(self._pending_framework_update_counts):
+            self._persist_framework_activity(symbol)
+
+    def _persist_framework_activity(self, symbol: str) -> None:
+        update_count = self._pending_framework_update_counts.pop(symbol, 0)
+        payload = self._pending_framework_update_payloads.pop(symbol, None)
+        if update_count <= 0 or payload is None:
+            return
+        payload["update_count"] = update_count
+        self.ledger.append_event("market", "framework_update", payload)
+        self._last_framework_evidence_timestamp_ns[symbol] = int(payload["timestamp_ns"])
 
     def _transition(self, target: LifecycleState, reason: str) -> None:
         transition = self.lifecycle.transition(target, reason)

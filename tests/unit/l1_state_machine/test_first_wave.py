@@ -6,6 +6,8 @@ from datetime import date
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
+import pytest
+
 from l1_microstructure.config import FrameworkConfig
 from l1_microstructure.datasets import PipelineTransitionDatasetBuilder
 from l1_microstructure.events import QuoteEvent
@@ -447,6 +449,37 @@ def test_massive_websocket_data_source_streams_and_filters_messages() -> None:
     assert events[0].timestamp_ns == _et_ns(2024, 3, 11, 9, 30, 0)
     assert events[1].timestamp_ns == _et_ns(2024, 3, 11, 9, 30, 7)
     assert fake_client.closed is True
+
+
+def test_massive_websocket_data_source_reorders_cross_channel_events() -> None:
+    class FakeWebSocketClient:
+        def run(self, handle_msg, **kwargs) -> None:
+            handle_msg(
+                json.dumps(
+                    [
+                        {"ev": "Q", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 0), "bp": 100.0, "ap": 100.02, "bs": 100, "as": 100},
+                        {"ev": "T", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 0) + 200_000_000, "p": 100.01, "s": 100},
+                        {"ev": "Q", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 0) + 100_000_000, "bp": 100.01, "ap": 100.03, "bs": 120, "as": 80},
+                    ]
+                )
+            )
+
+        async def close(self) -> None:
+            return None
+
+    source = MassiveWebSocketDataSource(
+        MassiveWebSocketConfig(endpoint="wss://example.invalid", api_key="secret"),
+        client_factory=lambda config, request: FakeWebSocketClient(),
+    )
+
+    events = list(source.subscribe_live(LiveSubscriptionRequest(symbols=("AAPL",))))
+
+    assert [event.timestamp_ns for event in events] == sorted(event.timestamp_ns for event in events)
+
+
+def test_massive_websocket_config_rejects_negative_reorder_window() -> None:
+    with pytest.raises(ValueError, match="reorder window"):
+        MassiveWebSocketConfig(reorder_window_seconds=-0.001)
 
 
 def test_massive_websocket_data_source_filters_active_auction_status_messages() -> None:
