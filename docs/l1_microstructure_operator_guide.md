@@ -206,8 +206,8 @@ python -m l1_microstructure workflow `
 Operational notes:
 
 1. `--trade-date` is required and may be repeated for completed sessions.
-2. With the default two-session consensus requirement, qualifying walk-forward validation needs at least three dates: two training sessions and one held-out session.
-3. Edge posteriors use equal-weighted per-session drift means. Edges with fewer than two training sessions, less than 60% directional agreement, below-chance leave-one-session-out hit rate, or less than 60% cross-session hit-rate agreement abstain from trading. The leave-one-session-out check fits direction on the other training sessions, so a few large same-sign outliers cannot make a usually wrong edge look stable.
+2. With the default four-session evidence requirement, qualifying walk-forward validation needs at least five dates: four training sessions and one held-out session.
+3. Edge posteriors use equal-weighted per-session drift means. Edges with fewer than four training sessions, less than 60% directional agreement, below-chance leave-one-session-out hit rate, or less than 60% cross-session hit-rate agreement abstain from trading. The leave-one-session-out check fits direction on the other training sessions, so a few large same-sign outliers cannot make a usually wrong edge look stable.
 4. Stateful feature, regime, transition, and replay components reset at every session boundary. Complete-session training panels are reused across splits; partial-session custom splits are rebuilt from raw events.
 5. The command uses the historical source, not a local payload file.
 6. `--transition-threshold 0.0` is useful only for smoke tests and tiny datasets because it forces observable transitions.

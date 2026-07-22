@@ -272,7 +272,7 @@ def test_validation_rebuilds_panels_from_only_the_training_window(tmp_path, monk
 
 def test_multi_session_workflow_resets_state_and_uses_expanding_walk_forward_splits(tmp_path, monkeypatch) -> None:
     payloads = []
-    for day, price_offset in ((11, 0.0), (12, 1.0), (13, 2.0)):
+    for day, price_offset in ((11, 0.0), (12, 1.0), (13, 2.0), (14, 3.0), (15, 4.0)):
         payloads.extend(
             [
                 {
@@ -335,7 +335,7 @@ def test_multi_session_workflow_resets_state_and_uses_expanding_walk_forward_spl
 
     assert len(combined_state.frame) == sum(state_rows for state_rows, _ in per_session_rows)
     assert len(combined_transitions.frame) == sum(transition_rows for _, transition_rows in per_session_rows)
-    assert combined_transitions.frame["session_date"].nunique() == 3
+    assert combined_transitions.frame["session_date"].nunique() == 5
 
     build_calls = 0
     original_build_panels = workflow._build_panels
@@ -351,18 +351,24 @@ def test_multi_session_workflow_resets_state_and_uses_expanding_walk_forward_spl
 
     assert result.validation_report.metadata["split_count"] == 1
     assert set(result.validation_report.metadata["activation_diagnostics"]) == {
-        "walk-forward-2024-03-13",
+        "walk-forward-2024-03-15",
     }
-    assert manifest["trade_date"] == "2024-03-13"
-    assert manifest["training_session_dates"] == ["2024-03-11", "2024-03-12", "2024-03-13"]
-    assert manifest["metadata"]["training_session_count"] == 3
+    assert manifest["trade_date"] == "2024-03-15"
+    assert manifest["training_session_dates"] == [
+        "2024-03-11",
+        "2024-03-12",
+        "2024-03-13",
+        "2024-03-14",
+        "2024-03-15",
+    ]
+    assert manifest["metadata"]["training_session_count"] == 5
     assert result.activation_summary["transition_count"] > 0
     assert build_calls == 1
 
 
 def test_session_consensus_workflow_rejects_too_few_dates(tmp_path) -> None:
     payloads = []
-    for day in (11, 12):
+    for day in (11, 12, 13, 14):
         payloads.extend(
             [
                 {
@@ -392,5 +398,5 @@ def test_session_consensus_workflow_rejects_too_few_dates(tmp_path) -> None:
     config.transition.mahalanobis_threshold = 0.0
     workflow = ArtifactDrivenResearchWorkflow(tmp_path, framework_config=config)
 
-    with __import__("pytest").raises(ValueError, match="requires at least 3 completed trade dates"):
+    with __import__("pytest").raises(ValueError, match="requires at least 5 completed trade dates"):
         workflow.run(symbol="AAPL", events=events)

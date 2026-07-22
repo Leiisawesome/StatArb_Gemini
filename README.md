@@ -132,12 +132,14 @@ Build a leakage-safe expanding walk-forward run by repeating `--trade-date` for 
 python -m l1_microstructure workflow `
   --artifact-root output/l1_microstructure_artifacts `
   --symbol AAPL `
+  --trade-date 2024-03-06 `
+  --trade-date 2024-03-07 `
   --trade-date 2024-03-08 `
   --trade-date 2024-03-11 `
   --trade-date 2024-03-12
 ```
 
-After the configured minimum of two training sessions, each later session is
+After the configured minimum of four training sessions, each later session is
 evaluated against prior sessions only. Edge direction uses equal-weighted
 per-session means and abstains when session support, sign consensus, or
 leave-one-session-out directional reliability is weak.

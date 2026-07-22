@@ -19,7 +19,7 @@ class RollingValidationHarness:
     minimum_regime_coverage: float = 0.5
     minimum_hit_rate: float = 0.5
     minimum_directional_test_rows: int = 30
-    minimum_edge_training_sessions: int = 2
+    minimum_edge_training_sessions: int = 4
     minimum_directional_consensus: float = 0.60
     minimum_cross_session_hit_rate: float = 0.50
     minimum_cross_session_hit_consensus: float = 0.60

@@ -264,6 +264,7 @@ def test_validation_scores_only_session_consensus_edges() -> None:
     )
     harness = RollingValidationHarness(
         minimum_test_rows=2,
+        minimum_edge_training_sessions=2,
         minimum_directional_test_rows=1,
         minimum_decay_ratio=0.1,
         minimum_fill_rate=0.0,
@@ -315,6 +316,7 @@ def test_validation_rejects_mean_signs_driven_by_directional_outliers() -> None:
         }
     ]
     harness = RollingValidationHarness(
+        minimum_edge_training_sessions=2,
         minimum_directional_test_rows=1,
         minimum_fill_rate=0.0,
         bootstrap_sample_count=0,
