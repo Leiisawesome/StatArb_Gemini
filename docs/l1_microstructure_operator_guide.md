@@ -184,7 +184,7 @@ Focus on these output fields:
 
 Purpose:
 
-1. load historical events for one symbol and trade date
+1. load historical events for one symbol and one or more trade dates
 2. build state and transition panels
 3. calibrate runtime artifacts
 4. train the transition model
@@ -199,15 +199,20 @@ python -m l1_microstructure workflow `
   --artifact-root <artifact-folder> `
   --symbol <ticker> `
   --trade-date <yyyy-mm-dd> `
+  [--trade-date <yyyy-mm-dd> ...] `
   [--transition-threshold <float>]
 ```
 
 Operational notes:
 
-1. `--trade-date` is required.
-2. The command uses the historical source, not a local payload file.
-3. `--transition-threshold 0.0` is useful for smoke tests and tiny datasets because it forces observable transitions.
-4. A full-day workflow run can take materially longer than broker smoke commands or single-quote checks because it paginates historical quotes and trades before artifact generation begins.
+1. `--trade-date` is required and may be repeated for completed sessions.
+2. With the default two-session consensus requirement, qualifying walk-forward validation needs at least three dates: two training sessions and one held-out session.
+3. Edge posteriors use equal-weighted per-session drift means. Edges with fewer than two training sessions or less than 60% directional agreement abstain from trading.
+4. Stateful feature, regime, transition, and replay components reset at every session boundary. Complete-session training panels are reused across splits; partial-session custom splits are rebuilt from raw events.
+5. The command uses the historical source, not a local payload file.
+6. `--transition-threshold 0.0` is useful only for smoke tests and tiny datasets because it forces observable transitions.
+7. Full-day workflow runs can take materially longer than broker smoke commands because each requested session is paginated before artifact generation begins.
+8. The output and monitored-replay artifact include `activation_summary`, which counts transitions, actionable intents, risk approvals, and decision/risk rejection reasons.
 
 ## 6.2 `list-runs`
 

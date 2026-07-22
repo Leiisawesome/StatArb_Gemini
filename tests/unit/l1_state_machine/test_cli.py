@@ -98,6 +98,43 @@ def test_cli_workflow_command_runs_end_to_end(tmp_path, capsys) -> None:
     assert "validation_failures" in payload
 
 
+def test_cli_workflow_accepts_repeated_trade_dates_for_walk_forward_validation(tmp_path, capsys) -> None:
+    second_day_payloads = [
+        {**payload, "t": int(payload["t"]) + 24 * 60 * 60 * 1_000_000_000}
+        for payload in _payloads()
+    ]
+    third_day_payloads = [
+        {**payload, "t": int(payload["t"]) + 2 * 24 * 60 * 60 * 1_000_000_000}
+        for payload in _payloads()
+    ]
+    source = FixtureMarketDataSource([*_payloads(), *second_day_payloads, *third_day_payloads])
+
+    with patch("l1_microstructure.cli._historical_source", return_value=source):
+        exit_code = main(
+            [
+                "workflow",
+                "--artifact-root",
+                str(tmp_path / "artifacts"),
+                "--symbol",
+                "AAPL",
+                "--trade-date",
+                "2024-03-11",
+                "--trade-date",
+                "2024-03-12",
+                "--trade-date",
+                "2024-03-13",
+                "--transition-threshold",
+                "0.0",
+                "--allow-unexecuted-validation",
+            ]
+        )
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["trade_dates"] == ["2024-03-11", "2024-03-12", "2024-03-13"]
+    assert payload["activation_summary"]["transition_count"] > 0
+
+
 def test_cli_transparent_workflow_reports_validation_and_artifacts(tmp_path, capsys) -> None:
     report = SimpleNamespace(to_dict=lambda: {"passed": True})
     manifest = SimpleNamespace(artifact_ids={"state_vector_model": "vector-id"})

@@ -35,6 +35,8 @@ class TransitionConfig:
     drift_horizon_ms: int = 3000
     drift_horizons_ms: tuple[int, ...] = (3000, 15000, 60000)
     min_edge_observations: int = 200
+    min_edge_training_sessions: int = 2
+    min_directional_consensus: float = 0.60
     min_sharpe_stability: float = 0.35
     adversarial_decay_gamma: float = 0.0025
 

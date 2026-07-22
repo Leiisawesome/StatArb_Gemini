@@ -126,15 +126,23 @@ Current commands implemented by `l1_microstructure/cli.py` are:
 
 ### Example commands
 
-Build a workflow run for one symbol and one trade date:
+Build a leakage-safe expanding walk-forward run by repeating `--trade-date` for completed sessions:
 
 ```powershell
 python -m l1_microstructure workflow `
   --artifact-root output/l1_microstructure_artifacts `
   --symbol AAPL `
+  --trade-date 2024-03-08 `
   --trade-date 2024-03-11 `
-  --transition-threshold 0.0
+  --trade-date 2024-03-12
 ```
+
+After the configured minimum of two training sessions, each later session is
+evaluated against prior sessions only. Edge direction uses equal-weighted
+per-session means and abstains when session support or sign consensus is weak.
+Feature, regime, transition, and replay state reset at every session boundary. A single
+`--trade-date` remains available for smoke testing and uses the legacy intraday
+half split.
 
 Inspect saved runs:
 

@@ -39,6 +39,7 @@ def test_rolling_validation_harness_passes_on_stable_split() -> None:
         minimum_test_rows=2,
         minimum_regime_coverage=1.0,
         minimum_hit_rate=0.5,
+        minimum_directional_test_rows=2,
         minimum_decay_ratio=0.5,
         minimum_fill_rate=0.5,
         maximum_cancel_rate=0.5,
@@ -205,4 +206,86 @@ def test_validation_hit_rate_scores_trained_direction_not_unconditional_drift_si
         ],
     )
 
+    assert report.summary["mean_test_hit_rate"] == 1.0
+
+
+def test_validation_scores_only_session_consensus_edges() -> None:
+    dataset = pd.DataFrame(
+        [
+            {
+                "timestamp": "2024-01-02T14:30:00Z",
+                "session_date": "2024-01-02",
+                "from_state": "stable",
+                "to_state": "next",
+                "regime": "execution_flow",
+                "realized_drift_bps": 1.0,
+            },
+            {
+                "timestamp": "2024-01-02T14:31:00Z",
+                "session_date": "2024-01-02",
+                "from_state": "unstable",
+                "to_state": "next",
+                "regime": "execution_flow",
+                "realized_drift_bps": 5.0,
+            },
+            {
+                "timestamp": "2024-01-03T14:30:00Z",
+                "session_date": "2024-01-03",
+                "from_state": "stable",
+                "to_state": "next",
+                "regime": "execution_flow",
+                "realized_drift_bps": 2.0,
+            },
+            {
+                "timestamp": "2024-01-03T14:31:00Z",
+                "session_date": "2024-01-03",
+                "from_state": "unstable",
+                "to_state": "next",
+                "regime": "execution_flow",
+                "realized_drift_bps": -4.0,
+            },
+            {
+                "timestamp": "2024-01-04T14:30:00Z",
+                "session_date": "2024-01-04",
+                "from_state": "stable",
+                "to_state": "next",
+                "regime": "execution_flow",
+                "realized_drift_bps": 0.5,
+            },
+            {
+                "timestamp": "2024-01-04T14:31:00Z",
+                "session_date": "2024-01-04",
+                "from_state": "unstable",
+                "to_state": "next",
+                "regime": "execution_flow",
+                "realized_drift_bps": 0.5,
+            },
+        ]
+    )
+    harness = RollingValidationHarness(
+        minimum_test_rows=2,
+        minimum_directional_test_rows=1,
+        minimum_decay_ratio=0.1,
+        minimum_fill_rate=0.0,
+        bootstrap_sample_count=0,
+        minimum_bootstrap_hit_rate_lower_bound=0.0,
+        minimum_bootstrap_decay_ratio_lower_bound=0.0,
+    )
+
+    report = harness.run(
+        dataset,
+        [
+            RegimeSplitSpec(
+                train_start="2024-01-02T14:29:00Z",
+                train_end="2024-01-03T14:59:00Z",
+                test_start="2024-01-04T14:29:00Z",
+                test_end="2024-01-04T14:59:00Z",
+                label="session-consensus",
+            )
+        ],
+    )
+
+    assert report.passed is True
+    assert report.summary["mean_directional_test_rows"] == 1.0
+    assert report.summary["mean_directional_coverage"] == 0.5
     assert report.summary["mean_test_hit_rate"] == 1.0

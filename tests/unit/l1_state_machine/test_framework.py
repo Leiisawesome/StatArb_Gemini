@@ -265,6 +265,8 @@ def test_transition_kernel_mahalanobis_uses_prior_history_only() -> None:
 def test_decision_engine_requires_probability_net_of_costs() -> None:
     config = FrameworkConfig()
     config.transition.min_edge_observations = 3
+    config.transition.min_edge_training_sessions = 0
+    config.transition.min_directional_consensus = 0.0
     decision_engine = DecisionEngine(config.decision, config.transition)
     kernel = TransitionKernel(config.transition)
     edge = EdgeKey("a", "b", MicrostructureRegime.EXECUTION_FLOW)
@@ -278,6 +280,42 @@ def test_decision_engine_requires_probability_net_of_costs() -> None:
     intent = decision_engine.decide(edge, kernel.get_edge(edge), kernel.diagnostic(edge), regime, state)
 
     assert intent.action is TradeAction.BUY
+
+
+def test_decision_engine_requires_stable_multi_session_direction() -> None:
+    config = FrameworkConfig()
+    config.transition.min_edge_observations = 3
+    config.transition.min_edge_training_sessions = 2
+    config.transition.min_directional_consensus = 0.60
+    config.decision.transaction_cost_bps = 0.0
+    config.decision.risk_premium_bps = 0.0
+    config.decision.entry_probability_threshold = 0.5
+    config.decision.min_alpha_score = 0.0
+    config.decision.min_observation_confidence = 0.0
+    decision_engine = DecisionEngine(config.decision, config.transition)
+    kernel = TransitionKernel(config.transition)
+    edge = EdgeKey("a", "b", MicrostructureRegime.EXECUTION_FLOW)
+    for _ in range(3):
+        kernel.observe_transition(edge, 1_000)
+    for sample in (4.0, 5.0, 6.0):
+        kernel.attach_drift(edge, sample)
+
+    state = FeatureEngine().update(_quote(1_000_000_000, 100.0, 100.01, 200, 100))
+    regime = L1MicrostructureStateMachine(config).regime_inferencer.update(state)
+    stats = kernel.get_edge(edge)
+
+    insufficient = decision_engine.decide(edge, stats, kernel.diagnostic(edge), regime, state)
+    assert insufficient.reason == "insufficient session support"
+
+    stats.session_drift_means_bps = [4.0, -3.0]
+    stats.directional_consensus = 0.5
+    unstable = decision_engine.decide(edge, stats, kernel.diagnostic(edge), regime, state)
+    assert unstable.reason == "unstable session direction"
+
+    stats.session_drift_means_bps = [4.0, 5.0]
+    stats.directional_consensus = 1.0
+    stable = decision_engine.decide(edge, stats, kernel.diagnostic(edge), regime, state)
+    assert stable.action is TradeAction.BUY
 
 
 def test_execution_simulator_cancels_when_state_misaligned() -> None:

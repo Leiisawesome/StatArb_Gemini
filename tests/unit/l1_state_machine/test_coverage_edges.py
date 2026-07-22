@@ -68,6 +68,8 @@ def test_decision_engine_sell_path_and_normal_cdf_edge() -> None:
     config = FrameworkConfig()
     config.decision.entry_probability_threshold = 0.55
     config.transition.min_edge_observations = 3
+    config.transition.min_edge_training_sessions = 0
+    config.transition.min_directional_consensus = 0.0
     engine = DecisionEngine(config.decision, config.transition)
     kernel = TransitionKernel(config.transition)
     edge = EdgeKey("a", "b", MicrostructureRegime.EXECUTION_FLOW)
@@ -251,12 +253,16 @@ def test_transitions_load_trained_payload_edges() -> None:
                 "count": 5,
                 "holding_times_ns": [1000, 2000],
                 "drift_samples_bps": [1.0, 2.0],
+                "session_drift_means_bps": [1.5, 1.0],
+                "directional_consensus": 1.0,
             }
         }
     })
     edge = EdgeKey("a", "b", MicrostructureRegime.EXECUTION_FLOW)
     stats = kernel.get_edge(edge)
     assert stats.count == 5 or stats.count == 0
+    assert stats.training_session_count == 2
+    assert stats.directional_consensus == 1.0
 
 
 def test_edge_statistics_signal_to_noise_zero_std() -> None:

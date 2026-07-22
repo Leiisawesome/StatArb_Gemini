@@ -171,4 +171,38 @@ def test_empirical_transition_trainer_builds_and_persists_artifact(tmp_path) -> 
     edge_payload = next(iter(payload["edges"].values()))
     assert edge_payload["transition_probability"] == 1.0
     assert edge_payload["drift_mean_bps"] == 1.5
+    assert edge_payload["training_session_count"] == 1
+    assert edge_payload["directional_consensus"] == 1.0
     assert payload["horizon_models"]["15000000000"]["sample_count"] == 1
+
+
+def test_transition_trainer_uses_equal_weighted_session_consensus() -> None:
+    transition_panel = pd.DataFrame(
+        [
+            {
+                "symbol": "AAPL",
+                "from_state": "a",
+                "to_state": "b",
+                "regime": "execution_flow",
+                "horizon_ns": 3_000_000_000,
+                "holding_time_ns": 1_000,
+                "realized_drift_bps": drift,
+                "session_date": session_date,
+            }
+            for session_date, drifts in (
+                ("2026-07-17", (8.0, 10.0, 12.0)),
+                ("2026-07-20", (-1.0,)),
+                ("2026-07-21", (2.0, 4.0)),
+            )
+            for drift in drifts
+        ]
+    )
+    trainer = EmpiricalTransitionTrainer()
+
+    trainer.fit(trainer.samples_from_frame(transition_panel), runtime_horizon_ns=3_000_000_000)
+
+    edge_payload = next(iter(trainer.last_payload["edges"].values()))
+    assert edge_payload["session_drift_means_bps"] == [10.0, -1.0, 3.0]
+    assert edge_payload["session_balanced_drift_mean_bps"] == 4.0
+    assert edge_payload["training_session_count"] == 3
+    assert edge_payload["directional_consensus"] == 2 / 3

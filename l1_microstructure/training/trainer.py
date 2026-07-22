@@ -138,6 +138,25 @@ class EmpiricalTransitionTrainer:
         for (from_state, to_state, regime), edge_samples in sorted(grouped.items()):
             holding_times = [sample.holding_time_ns for sample in edge_samples]
             drifts = [sample.realized_drift_bps for sample in edge_samples]
+            session_drifts: dict[str, list[float]] = defaultdict(list)
+            for sample in edge_samples:
+                session_id = str(
+                    sample.metadata.get("session_date")
+                    or sample.metadata.get("trade_date")
+                    or "unknown-session"
+                )
+                session_drifts[session_id].append(sample.realized_drift_bps)
+            session_drift_means = [
+                float(sum(values) / len(values)) for _, values in sorted(session_drifts.items())
+            ]
+            session_balanced_mean = float(sum(session_drift_means) / len(session_drift_means))
+            if session_balanced_mean > 0.0:
+                aligned_session_count = sum(value > 0.0 for value in session_drift_means)
+            elif session_balanced_mean < 0.0:
+                aligned_session_count = sum(value < 0.0 for value in session_drift_means)
+            else:
+                aligned_session_count = 0
+            directional_consensus = aligned_session_count / len(session_drift_means)
             total_outgoing = outgoing[(from_state, regime)]
             edge_key = f"{from_state}::{to_state}::{regime}"
             edges[edge_key] = {
@@ -149,6 +168,10 @@ class EmpiricalTransitionTrainer:
                 "mean_holding_time_ns": float(sum(holding_times) / max(len(holding_times), 1)),
                 "drift_mean_bps": float(sum(drifts) / max(len(drifts), 1)),
                 "drift_std_bps": float(stdev(drifts)) if len(drifts) > 1 else 0.0,
+                "training_session_count": len(session_drift_means),
+                "session_drift_means_bps": session_drift_means,
+                "session_balanced_drift_mean_bps": session_balanced_mean,
+                "directional_consensus": directional_consensus,
                 "holding_times_ns": [int(value) for value in holding_times],
                 "drift_samples_bps": [float(value) for value in drifts],
             }

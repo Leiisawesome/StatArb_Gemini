@@ -83,6 +83,7 @@ def _research_workflow(tmp_path, config: FrameworkConfig) -> ArtifactDrivenResea
             minimum_fill_rate=0.0,
             maximum_cancel_rate=1.0,
             maximum_drift_tracking_error_bps=float("inf"),
+            minimum_directional_test_rows=0,
             bootstrap_sample_count=0,
             minimum_bootstrap_hit_rate_lower_bound=0.0,
             minimum_bootstrap_decay_ratio_lower_bound=0.0,

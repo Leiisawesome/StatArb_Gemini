@@ -79,7 +79,12 @@ def build_parser() -> argparse.ArgumentParser:
     workflow_parser = subparsers.add_parser("workflow")
     workflow_parser.add_argument("--artifact-root", required=True)
     workflow_parser.add_argument("--symbol", required=True)
-    workflow_parser.add_argument("--trade-date", required=True)
+    workflow_parser.add_argument(
+        "--trade-date",
+        required=True,
+        action="append",
+        help="completed U.S. session date; repeat for expanding walk-forward validation",
+    )
     workflow_parser.add_argument("--transition-threshold", type=float, default=None)
     workflow_parser.add_argument(
         "--allow-unexecuted-validation",
@@ -188,11 +193,15 @@ def _live_source() -> MassiveWebSocketDataSource:
 
 def _run_workflow_command(args: argparse.Namespace) -> int:
     source = _historical_source()
-    events = list(
-        source.load_historical(
-            HistoricalBatchRequest(symbols=(args.symbol,), trade_date=date.fromisoformat(args.trade_date))
+    requested_dates = args.trade_date if isinstance(args.trade_date, list) else [args.trade_date]
+    trade_dates = tuple(sorted({date.fromisoformat(value) for value in requested_dates}))
+    events = [
+        event
+        for trade_date in trade_dates
+        for event in source.load_historical(
+            HistoricalBatchRequest(symbols=(args.symbol,), trade_date=trade_date)
         )
-    )
+    ]
     workflow = ArtifactDrivenResearchWorkflow(
         args.artifact_root,
         framework_config=_framework_config(args.transition_threshold),
@@ -201,6 +210,7 @@ def _run_workflow_command(args: argparse.Namespace) -> int:
                 minimum_fill_rate=0.0,
                 maximum_cancel_rate=1.0,
                 maximum_drift_tracking_error_bps=float("inf"),
+                minimum_directional_test_rows=0,
                 bootstrap_sample_count=0,
                 minimum_bootstrap_hit_rate_lower_bound=0.0,
                 minimum_bootstrap_decay_ratio_lower_bound=0.0,
@@ -210,7 +220,9 @@ def _run_workflow_command(args: argparse.Namespace) -> int:
         ),
     )
     result = workflow.run(symbol=args.symbol, events=events)
-    print(json.dumps(_workflow_result_to_json(result), sort_keys=True))
+    payload = _workflow_result_to_json(result)
+    payload["trade_dates"] = [value.isoformat() for value in trade_dates]
+    print(json.dumps(payload, sort_keys=True))
     return 0
 
 
@@ -485,6 +497,7 @@ def _workflow_result_to_json(result: Any) -> dict[str, Any]:
         "validation_failures": list(result.validation_report.failures),
         "validation_summary": result.validation_report.summary,
         "replay_summary": result.replay_summary,
+        "activation_summary": getattr(result, "activation_summary", {}),
     }
 
 
@@ -534,6 +547,8 @@ def _quality_metrics_from_metadata(metadata: dict[str, Any]) -> dict[str, float]
         "mean_execution_drift_tracking_error_bps",
         "mean_unseen_edge_rate",
         "mean_test_hit_rate",
+        "mean_directional_test_rows",
+        "mean_directional_coverage",
     )
     return {key: float(metadata[key]) for key in keys if key in metadata}
 
