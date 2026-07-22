@@ -35,6 +35,10 @@ def _framework_config() -> FrameworkConfig:
     config = FrameworkConfig()
     config.transition.mahalanobis_threshold = 0.0
     config.transition.min_edge_observations = 1
+    config.transition.min_edge_training_sessions = 0
+    config.transition.min_directional_consensus = 0.0
+    config.transition.min_cross_session_hit_rate = 0.0
+    config.transition.min_cross_session_hit_consensus = 0.0
     config.decision.min_alpha_score = 0.0
     config.decision.entry_probability_threshold = 0.5
     config.decision.transaction_cost_bps = 0.0
@@ -69,7 +73,7 @@ def _runtime_artifacts(config: FrameworkConfig) -> RuntimeArtifactBundle:
 
 
 def _isolated_broker_env_file(tmp_path: Path) -> str:
-    values = {key: str(value) for key, value in dotenv_values("broker.env").items() if value is not None}
+    values = {key: str(value) for key, value in dotenv_values("broker.paper.env").items() if value is not None}
     values["IBKR_CLIENT_ID"] = "91313"
     env_file = tmp_path / "ibkr_routed_live_smoke.env"
     env_file.write_text("\n".join(f"{key}={value}" for key, value in values.items()) + "\n", encoding="utf-8")
