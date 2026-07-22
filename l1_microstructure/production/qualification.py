@@ -335,9 +335,9 @@ class ProductionQualification:
                 entry_timestamp_ns=now_ns,
             )
             runtime._transition(LifecycleState.FLATTENING, "qualification flatten drill")
-            runtime._flatten_started_at_ns = now_ns
+            runtime._flatten_started_at_ns = now_ns - 2_000_000_000
             runtime._flatten_submitted_symbols = {"AAPL"}
-            runtime.process_event(QuoteEvent("AAPL", now_ns + 2_000_000_000, 100.0, 100.01, 100, 100))
+            runtime.process_event(QuoteEvent("AAPL", now_ns, 100.0, 100.01, 100, 100))
             checks = (
                 *self._halt_checks(runtime, "flatten_timeout"),
                 QualificationCheck(

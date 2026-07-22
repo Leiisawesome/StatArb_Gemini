@@ -47,10 +47,10 @@
     "allow_shorting": false
   },
   "model_quality": {
-    "minimum_fill_rate": null,
-    "maximum_cancel_rate": null,
-    "maximum_drift_tracking_error_bps": null,
-    "maximum_unseen_edge_rate": null
+    "minimum_fill_rate": 0.01,
+    "maximum_cancel_rate": 0.5,
+    "maximum_drift_tracking_error_bps": 2.0,
+    "maximum_unseen_edge_rate": 0.05
   },
   "session": {
     "timezone": "America/New_York",

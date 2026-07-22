@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from math import isfinite
 from typing import TypeAlias
 
 
@@ -29,6 +30,19 @@ class QuoteEvent:
     exchange: str | None = None
     sequence_number: int | None = None
 
+    def __post_init__(self) -> None:
+        _validate_common_event_fields(self.symbol, self.timestamp_ns, self.sequence_number)
+        if not isfinite(self.bid_price) or not isfinite(self.ask_price):
+            raise ValueError("quote prices must be finite")
+        if self.bid_price <= 0.0 or self.ask_price <= 0.0:
+            raise ValueError("quote prices must be positive")
+        if self.ask_price < self.bid_price:
+            raise ValueError("quote ask price cannot be below bid price")
+        if self.bid_size < 0 or self.ask_size < 0:
+            raise ValueError("quote sizes cannot be negative")
+        if self.bid_size + self.ask_size <= 0:
+            raise ValueError("quote must contain positive displayed size")
+
     @property
     def kind(self) -> EventKind:
         return EventKind.QUOTE
@@ -44,12 +58,28 @@ class TradeEvent:
     exchange: str | None = None
     sequence_number: int | None = None
 
+    def __post_init__(self) -> None:
+        _validate_common_event_fields(self.symbol, self.timestamp_ns, self.sequence_number)
+        if not isfinite(self.price) or self.price <= 0.0:
+            raise ValueError("trade price must be finite and positive")
+        if self.size <= 0:
+            raise ValueError("trade size must be positive")
+
     @property
     def kind(self) -> EventKind:
         return EventKind.TRADE
 
 
 MarketEvent: TypeAlias = QuoteEvent | TradeEvent
+
+
+def _validate_common_event_fields(symbol: str, timestamp_ns: int, sequence_number: int | None) -> None:
+    if not symbol or not symbol.strip():
+        raise ValueError("market-event symbol cannot be empty")
+    if timestamp_ns < 0:
+        raise ValueError("market-event timestamp cannot be negative")
+    if sequence_number is not None and sequence_number < 0:
+        raise ValueError("market-event sequence number cannot be negative")
 
 
 def event_sort_key(event: MarketEvent) -> tuple[int, int, int]:
@@ -68,9 +98,20 @@ class BookSnapshot:
     bid_size: int
     ask_size: int
 
+    def __post_init__(self) -> None:
+        _validate_common_event_fields(self.symbol, self.timestamp_ns, None)
+        if not isfinite(self.bid_price) or not isfinite(self.ask_price):
+            raise ValueError("book prices must be finite")
+        if self.bid_price <= 0.0 or self.ask_price <= 0.0:
+            raise ValueError("book prices must be positive")
+        if self.ask_price < self.bid_price:
+            raise ValueError("book ask price cannot be below bid price")
+        if self.bid_size < 0 or self.ask_size < 0 or self.bid_size + self.ask_size <= 0:
+            raise ValueError("book must contain non-negative, positive-total size")
+
     @property
     def spread(self) -> float:
-        return max(self.ask_price - self.bid_price, 0.0)
+        return self.ask_price - self.bid_price
 
     @property
     def midpoint(self) -> float:

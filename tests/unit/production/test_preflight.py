@@ -178,7 +178,7 @@ def test_production_preflight_uses_runtime_artifact_quality_gate(tmp_path, monke
 
     assert report.passed is True
     assert calls[0][0:2] == ("AAPL", "aapl-v1")
-    assert calls[0][2].minimum_fill_rate is None
+    assert calls[0][2].minimum_fill_rate == 0.01
 
 
 def test_production_preflight_reports_missing_credentials_without_values(tmp_path) -> None:

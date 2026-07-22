@@ -7,6 +7,7 @@ from l1_microstructure.config import FrameworkConfig
 from l1_microstructure.datasets import PipelineTransitionDatasetBuilder
 from l1_microstructure.ingest import LiveSubscriptionRequest
 from l1_microstructure.replay import DeterministicReplayEngine
+from l1_microstructure.validation import RollingValidationHarness
 from l1_microstructure.workflow import ArtifactDrivenResearchWorkflow
 from tests.unit.l1_state_machine.support import FixtureMarketDataSource as InMemoryMassiveDataSource
 
@@ -76,7 +77,18 @@ def test_multi_horizon_dataset_matches_golden_fixture() -> None:
 
 def test_artifact_driven_workflow_matches_golden_fixture(tmp_path) -> None:
     expected = _load_fixture("golden_expected.json")["workflow"]
-    workflow = ArtifactDrivenResearchWorkflow(tmp_path, framework_config=_config())
+    workflow = ArtifactDrivenResearchWorkflow(
+        tmp_path,
+        framework_config=_config(),
+        validation_harness=RollingValidationHarness(
+            minimum_fill_rate=0.0,
+            maximum_cancel_rate=1.0,
+            maximum_drift_tracking_error_bps=float("inf"),
+            bootstrap_sample_count=0,
+            minimum_bootstrap_hit_rate_lower_bound=0.0,
+            minimum_bootstrap_decay_ratio_lower_bound=0.0,
+        ),
+    )
 
     result = workflow.run(symbol="AAPL", events=_load_events())
     manifest = workflow.store.load(result.artifact_ids.run_manifest_id)

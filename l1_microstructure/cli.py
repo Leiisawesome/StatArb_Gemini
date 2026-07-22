@@ -32,6 +32,7 @@ from l1_microstructure.live import (
 )
 from l1_microstructure.regime import MicrostructureRegime
 from l1_microstructure.transitions import EdgeKey
+from l1_microstructure.validation import RollingValidationHarness
 from l1_microstructure.transparent import (
     TransparentArtifactDrivenWorkflow,
     TransparentArtifactSelector,
@@ -80,6 +81,11 @@ def build_parser() -> argparse.ArgumentParser:
     workflow_parser.add_argument("--symbol", required=True)
     workflow_parser.add_argument("--trade-date", required=True)
     workflow_parser.add_argument("--transition-threshold", type=float, default=None)
+    workflow_parser.add_argument(
+        "--allow-unexecuted-validation",
+        action="store_true",
+        help="research-only override that permits validation without execution or bootstrap evidence",
+    )
 
     transparent_workflow_parser = subparsers.add_parser("transparent-workflow")
     transparent_workflow_parser.add_argument("--artifact-root", required=True)
@@ -190,6 +196,18 @@ def _run_workflow_command(args: argparse.Namespace) -> int:
     workflow = ArtifactDrivenResearchWorkflow(
         args.artifact_root,
         framework_config=_framework_config(args.transition_threshold),
+        validation_harness=(
+            RollingValidationHarness(
+                minimum_fill_rate=0.0,
+                maximum_cancel_rate=1.0,
+                maximum_drift_tracking_error_bps=float("inf"),
+                bootstrap_sample_count=0,
+                minimum_bootstrap_hit_rate_lower_bound=0.0,
+                minimum_bootstrap_decay_ratio_lower_bound=0.0,
+            )
+            if args.allow_unexecuted_validation
+            else None
+        ),
     )
     result = workflow.run(symbol=args.symbol, events=events)
     print(json.dumps(_workflow_result_to_json(result), sort_keys=True))

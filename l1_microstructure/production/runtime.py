@@ -88,6 +88,7 @@ class ProductionRuntime:
         self._shadow_candidate_errors = 0
         self._shadow_action_disagreements = 0
         self._shadow_comparisons = 0
+        self._shadow_late_event_start_counts: dict[str, int] = {}
         self._campaign_fingerprint: str | None = None
         self.last_event_timestamp_ns: dict[str, int] = {}
         self.first_event_timestamp_ns: dict[str, int] = {}
@@ -112,7 +113,6 @@ class ProductionRuntime:
                 self._transition(LifecycleState.RECONCILING, "reconciling broker and ledger")
             if not self.machines:
                 self._load_machines()
-            self._record_session_start()
             try:
                 self._restore_router_recovery_state()
             except Exception as exc:
@@ -141,6 +141,7 @@ class ProductionRuntime:
                     metadata={"retry": snapshot.get("retry", {})},
                 )
                 return
+            self._record_session_start(net_liquidation=snapshot.get("net_liquidation"))
             self._rehydrate_positions(snapshot)
             self._persist_positions()
             if self.config.warmup_seconds > 0:
@@ -230,16 +231,10 @@ class ProductionRuntime:
             return
         if self.lifecycle.state is LifecycleState.FLATTENING:
             machine = self.machines[event.symbol]
-            if event.symbol in machine.open_positions and event.symbol not in self._flatten_submitted_symbols:
+            if event.symbol in machine.open_positions:
                 machine.on_event(event)
-                self._route_flatten_symbol(event.symbol, machine)
             self._poll_reports()
-            if not any(machine.open_positions for machine in self.machines.values()) and not self.ledger.open_orders():
-                self._transition(LifecycleState.STOPPED, "flatten complete")
-                self._running = False
-                self._record_session_close(event.timestamp_ns)
-            elif self._flatten_timed_out(event.timestamp_ns):
-                self._halt("flatten timed out with unresolved positions or orders", code="flatten_timeout")
+            self._advance_flatten(event.timestamp_ns)
             return
         session_phase = self._session_phase(event.timestamp_ns)
         self.last_event_timestamp_ns[event.symbol] = event.timestamp_ns
@@ -331,15 +326,48 @@ class ProductionRuntime:
         self._flatten_submitted_symbols = set()
         for order_id in self._router_open_order_ids():
             self.execution_service.cancel(order_id)
+        self._poll_reports()
+        self._advance_flatten(timestamp_ns)
+
+    def _advance_flatten(self, timestamp_ns: int | None) -> None:
+        if self.lifecycle.state is not LifecycleState.FLATTENING:
+            return
+        open_orders = self.ledger.open_orders()
+        if open_orders:
+            self.ledger.append_event(
+                "lifecycle",
+                "flatten_pending",
+                {"open_order_count": len(open_orders), "position_count": self._open_position_count()},
+            )
+            if timestamp_ns is not None and self._flatten_timed_out(timestamp_ns):
+                self._halt("flatten timed out with unresolved positions or orders", code="flatten_timeout")
+            return
+
+        # Every previously submitted flatten is terminal at this point. A cancelled
+        # flatten may leave a position, so permit one fresh request for that symbol.
+        self._flatten_submitted_symbols.clear()
         for symbol, machine in self.machines.items():
             self._route_flatten_symbol(symbol, machine)
-        self._poll_reports()
-        if any(machine.open_positions for machine in self.machines.values()):
-            self.ledger.append_event("lifecycle", "flatten_pending", {})
-        else:
-            self._transition(LifecycleState.STOPPED, "flatten complete")
-            self._running = False
-            self._record_session_close(timestamp_ns)
+
+        if self.ledger.open_orders() or self._open_position_count() > 0:
+            self.ledger.append_event(
+                "lifecycle",
+                "flatten_pending",
+                {
+                    "open_order_count": len(self.ledger.open_orders()),
+                    "position_count": self._open_position_count(),
+                },
+            )
+            if timestamp_ns is not None and self._flatten_timed_out(timestamp_ns):
+                self._halt("flatten timed out with unresolved positions or orders", code="flatten_timeout")
+            return
+
+        self._transition(LifecycleState.STOPPED, "flatten complete")
+        self._running = False
+        self._record_session_close(timestamp_ns)
+
+    def _open_position_count(self) -> int:
+        return sum(len(machine.open_positions) for machine in self.machines.values())
 
     def _route_flatten_symbol(self, symbol: str, machine: L1MicrostructureStateMachine) -> None:
         position = machine.open_positions.get(symbol)
@@ -669,8 +697,12 @@ class ProductionRuntime:
                 ),
                 "candidate_error_count": self._shadow_candidate_errors,
                 "candidate_late_event_count": sum(
-                    int(getattr(engine, "late_event_count", 0))
-                    for engine in self.transparent_shadow_engines.values()
+                    max(
+                        int(getattr(engine, "late_event_count", 0))
+                        - self._shadow_late_event_start_counts.get(symbol, 0),
+                        0,
+                    )
+                    for symbol, engine in self.transparent_shadow_engines.items()
                 ),
                 "comparison_count": self._shadow_comparisons,
                 "action_disagreement_rate": self._shadow_action_disagreements / max(self._shadow_comparisons, 1),
@@ -704,6 +736,13 @@ class ProductionRuntime:
             )
         expected_positions = self.ledger.get_state("strategy_positions", {})
         broker_positions = health.get("positions", {})
+        unexpected_positions = {
+            symbol: float(dict(payload).get("quantity", 0.0))
+            for symbol, payload in dict(broker_positions).items()
+            if symbol not in self.config.symbols and float(dict(payload).get("quantity", 0.0)) != 0.0
+        }
+        if unexpected_positions:
+            return f"broker account contains unexpected positions: {unexpected_positions}", health
         for symbol in self.config.symbols:
             expected_quantity = float(expected_positions.get(symbol, 0.0))
             broker_quantity = float(dict(broker_positions.get(symbol, {})).get("quantity", 0.0))
@@ -712,10 +751,8 @@ class ProductionRuntime:
                     f"position reconciliation mismatch for {symbol}: ledger={expected_quantity} broker={broker_quantity}",
                     health,
                 )
-        if self.config.mode is OperatingMode.LIVE and health.get("net_liquidation") is None:
-            return "live reconciliation requires broker net liquidation value", health
-        if health.get("net_liquidation") is not None and self.ledger.get_state("session_start_net_liquidation") is None:
-            self.ledger.set_state("session_start_net_liquidation", float(health["net_liquidation"]))
+        if health.get("net_liquidation") is None:
+            return "reconciliation requires broker net liquidation value", health
         return None, health
 
     def _rehydrate_positions(self, snapshot: dict[str, Any]) -> None:
@@ -763,8 +800,30 @@ class ProductionRuntime:
     def _may_route(self, request: ExecutionRequest) -> bool:
         machine = self.machines[request.symbol]
         position = machine.open_positions.get(request.symbol)
-        is_exit = position is not None and position.side is not request.action
-        if not is_exit and not self.lifecycle.permits_entries:
+        if self._has_working_order(request.symbol):
+            self.ledger.append_event(
+                "risk",
+                "order_blocked",
+                {
+                    "reason": "working order already exists for symbol",
+                    "symbol": request.symbol,
+                    "client_order_id": request.client_order_id,
+                },
+            )
+            return False
+
+        signed_position = 0.0
+        if position is not None:
+            signed_position = position.quantity * (1.0 if position.side is TradeAction.BUY else -1.0)
+        signed_request = request.quantity * (1.0 if request.action is TradeAction.BUY else -1.0)
+        resulting_position = signed_position + signed_request
+        is_pure_exit = (
+            signed_position != 0.0
+            and signed_position * signed_request < 0.0
+            and signed_position * resulting_position >= 0.0
+            and abs(resulting_position) < abs(signed_position)
+        )
+        if not is_pure_exit and not self.lifecycle.permits_entries:
             self.ledger.append_event(
                 "risk",
                 "order_blocked",
@@ -776,14 +835,14 @@ class ProductionRuntime:
             )
             return False
         session_phase = self._session_phase(request.decision_timestamp_ns)
-        if not is_exit and session_phase != "entries":
+        if not is_pure_exit and session_phase != "entries":
             self.ledger.append_event(
                 "risk",
                 "order_blocked",
                 {"reason": session_phase, "symbol": request.symbol, "client_order_id": request.client_order_id},
             )
             return False
-        if not is_exit and self._would_breach_exposure(request):
+        if not is_pure_exit and self._would_breach_exposure(request):
             self.ledger.append_event(
                 "risk",
                 "order_blocked",
@@ -794,7 +853,7 @@ class ProductionRuntime:
                 },
             )
             return False
-        if not is_exit and request.action is TradeAction.SELL and not self.config.risk.allow_shorting:
+        if resulting_position < 0.0 and not self.config.risk.allow_shorting:
             self.ledger.append_event(
                 "risk",
                 "order_blocked",
@@ -961,6 +1020,9 @@ class ProductionRuntime:
             )
         return True
 
+    def _has_working_order(self, symbol: str) -> bool:
+        return any(str(order.get("payload", {}).get("symbol", "")).upper() == symbol for order in self.ledger.open_orders())
+
     def _record_execution_report(self, report: ExecutionReport) -> None:
         if report.client_order_id:
             ledger_status = "partial_filled" if report.reason == "broker reported partial fill" else report.status
@@ -1054,7 +1116,12 @@ class ProductionRuntime:
         )
         self.ledger.set_state("last_closed_session_date", session_date)
 
-    def _record_session_start(self, timestamp_ns: int | None = None) -> None:
+    def _record_session_start(
+        self,
+        timestamp_ns: int | None = None,
+        *,
+        net_liquidation: float | None = None,
+    ) -> None:
         observed_at_ns = (
             int(datetime.now(timezone.utc).timestamp() * 1_000_000_000) if timestamp_ns is None else int(timestamp_ns)
         )
@@ -1091,6 +1158,15 @@ class ProductionRuntime:
         self._shadow_candidate_errors = 0
         self._shadow_action_disagreements = 0
         self._shadow_comparisons = 0
+        self._shadow_late_event_start_counts = {
+            symbol: int(getattr(engine, "late_event_count", 0))
+            for symbol, engine in self.transparent_shadow_engines.items()
+        }
+        self.ledger.set_state(
+            "session_start_net_liquidation",
+            None if net_liquidation is None else float(net_liquidation),
+        )
+        self.ledger.set_state("session_start_net_liquidation_date", session_date)
         self.ledger.append_event(
             "session",
             "started",
@@ -1129,19 +1205,42 @@ class ProductionRuntime:
     def _would_breach_exposure(self, request: ExecutionRequest) -> bool:
         health = self._router_health()
         net_liquidation = float(health.get("net_liquidation") or self.framework_config.risk.starting_equity)
-        proposed_notional = request.quantity * request.expected_state.book.midpoint
-        symbol_notional = proposed_notional
-        gross_notional = proposed_notional
+        signed_quantities: dict[str, float] = {}
+        marks: dict[str, float] = {}
         for symbol, machine in self.machines.items():
             position = machine.open_positions.get(symbol)
             if position is None:
                 continue
             state = machine.previous_state
             mark = state.book.midpoint if state is not None else position.entry_price
-            notional = position.quantity * mark
-            gross_notional += notional
-            if symbol == request.symbol:
-                symbol_notional += notional
+            signed_quantities[symbol] = position.quantity * (1.0 if position.side is TradeAction.BUY else -1.0)
+            marks[symbol] = mark if mark > 0.0 else net_liquidation
+        for order in self.ledger.open_orders():
+            payload = dict(order.get("payload", {}))
+            symbol = str(payload.get("symbol", "")).upper()
+            if not symbol or symbol not in self.machines:
+                continue
+            quantity = float(payload.get("quantity", 0.0))
+            action = str(payload.get("action", ""))
+            direction = 1.0 if action == TradeAction.BUY.value else -1.0
+            signed_quantities[symbol] = signed_quantities.get(symbol, 0.0) + direction * quantity
+            state = self.machines[symbol].previous_state
+            if state is not None:
+                marks[symbol] = state.book.midpoint
+            else:
+                request_payload = payload.get("recovery_request")
+                if isinstance(request_payload, dict):
+                    try:
+                        marks[symbol] = BrokerRecoveryCodec.request_from_dict(request_payload).expected_state.book.midpoint
+                    except (KeyError, TypeError, ValueError):
+                        # Missing recovery data is handled by reconciliation. Until
+                        # then, an unknown mark must not reduce reserved exposure.
+                        marks[symbol] = net_liquidation
+        direction = 1.0 if request.action is TradeAction.BUY else -1.0
+        signed_quantities[request.symbol] = signed_quantities.get(request.symbol, 0.0) + direction * request.quantity
+        marks[request.symbol] = request.expected_state.book.midpoint
+        gross_notional = sum(abs(quantity) * marks.get(symbol, 0.0) for symbol, quantity in signed_quantities.items())
+        symbol_notional = abs(signed_quantities.get(request.symbol, 0.0)) * marks[request.symbol]
         return (
             gross_notional / max(net_liquidation, 1.0) > self.config.risk.max_gross_exposure
             or symbol_notional / max(net_liquidation, 1.0) > self.config.risk.max_symbol_exposure
@@ -1179,7 +1278,7 @@ class ProductionRuntime:
     def _event_is_stale(self, event: MarketEvent) -> bool:
         now_ns = int(datetime.now(timezone.utc).timestamp() * 1_000_000_000)
         lag_seconds = (now_ns - event.timestamp_ns) / 1_000_000_000
-        return lag_seconds > self.config.event_stale_after_seconds
+        return abs(lag_seconds) > self.config.event_stale_after_seconds
 
     def _wall_clock_start_allowed(self) -> bool:
         local = datetime.now(timezone.utc).astimezone(ZoneInfo(self.config.session.timezone))
@@ -1279,6 +1378,17 @@ class ProductionRuntime:
         metadata: dict[str, Any] | None = None,
     ) -> None:
         self._flush_framework_activity()
+        self.ledger.set_state("kill_switch", True)
+        cancellation_results: dict[str, bool] = {}
+        try:
+            open_order_ids = self._router_open_order_ids()
+        except Exception:
+            open_order_ids = []
+        for order_id in open_order_ids:
+            try:
+                cancellation_results[order_id] = self.execution_service.cancel(order_id)
+            except Exception:
+                cancellation_results[order_id] = False
         if self.lifecycle.state is not LifecycleState.HALTED:
             self._transition(LifecycleState.HALTED, reason)
         self._running = False
@@ -1293,7 +1403,11 @@ class ProductionRuntime:
         self.ledger.append_event(
             "incident",
             "runtime_halted",
-            {"reason": reason, "alert": alert.to_dict() if alert is not None else None},
+            {
+                "reason": reason,
+                "alert": alert.to_dict() if alert is not None else None,
+                "working_order_cancellations": cancellation_results,
+            },
         )
 
     def _record_framework_activity(self, event: MarketEvent, update: FrameworkUpdate) -> None:

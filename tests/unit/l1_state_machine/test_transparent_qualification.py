@@ -18,6 +18,7 @@ def _record_session(
     *,
     fingerprint: str = "config-and-artifacts-v2",
     candidate_errors: int = 0,
+    candidate_late_events: int = 0,
 ) -> None:
     timestamp = datetime.fromisoformat(f"{session_date}T12:00:00").replace(
         tzinfo=ZoneInfo("America/New_York")
@@ -49,6 +50,7 @@ def _record_session(
             "candidate_update_count": 100,
             "resolved_outcome_count": 25,
             "candidate_error_count": candidate_errors,
+            "candidate_late_event_count": candidate_late_events,
             "baseline_p95_latency_ns": 100.0,
             "candidate_p95_latency_ns": 110.0,
         },
@@ -101,6 +103,20 @@ def test_transparent_campaign_resets_streak_on_fingerprint_change_or_error(tmp_p
         assert not report.qualified
         assert report.trailing_passing_sessions == 0
         assert not report.sessions[-1].passed
+    finally:
+        ledger.close()
+
+
+def test_transparent_campaign_rejects_late_shadow_events(tmp_path) -> None:
+    ledger = OperationalLedger(tmp_path / "ledger.sqlite3")
+    try:
+        _record_session(ledger, "2026-07-13", candidate_late_events=1)
+
+        result = TransparentCampaignEvaluator(ledger).evaluate("2026-07-13")
+
+        check = next(check for check in result.checks if check.code == "shadow.no_late_events")
+        assert check.passed is False
+        assert check.details["candidate_late_event_count"] == 1
     finally:
         ledger.close()
 

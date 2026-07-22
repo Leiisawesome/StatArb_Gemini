@@ -144,6 +144,8 @@ class IBKRNativeBrokerSession:
         self._app: _IBKRApp | None = None
         self._thread: Thread | None = None
         self._orders: dict[str, BrokerOrder] = {}
+        self._last_open_order_ids: set[str] = set()
+        self._refreshing_open_order_ids: set[str] | None = None
         self._next_order_id: int | None = None
         self._last_error: str | None = None
         self._positions: dict[str, dict[str, Any]] = {}
@@ -228,6 +230,12 @@ class IBKRNativeBrokerSession:
         self._refresh_open_orders()
         with self._lock:
             order = self._orders.get(str(order_id))
+            if (
+                order is not None
+                and order.status not in _TERMINAL_STATUSES
+                and str(order_id) not in self._last_open_order_ids
+            ):
+                return None
             return replace(order) if order is not None else None
 
     async def get_orders(self, status: str = "open") -> list[BrokerOrder]:
@@ -235,8 +243,13 @@ class IBKRNativeBrokerSession:
         self._refresh_open_orders()
         with self._lock:
             orders = list(self._orders.values())
+            open_order_ids = set(self._last_open_order_ids)
         if status == "open":
-            orders = [order for order in orders if order.status not in _TERMINAL_STATUSES]
+            orders = [
+                order
+                for order in orders
+                if order.status not in _TERMINAL_STATUSES and str(order.order_id) in open_order_ids
+            ]
         return [replace(order) for order in orders]
 
     async def cancel_order(self, order_id: str) -> bool:
@@ -287,7 +300,7 @@ class IBKRNativeBrokerSession:
                 "net_liquidation": self._net_liquidation,
                 "positions": {symbol: dict(value) for symbol, value in self._positions.items()},
                 "open_order_ids": [
-                    order_id for order_id, order in self._orders.items() if order.status not in _TERMINAL_STATUSES
+                    order_id for order_id in self._last_open_order_ids
                 ],
             }
 
@@ -353,12 +366,17 @@ class IBKRNativeBrokerSession:
             order.timestamp = timestamp
 
     def on_open_order(self, order_id: int, contract: Contract, order: Order, order_state: OrderState) -> None:
+        account = str(getattr(order, "account", "") or "")
+        if self.config.account_id and account != self.config.account_id:
+            return
         quantity = float(order.totalQuantity or 0.0)
         side = BrokerOrderSide.BUY if str(order.action).upper() == "BUY" else BrokerOrderSide.SELL
         order_type = BrokerOrderType.LIMIT if str(order.orderType).upper() == "LMT" else BrokerOrderType.MARKET
         price = float(order.lmtPrice) if order_type is BrokerOrderType.LIMIT and order.lmtPrice is not None else None
         timestamp = _utc_now()
         with self._lock:
+            if self._refreshing_open_order_ids is not None:
+                self._refreshing_open_order_ids.add(str(order_id))
             existing = self._orders.get(str(order_id))
             if existing is None:
                 existing = BrokerOrder(
@@ -408,6 +426,8 @@ class IBKRNativeBrokerSession:
             self._connected = False
 
     def on_position(self, account: str, contract: Contract, position: float, average_cost: float) -> None:
+        if self.config.account_id and account != self.config.account_id:
+            return
         symbol = str(contract.symbol or "")
         if not symbol:
             return
@@ -442,8 +462,16 @@ class IBKRNativeBrokerSession:
     def _refresh_open_orders(self) -> None:
         app = self._require_app()
         self._open_orders_event.clear()
-        app.reqOpenOrders()
-        self._open_orders_event.wait(timeout=1.0)
+        with self._lock:
+            self._refreshing_open_order_ids = set()
+        app.reqAllOpenOrders()
+        if not self._open_orders_event.wait(timeout=1.0):
+            with self._lock:
+                self._refreshing_open_order_ids = None
+            raise TimeoutError("timed out reconciling IBKR open orders")
+        with self._lock:
+            self._last_open_order_ids = set(self._refreshing_open_order_ids or ())
+            self._refreshing_open_order_ids = None
 
     def _reserve_order_id(self) -> int:
         with self._lock:

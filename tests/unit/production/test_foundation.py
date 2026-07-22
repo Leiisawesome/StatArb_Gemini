@@ -27,6 +27,7 @@ from l1_microstructure.production.config import (
     ModelQualityPolicy,
     OperatingMode,
     ProductionConfig,
+    RiskLimits,
 )
 from l1_microstructure.production.ledger import OperationalLedger
 from l1_microstructure.production.lifecycle import LifecycleState, RuntimeLifecycle
@@ -195,8 +196,8 @@ class _Router:
         return None
 
 
-def _execution_request():
-    state = FeatureEngine().update(QuoteEvent("AAPL", 1_000_000_000, 100.0, 100.02, 300, 300))
+def _execution_request(symbol: str = "AAPL"):
+    state = FeatureEngine().update(QuoteEvent(symbol, 1_000_000_000, 100.0, 100.02, 300, 300))
     assert state is not None
     intent = TradeIntent(
         action=TradeAction.BUY,
@@ -920,3 +921,147 @@ def test_production_promotion_requires_passing_quality_gate(tmp_path, monkeypatc
     assert calls[0][0:2] == ("AAPL", "approved-run")
     assert calls[0][2].minimum_fill_rate == 0.5
     assert runtime.promoted_run_ids["AAPL"] == "approved-run"
+
+
+def test_production_runtime_reserves_working_orders_in_effective_exposure(tmp_path) -> None:
+    config = _config(
+        tmp_path,
+        risk=RiskLimits(max_gross_exposure=0.0015, max_symbol_exposure=0.0015),
+    )
+    router = _RecoverableRouter({})
+    runtime = _Runtime(config, source=_Source(), router=router)
+    runtime.start()
+    rth_timestamp_ns = int(datetime(2026, 7, 13, 15, 0, tzinfo=timezone.utc).timestamp() * 1_000_000_000)
+    first = replace(
+        _execution_request("AAPL"),
+        decision_timestamp_ns=rth_timestamp_ns,
+        executable_timestamp_ns=rth_timestamp_ns,
+    )
+    second = replace(
+        _execution_request("MSFT"),
+        decision_timestamp_ns=rth_timestamp_ns,
+        executable_timestamp_ns=rth_timestamp_ns,
+    )
+
+    runtime._route(first)
+
+    duplicate = replace(first, client_order_id="duplicate-aapl")
+    assert runtime._may_route(duplicate) is False
+    assert runtime._may_route(second) is False
+    reasons = {
+        event["payload"]["reason"]
+        for event in runtime.ledger.recent_events(5, category="risk", event_type="order_blocked")
+    }
+    assert "working order already exists for symbol" in reasons
+    assert "production exposure limit" in reasons
+    runtime.stop()
+
+
+def test_production_runtime_does_not_treat_reversal_as_pure_exit(tmp_path) -> None:
+    runtime = _Runtime(
+        _config(tmp_path, symbols=("AAPL",), promoted_run_ids={"AAPL": "aapl-v1"}),
+        source=_Source(),
+        router=_Router(),
+    )
+    runtime.start()
+    runtime.machines["AAPL"].open_positions["AAPL"] = OpenPosition(
+        "AAPL", TradeAction.BUY, 1, 100.0, 1_000_000_000
+    )
+    rth_timestamp_ns = int(datetime(2026, 7, 13, 15, 0, tzinfo=timezone.utc).timestamp() * 1_000_000_000)
+    buy = _execution_request()
+    reversal = replace(
+        buy,
+        action=TradeAction.SELL,
+        quantity=2,
+        intent=replace(buy.intent, action=TradeAction.SELL),
+        decision_timestamp_ns=rth_timestamp_ns,
+        executable_timestamp_ns=rth_timestamp_ns,
+    )
+
+    assert runtime._may_route(reversal) is False
+    blocked = runtime.ledger.recent_events(1, category="risk", event_type="order_blocked")[0]
+    assert blocked["payload"]["reason"] == "shorting disabled"
+    runtime.stop()
+
+
+def test_flatten_waits_for_terminal_cancellation_before_stopping(tmp_path) -> None:
+    router = _RecoverableRouter({})
+    runtime = _Runtime(
+        _config(tmp_path, symbols=("AAPL",), promoted_run_ids={"AAPL": "aapl-v1"}),
+        source=_Source(),
+        router=router,
+    )
+    runtime.start()
+    runtime._route(_execution_request())
+
+    runtime.flatten()
+
+    assert runtime.lifecycle.state is LifecycleState.FLATTENING
+    assert runtime.ledger.open_orders()
+    assert not runtime.ledger.recent_events(1, category="session", event_type="closed")
+    runtime.stop()
+
+
+def test_daily_loss_baseline_resets_only_at_new_session_boundary(tmp_path) -> None:
+    runtime = _Runtime(_config(tmp_path), source=_Source(), router=_Router())
+    first = int(datetime(2026, 7, 13, 14, 0, tzinfo=timezone.utc).timestamp() * 1_000_000_000)
+    second = int(datetime(2026, 7, 14, 14, 0, tzinfo=timezone.utc).timestamp() * 1_000_000_000)
+
+    runtime._record_session_start(first, net_liquidation=100_000.0)
+    runtime._record_session_start(first + 1_000_000_000, net_liquidation=99_000.0)
+    assert runtime.ledger.get_state("session_start_net_liquidation") == 100_000.0
+
+    runtime._record_session_start(second, net_liquidation=101_000.0)
+    assert runtime.ledger.get_state("session_start_net_liquidation") == 101_000.0
+    assert runtime.ledger.get_state("session_start_net_liquidation_date") == "2026-07-14"
+    runtime.stop()
+
+
+def test_non_operator_halt_latches_kill_switch_and_cancels_orders(tmp_path) -> None:
+    router = _RecoverableRouter({})
+    runtime = _Runtime(
+        _config(tmp_path, symbols=("AAPL",), promoted_run_ids={"AAPL": "aapl-v1"}),
+        source=_Source(),
+        router=router,
+    )
+    runtime.start()
+    runtime._route(_execution_request())
+
+    runtime._halt("risk incident", code="risk_incident")
+
+    assert runtime.lifecycle.state is LifecycleState.HALTED
+    assert runtime.ledger.get_state("kill_switch") is True
+    incident = runtime.ledger.recent_events(1, category="incident", event_type="runtime_halted")[0]
+    assert incident["payload"]["working_order_cancellations"] == {"paper-1": True}
+    runtime.stop()
+
+
+def test_reconciliation_rejects_unexpected_account_positions(tmp_path) -> None:
+    runtime = _Runtime(
+        _config(tmp_path, symbols=("AAPL",), promoted_run_ids={"AAPL": "aapl-v1"}),
+        source=_Source(),
+        router=_Router(positions={"SPY": {"quantity": 1.0, "average_cost": 500.0}}),
+    )
+
+    runtime.start()
+
+    assert runtime.lifecycle.state is LifecycleState.HALTED
+    assert "unexpected positions" in runtime.recent_alerts()[0]["message"]
+    runtime.stop()
+
+
+def test_production_runtime_rejects_future_dated_market_data(tmp_path) -> None:
+    runtime = _Runtime(
+        _config(tmp_path, event_stale_after_seconds=1.0),
+        source=_Source(),
+        router=_Router(),
+    )
+    runtime.start()
+    future_timestamp_ns = int(datetime.now(timezone.utc).timestamp() * 1_000_000_000) + 2_000_000_000
+
+    runtime.process_event(QuoteEvent("AAPL", future_timestamp_ns, 100.0, 100.01, 100, 100))
+
+    assert runtime.lifecycle.state is LifecycleState.HALTED
+    assert runtime.recent_alerts()[0]["code"] == "stale_market_data"
+    assert runtime.ledger.get_state("kill_switch") is True
+    runtime.stop()

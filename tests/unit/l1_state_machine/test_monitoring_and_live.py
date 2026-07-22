@@ -14,7 +14,9 @@ from l1_microstructure.datasets import PipelineTransitionDatasetBuilder
 from l1_microstructure.ingest import LiveSubscriptionRequest
 from l1_microstructure.live import (
     BrokerOrder,
+    BrokerOrderSide,
     BrokerOrderStatus,
+    BrokerOrderType,
     IBKRBrokerOrderRouter,
     IBKRConnectionConfig,
     RouteAcknowledgement,
@@ -1295,3 +1297,42 @@ def test_ibkr_native_ignores_order_timing_warning() -> None:
 
     assert session._last_error is None
     assert session._orders["3"].status is BrokerOrderStatus.SUBMITTED
+
+
+def test_ibkr_native_reconciliation_is_account_and_client_wide() -> None:
+    from l1_microstructure.live._ibkr_native import IBKRNativeBrokerSession
+
+    config = IBKRConnectionConfig(
+        host="127.0.0.1",
+        port=4002,
+        client_id=999,
+        account_id="DU123456",
+    )
+    session = IBKRNativeBrokerSession(config)
+    contract = session._stock_contract("AAPL")
+    order_state = type("OrderState", (), {"status": "Submitted"})()
+    other_order = session._build_order(BrokerOrderSide.BUY, 1.0, BrokerOrderType.MARKET, None)
+    other_order.account = "DU999999"
+    own_order = session._build_order(BrokerOrderSide.BUY, 1.0, BrokerOrderType.MARKET, None)
+
+    session.on_position("DU999999", contract, 9.0, 90.0)
+    session.on_position("DU123456", contract, 1.0, 100.0)
+    session.on_open_order(1, contract, other_order, order_state)
+
+    class FakeApp:
+        def __init__(self) -> None:
+            self.all_open_order_requests = 0
+
+        def reqAllOpenOrders(self) -> None:  # noqa: N802
+            self.all_open_order_requests += 1
+            session.on_open_order(2, contract, own_order, order_state)
+            session.on_open_order_end()
+
+    app = FakeApp()
+    session._app = app
+    session._refresh_open_orders()
+
+    assert session._positions == {"AAPL": {"account": "DU123456", "quantity": 1.0, "average_cost": 100.0}}
+    assert "1" not in session._orders
+    assert session._last_open_order_ids == {"2"}
+    assert app.all_open_order_requests == 1

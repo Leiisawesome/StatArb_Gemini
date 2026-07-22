@@ -36,10 +36,10 @@ class SessionPolicy:
 
 @dataclass(frozen=True, slots=True)
 class ModelQualityPolicy:
-    minimum_fill_rate: float | None = None
-    maximum_cancel_rate: float | None = None
-    maximum_drift_tracking_error_bps: float | None = None
-    maximum_unseen_edge_rate: float | None = None
+    minimum_fill_rate: float | None = 0.01
+    maximum_cancel_rate: float | None = 0.50
+    maximum_drift_tracking_error_bps: float | None = 2.0
+    maximum_unseen_edge_rate: float | None = 0.05
 
 
 @dataclass(frozen=True, slots=True)

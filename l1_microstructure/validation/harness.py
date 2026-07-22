@@ -17,13 +17,13 @@ class RollingValidationHarness:
     minimum_regime_coverage: float = 0.5
     minimum_hit_rate: float = 0.5
     minimum_decay_ratio: float = 0.25
-    minimum_fill_rate: float = 0.0
-    maximum_cancel_rate: float = 1.0
-    maximum_drift_tracking_error_bps: float = float("inf")
-    bootstrap_sample_count: int = 0
+    minimum_fill_rate: float = 0.01
+    maximum_cancel_rate: float = 0.50
+    maximum_drift_tracking_error_bps: float = 2.0
+    bootstrap_sample_count: int = 128
     bootstrap_confidence_level: float = 0.90
-    minimum_bootstrap_hit_rate_lower_bound: float = 0.0
-    minimum_bootstrap_decay_ratio_lower_bound: float = 0.0
+    minimum_bootstrap_hit_rate_lower_bound: float = 0.50
+    minimum_bootstrap_decay_ratio_lower_bound: float = 0.25
     bootstrap_random_seed: int = 7
     timestamp_column: str = "timestamp"
     regime_column: str = "regime"
@@ -90,7 +90,9 @@ class RollingValidationHarness:
         regime_coverage = len(train_regimes & test_regimes) / max(len(test_regimes), 1)
 
         test_rows = int(len(test_frame))
-        hit_rate = float((test_frame[self.drift_column] > 0.0).mean()) if test_rows else 0.0
+        predicted_drifts = self._predicted_drifts(train_frame, test_frame)
+        realized_drifts = test_frame[self.drift_column].to_numpy(dtype=float)
+        hit_rate = float(np.mean(predicted_drifts * realized_drifts > 0.0)) if test_rows else 0.0
         unseen_edge_rate = self._unseen_edge_rate(train_frame, test_frame)
         fill_rate = self._execution_mean(execution_test_frame, self.execution_fill_rate_column)
         cancel_rate = self._execution_mean(execution_test_frame, self.execution_cancel_rate_column)
@@ -113,6 +115,14 @@ class RollingValidationHarness:
             "kill_switch_rate": float(kill_switch_rate),
             **bootstrap_metrics,
         }
+
+    def _predicted_drifts(self, train_frame: pd.DataFrame, test_frame: pd.DataFrame) -> np.ndarray:
+        if train_frame.empty or test_frame.empty:
+            return np.zeros(len(test_frame), dtype=float)
+        edge_columns = [self.edge_from_column, self.edge_to_column, self.regime_column]
+        edge_means = train_frame.groupby(edge_columns, dropna=False)[self.drift_column].mean()
+        test_edges = pd.MultiIndex.from_frame(test_frame[edge_columns])
+        return edge_means.reindex(test_edges).fillna(0.0).to_numpy(dtype=float)
 
     def _unseen_edge_rate(self, train_frame: pd.DataFrame, test_frame: pd.DataFrame) -> float:
         if test_frame.empty:
@@ -199,6 +209,8 @@ class RollingValidationHarness:
         train_abs_mean = float(train_frame[self.drift_column].abs().mean()) if not train_frame.empty else 0.0
         rng = np.random.default_rng(self.bootstrap_random_seed)
         test_drifts = test_frame[self.drift_column].to_numpy(dtype=float)
+        predicted_drifts = self._predicted_drifts(train_frame, test_frame)
+        signed_outcomes = predicted_drifts * test_drifts
         # Bound each allocation while moving the bootstrap's inner loop into NumPy.
         chunk_size = max(1, min(self.bootstrap_sample_count, 1_000_000 // len(test_drifts)))
         hit_rate_chunks: list[np.ndarray] = []
@@ -206,9 +218,11 @@ class RollingValidationHarness:
         remaining = self.bootstrap_sample_count
         while remaining:
             sample_count = min(chunk_size, remaining)
-            samples = rng.choice(test_drifts, size=(sample_count, len(test_drifts)), replace=True)
-            hit_rate_chunks.append(np.mean(samples > 0.0, axis=1))
-            decay_ratio_chunks.append(np.mean(np.abs(samples), axis=1) / max(train_abs_mean, 1e-9))
+            indexes = rng.integers(0, len(test_drifts), size=(sample_count, len(test_drifts)))
+            hit_rate_chunks.append(np.mean(signed_outcomes[indexes] > 0.0, axis=1))
+            decay_ratio_chunks.append(
+                np.mean(np.abs(test_drifts[indexes]), axis=1) / max(train_abs_mean, 1e-9)
+            )
             remaining -= sample_count
 
         hit_rates = np.concatenate(hit_rate_chunks)

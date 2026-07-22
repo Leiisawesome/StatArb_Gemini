@@ -178,6 +178,7 @@ def test_cli_paper_historical_uses_latest_artifacts(tmp_path, capsys) -> None:
                 "2024-03-11",
                 "--transition-threshold",
                 "0.0",
+                "--allow-unexecuted-validation",
             ]
         )
         assert workflow_exit == 0
@@ -281,8 +282,8 @@ def test_cli_list_runs_can_filter_to_passing_runs(tmp_path, capsys) -> None:
     assert exit_code == 0
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["passing_only"] is True
-    assert payload["run_count"] >= 1
-    assert payload["runs"][0]["run_id"] == workflow_payload["run_id"]
+    assert payload["run_count"] == 0
+    assert workflow_payload["validation_passed"] is False
 
 
 def test_cli_list_runs_can_filter_by_quality_gate(tmp_path, capsys) -> None:
@@ -299,6 +300,7 @@ def test_cli_list_runs_can_filter_by_quality_gate(tmp_path, capsys) -> None:
                 "2024-03-11",
                 "--transition-threshold",
                 "0.0",
+                "--allow-unexecuted-validation",
             ]
         )
         assert workflow_exit == 0
@@ -352,6 +354,7 @@ def test_cli_paper_historical_can_require_validation_passing_bundle(tmp_path, ca
                 "2024-03-11",
                 "--transition-threshold",
                 "0.0",
+                "--allow-unexecuted-validation",
             ]
         )
         assert workflow_exit == 0
@@ -393,6 +396,7 @@ def test_cli_paper_historical_accepts_quality_gate(tmp_path, capsys) -> None:
                 "2024-03-11",
                 "--transition-threshold",
                 "0.0",
+                "--allow-unexecuted-validation",
             ]
         )
         assert workflow_exit == 0

@@ -157,3 +157,52 @@ def test_rolling_validation_harness_surfaces_bootstrap_decay_failure() -> None:
 
     assert report.passed is False
     assert any("bootstrap decay-ratio" in failure for failure in report.failures)
+
+
+def test_validation_hit_rate_scores_trained_direction_not_unconditional_drift_sign() -> None:
+    train = [
+        {
+            "timestamp": "2024-01-02T14:30:00Z",
+            "from_state": "s1",
+            "to_state": "s2",
+            "regime": "execution_flow",
+            "realized_drift_bps": -1.0,
+        },
+        {
+            "timestamp": "2024-01-02T14:31:00Z",
+            "from_state": "s1",
+            "to_state": "s2",
+            "regime": "execution_flow",
+            "realized_drift_bps": -2.0,
+        },
+    ]
+    test = [
+        {
+            "timestamp": "2024-01-03T14:30:00Z",
+            "from_state": "s1",
+            "to_state": "s2",
+            "regime": "execution_flow",
+            "realized_drift_bps": -0.5,
+        }
+    ]
+    harness = RollingValidationHarness(
+        minimum_fill_rate=0.0,
+        bootstrap_sample_count=0,
+        minimum_bootstrap_hit_rate_lower_bound=0.0,
+        minimum_bootstrap_decay_ratio_lower_bound=0.0,
+    )
+
+    report = harness.run(
+        pd.DataFrame(train + test),
+        [
+            RegimeSplitSpec(
+                train_start="2024-01-02T14:29:00Z",
+                train_end="2024-01-02T14:59:00Z",
+                test_start="2024-01-03T14:29:00Z",
+                test_end="2024-01-03T14:59:00Z",
+                label="directional",
+            )
+        ],
+    )
+
+    assert report.summary["mean_test_hit_rate"] == 1.0

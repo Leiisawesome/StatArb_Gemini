@@ -10,6 +10,7 @@ from l1_microstructure.config import FrameworkConfig
 from l1_microstructure.execution import ExecutionReport
 from l1_microstructure.ingest import HistoricalBatchRequest, LiveSubscriptionRequest
 from l1_microstructure.live import RouteAcknowledgement, RoutedLiveTradingRunner, RunnerConfig, SourceBackedPaperRunner
+from l1_microstructure.validation import RollingValidationHarness
 from l1_microstructure.workflow import ArtifactDrivenResearchWorkflow
 from tests.unit.l1_state_machine.support import FixtureMarketDataSource as InMemoryMassiveDataSource
 
@@ -74,6 +75,21 @@ def _make_source() -> InMemoryMassiveDataSource:
     )
 
 
+def _research_workflow(tmp_path, config: FrameworkConfig) -> ArtifactDrivenResearchWorkflow:
+    return ArtifactDrivenResearchWorkflow(
+        tmp_path,
+        framework_config=config,
+        validation_harness=RollingValidationHarness(
+            minimum_fill_rate=0.0,
+            maximum_cancel_rate=1.0,
+            maximum_drift_tracking_error_bps=float("inf"),
+            bootstrap_sample_count=0,
+            minimum_bootstrap_hit_rate_lower_bound=0.0,
+            minimum_bootstrap_decay_ratio_lower_bound=0.0,
+        ),
+    )
+
+
 class AcceptedFillRouter:
     def __init__(self) -> None:
         self.pending_reports: list[ExecutionReport] = []
@@ -109,7 +125,7 @@ def test_artifact_bundle_selector_resolves_latest_complete_run(tmp_path) -> None
     events = list(source.subscribe_live(LiveSubscriptionRequest(symbols=("AAPL",))))
     config = FrameworkConfig()
     config.transition.mahalanobis_threshold = 0.0
-    workflow = ArtifactDrivenResearchWorkflow(tmp_path, framework_config=config)
+    workflow = _research_workflow(tmp_path, config)
 
     first = workflow.run(symbol="AAPL", events=events)
     second = workflow.run(symbol="AAPL", events=events)
@@ -159,7 +175,7 @@ def test_source_backed_runner_uses_historical_source_and_resolved_bundle(tmp_pat
     events = list(source.subscribe_live(LiveSubscriptionRequest(symbols=("AAPL",))))
     config = FrameworkConfig()
     config.transition.mahalanobis_threshold = 0.0
-    workflow = ArtifactDrivenResearchWorkflow(tmp_path, framework_config=config)
+    workflow = _research_workflow(tmp_path, config)
     result = workflow.run(symbol="AAPL", events=events)
 
     selector = ArtifactBundleSelector(workflow.store)
@@ -181,7 +197,7 @@ def test_source_backed_runner_can_require_validation_passing_bundle(tmp_path) ->
     events = list(source.subscribe_live(LiveSubscriptionRequest(symbols=("AAPL",))))
     config = FrameworkConfig()
     config.transition.mahalanobis_threshold = 0.0
-    workflow = ArtifactDrivenResearchWorkflow(tmp_path, framework_config=config)
+    workflow = _research_workflow(tmp_path, config)
     result = workflow.run(symbol="AAPL", events=events)
 
     selector = ArtifactBundleSelector(workflow.store)
@@ -205,7 +221,7 @@ def test_artifact_bundle_selector_can_gate_on_execution_quality(tmp_path) -> Non
     events = list(source.subscribe_live(LiveSubscriptionRequest(symbols=("AAPL",))))
     config = FrameworkConfig()
     config.transition.mahalanobis_threshold = 0.0
-    workflow = ArtifactDrivenResearchWorkflow(tmp_path, framework_config=config)
+    workflow = _research_workflow(tmp_path, config)
     result = workflow.run(symbol="AAPL", events=events)
 
     selector = ArtifactBundleSelector(workflow.store)
@@ -245,7 +261,7 @@ def test_passing_bundle_requires_matching_approved_validation_report(tmp_path) -
     events = list(source.subscribe_live(LiveSubscriptionRequest(symbols=("AAPL",))))
     config = FrameworkConfig()
     config.transition.mahalanobis_threshold = 0.0
-    workflow = ArtifactDrivenResearchWorkflow(tmp_path, framework_config=config)
+    workflow = _research_workflow(tmp_path, config)
     result = workflow.run(symbol="AAPL", events=events)
     validation_id = result.artifact_ids.validation_report_id
     metadata = workflow.store.load_metadata(validation_id)
@@ -265,7 +281,7 @@ def test_source_backed_runner_quality_gate_rejects_low_quality_bundle(tmp_path) 
     events = list(source.subscribe_live(LiveSubscriptionRequest(symbols=("AAPL",))))
     config = FrameworkConfig()
     config.transition.mahalanobis_threshold = 0.0
-    workflow = ArtifactDrivenResearchWorkflow(tmp_path, framework_config=config)
+    workflow = _research_workflow(tmp_path, config)
     workflow.run(symbol="AAPL", events=events)
 
     selector = ArtifactBundleSelector(workflow.store)
@@ -289,7 +305,7 @@ def test_routed_live_runner_can_resolve_latest_passing_bundle(tmp_path) -> None:
     events = list(source.subscribe_live(LiveSubscriptionRequest(symbols=("AAPL",))))
     config = FrameworkConfig()
     config.transition.mahalanobis_threshold = 0.0
-    workflow = ArtifactDrivenResearchWorkflow(tmp_path, framework_config=config)
+    workflow = _research_workflow(tmp_path, config)
     result = workflow.run(symbol="AAPL", events=events)
 
     runner = RoutedLiveTradingRunner(

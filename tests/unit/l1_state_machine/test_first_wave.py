@@ -37,6 +37,19 @@ def test_massive_payload_normalizer_handles_quote_and_trade_payloads() -> None:
     assert quote.timestamp_ns < trade.timestamp_ns
 
 
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"ev": "Q", "sym": "AAPL", "t": 1710163800000, "bp": 100.02, "ap": 100.0, "bs": 100, "as": 100},
+        {"ev": "Q", "sym": "AAPL", "t": 1710163800000, "bp": float("nan"), "ap": 100.0, "bs": 100, "as": 100},
+        {"ev": "T", "sym": "AAPL", "t": 1710163800000, "p": 0.0, "s": 100},
+        {"ev": "T", "sym": "AAPL", "t": 1710163800000, "p": 100.0, "s": 0},
+    ],
+)
+def test_massive_payload_normalizer_drops_invalid_market_values(payload) -> None:
+    assert MassivePayloadNormalizer().normalize(payload) is None
+
+
 def test_massive_payload_normalizer_converts_websocket_millisecond_timestamps_to_nanoseconds() -> None:
     normalizer = MassivePayloadNormalizer()
 

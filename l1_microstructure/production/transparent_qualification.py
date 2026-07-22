@@ -210,6 +210,11 @@ class TransparentCampaignEvaluator:
                 {"candidate_error_count": int(summary.get("candidate_error_count", -1))},
             ),
             TransparentCampaignCheck(
+                "shadow.no_late_events",
+                int(summary.get("candidate_late_event_count", -1)) == 0,
+                {"candidate_late_event_count": int(summary.get("candidate_late_event_count", -1))},
+            ),
+            TransparentCampaignCheck(
                 "shadow.latency",
                 baseline_latency > 0.0
                 and candidate_latency <= baseline_latency * self.policy.maximum_latency_ratio,
@@ -228,6 +233,7 @@ class TransparentCampaignEvaluator:
                 "shadow_summary_count": len(summaries),
                 "candidate_update_count": int(summary.get("candidate_update_count", 0)),
                 "candidate_error_count": int(summary.get("candidate_error_count", -1)),
+                "candidate_late_event_count": int(summary.get("candidate_late_event_count", -1)),
                 "resolved_outcome_count": int(summary.get("resolved_outcome_count", 0)),
                 "restart_count": len(restart_events),
                 "paper_safety_passed": paper_safety.passed,
