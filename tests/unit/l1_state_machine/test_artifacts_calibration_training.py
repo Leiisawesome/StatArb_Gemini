@@ -203,6 +203,10 @@ def test_transition_trainer_uses_equal_weighted_session_consensus() -> None:
 
     edge_payload = next(iter(trainer.last_payload["edges"].values()))
     assert edge_payload["session_drift_means_bps"] == [10.0, -1.0, 3.0]
+    assert edge_payload["training_session_ids"] == ["2026-07-17", "2026-07-20", "2026-07-21"]
     assert edge_payload["session_balanced_drift_mean_bps"] == 4.0
     assert edge_payload["training_session_count"] == 3
     assert edge_payload["directional_consensus"] == 2 / 3
+    assert edge_payload["cross_session_hit_rates"] == [1.0, 0.0, 1.0]
+    assert edge_payload["cross_session_hit_rate"] == 2 / 3
+    assert edge_payload["cross_session_hit_consensus"] == 2 / 3

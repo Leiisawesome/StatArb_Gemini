@@ -139,7 +139,8 @@ python -m l1_microstructure workflow `
 
 After the configured minimum of two training sessions, each later session is
 evaluated against prior sessions only. Edge direction uses equal-weighted
-per-session means and abstains when session support or sign consensus is weak.
+per-session means and abstains when session support, sign consensus, or
+leave-one-session-out directional reliability is weak.
 Feature, regime, transition, and replay state reset at every session boundary. A single
 `--trade-date` remains available for smoke testing and uses the legacy intraday
 half split.

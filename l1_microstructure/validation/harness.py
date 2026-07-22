@@ -8,6 +8,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from l1_microstructure.session_evidence import leave_one_session_out_hit_evidence
+
 from .interfaces import RegimeSplitSpec, ValidationReport
 
 
@@ -19,6 +21,8 @@ class RollingValidationHarness:
     minimum_directional_test_rows: int = 30
     minimum_edge_training_sessions: int = 2
     minimum_directional_consensus: float = 0.60
+    minimum_cross_session_hit_rate: float = 0.50
+    minimum_cross_session_hit_consensus: float = 0.60
     minimum_decay_ratio: float = 0.25
     minimum_fill_rate: float = 0.01
     maximum_cancel_rate: float = 0.50
@@ -72,6 +76,8 @@ class RollingValidationHarness:
             "session_consensus_policy": {
                 "minimum_training_sessions": self.minimum_edge_training_sessions,
                 "minimum_directional_consensus": self.minimum_directional_consensus,
+                "minimum_cross_session_hit_rate": self.minimum_cross_session_hit_rate,
+                "minimum_cross_session_hit_consensus": self.minimum_cross_session_hit_consensus,
                 "minimum_directional_test_rows": self.minimum_directional_test_rows,
             },
         }
@@ -140,12 +146,17 @@ class RollingValidationHarness:
             "session_date" in train_frame.columns
             and train_frame["session_date"].nunique() >= self.minimum_edge_training_sessions
         ):
-            session_edge_means = (
-                train_frame.groupby([*edge_columns, "session_date"], dropna=False)[self.drift_column]
-                .mean()
-                .rename("session_mean")
-                .reset_index()
-            )
+            evidence_frame = train_frame[[*edge_columns, "session_date", self.drift_column]].copy()
+            evidence_frame["positive"] = (evidence_frame[self.drift_column] > 0.0).astype("int64")
+            evidence_frame["negative"] = (evidence_frame[self.drift_column] < 0.0).astype("int64")
+            session_edge_means = evidence_frame.groupby(
+                [*edge_columns, "session_date"], dropna=False
+            ).agg(
+                session_mean=(self.drift_column, "mean"),
+                sample_count=(self.drift_column, "size"),
+                positive_count=("positive", "sum"),
+                negative_count=("negative", "sum"),
+            ).reset_index()
             records: dict[tuple[object, ...], float] = {}
             for edge_values, edge_sessions in session_edge_means.groupby(edge_columns, dropna=False):
                 session_means = edge_sessions["session_mean"].to_numpy(dtype=float)
@@ -156,9 +167,17 @@ class RollingValidationHarness:
                     consensus = float(np.mean(session_means < 0.0))
                 else:
                     consensus = 0.0
+                cross_session_evidence = leave_one_session_out_hit_evidence(
+                    session_means,
+                    edge_sessions["positive_count"].to_numpy(dtype=int),
+                    edge_sessions["negative_count"].to_numpy(dtype=int),
+                    edge_sessions["sample_count"].to_numpy(dtype=int),
+                )
                 if (
                     len(session_means) >= self.minimum_edge_training_sessions
                     and consensus >= self.minimum_directional_consensus
+                    and cross_session_evidence.mean_hit_rate >= self.minimum_cross_session_hit_rate
+                    and cross_session_evidence.consensus >= self.minimum_cross_session_hit_consensus
                 ):
                     edge_key = edge_values if isinstance(edge_values, tuple) else (edge_values,)
                     records[edge_key] = balanced_mean

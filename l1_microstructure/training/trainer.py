@@ -12,6 +12,7 @@ from typing import Iterable
 import pandas as pd
 
 from l1_microstructure.artifacts import ArtifactMetadata, LocalArtifactStore
+from l1_microstructure.session_evidence import leave_one_session_out_hit_evidence
 
 from .interfaces import TransitionModelArtifact, TransitionTrainingSample
 
@@ -146,9 +147,15 @@ class EmpiricalTransitionTrainer:
                     or "unknown-session"
                 )
                 session_drifts[session_id].append(sample.realized_drift_bps)
-            session_drift_means = [
-                float(sum(values) / len(values)) for _, values in sorted(session_drifts.items())
-            ]
+            ordered_session_drifts = sorted(session_drifts.items())
+            training_session_ids = [session_id for session_id, _ in ordered_session_drifts]
+            session_drift_means = [float(sum(values) / len(values)) for _, values in ordered_session_drifts]
+            cross_session_evidence = leave_one_session_out_hit_evidence(
+                session_drift_means,
+                [sum(value > 0.0 for value in values) for _, values in ordered_session_drifts],
+                [sum(value < 0.0 for value in values) for _, values in ordered_session_drifts],
+                [len(values) for _, values in ordered_session_drifts],
+            )
             session_balanced_mean = float(sum(session_drift_means) / len(session_drift_means))
             if session_balanced_mean > 0.0:
                 aligned_session_count = sum(value > 0.0 for value in session_drift_means)
@@ -169,9 +176,13 @@ class EmpiricalTransitionTrainer:
                 "drift_mean_bps": float(sum(drifts) / max(len(drifts), 1)),
                 "drift_std_bps": float(stdev(drifts)) if len(drifts) > 1 else 0.0,
                 "training_session_count": len(session_drift_means),
+                "training_session_ids": training_session_ids,
                 "session_drift_means_bps": session_drift_means,
                 "session_balanced_drift_mean_bps": session_balanced_mean,
                 "directional_consensus": directional_consensus,
+                "cross_session_hit_rates": list(cross_session_evidence.session_hit_rates),
+                "cross_session_hit_rate": cross_session_evidence.mean_hit_rate,
+                "cross_session_hit_consensus": cross_session_evidence.consensus,
                 "holding_times_ns": [int(value) for value in holding_times],
                 "drift_samples_bps": [float(value) for value in drifts],
             }

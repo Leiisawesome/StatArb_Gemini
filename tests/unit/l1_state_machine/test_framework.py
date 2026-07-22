@@ -267,6 +267,8 @@ def test_decision_engine_requires_probability_net_of_costs() -> None:
     config.transition.min_edge_observations = 3
     config.transition.min_edge_training_sessions = 0
     config.transition.min_directional_consensus = 0.0
+    config.transition.min_cross_session_hit_rate = 0.0
+    config.transition.min_cross_session_hit_consensus = 0.0
     decision_engine = DecisionEngine(config.decision, config.transition)
     kernel = TransitionKernel(config.transition)
     edge = EdgeKey("a", "b", MicrostructureRegime.EXECUTION_FLOW)
@@ -314,6 +316,16 @@ def test_decision_engine_requires_stable_multi_session_direction() -> None:
 
     stats.session_drift_means_bps = [4.0, 5.0]
     stats.directional_consensus = 1.0
+    stats.cross_session_hit_rate = 0.4
+    weak_hit_rate = decision_engine.decide(edge, stats, kernel.diagnostic(edge), regime, state)
+    assert weak_hit_rate.reason == "weak cross-session hit rate"
+
+    stats.cross_session_hit_rate = 0.6
+    stats.cross_session_hit_consensus = 0.5
+    unstable_hit_rate = decision_engine.decide(edge, stats, kernel.diagnostic(edge), regime, state)
+    assert unstable_hit_rate.reason == "unstable cross-session hit rate"
+
+    stats.cross_session_hit_consensus = 1.0
     stable = decision_engine.decide(edge, stats, kernel.diagnostic(edge), regime, state)
     assert stable.action is TradeAction.BUY
 

@@ -37,6 +37,8 @@ class TransitionConfig:
     min_edge_observations: int = 200
     min_edge_training_sessions: int = 2
     min_directional_consensus: float = 0.60
+    min_cross_session_hit_rate: float = 0.50
+    min_cross_session_hit_consensus: float = 0.60
     min_sharpe_stability: float = 0.35
     adversarial_decay_gamma: float = 0.0025
 

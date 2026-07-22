@@ -289,3 +289,51 @@ def test_validation_scores_only_session_consensus_edges() -> None:
     assert report.summary["mean_directional_test_rows"] == 1.0
     assert report.summary["mean_directional_coverage"] == 0.5
     assert report.summary["mean_test_hit_rate"] == 1.0
+
+
+def test_validation_rejects_mean_signs_driven_by_directional_outliers() -> None:
+    training_rows = [
+        {
+            "timestamp": f"{session_date}T14:{30 + index:02d}:00Z",
+            "session_date": session_date,
+            "from_state": "outlier-driven",
+            "to_state": "next",
+            "regime": "execution_flow",
+            "realized_drift_bps": drift,
+        }
+        for session_date in ("2024-01-02", "2024-01-03")
+        for index, drift in enumerate((-1.0, -1.0, 10.0))
+    ]
+    test_rows = [
+        {
+            "timestamp": "2024-01-04T14:30:00Z",
+            "session_date": "2024-01-04",
+            "from_state": "outlier-driven",
+            "to_state": "next",
+            "regime": "execution_flow",
+            "realized_drift_bps": 1.0,
+        }
+    ]
+    harness = RollingValidationHarness(
+        minimum_directional_test_rows=1,
+        minimum_fill_rate=0.0,
+        bootstrap_sample_count=0,
+        minimum_bootstrap_hit_rate_lower_bound=0.0,
+        minimum_bootstrap_decay_ratio_lower_bound=0.0,
+    )
+
+    report = harness.run(
+        pd.DataFrame(training_rows + test_rows),
+        [
+            RegimeSplitSpec(
+                train_start="2024-01-02T14:29:00Z",
+                train_end="2024-01-03T14:59:00Z",
+                test_start="2024-01-04T14:29:00Z",
+                test_end="2024-01-04T14:59:00Z",
+                label="outlier-driven",
+            )
+        ],
+    )
+
+    assert report.summary["mean_directional_test_rows"] == 0.0
+    assert any("insufficient stable directional observations" in failure for failure in report.failures)

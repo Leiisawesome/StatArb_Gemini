@@ -27,6 +27,9 @@ class EdgeStatistics:
     drift_samples_bps: list[float] = field(default_factory=list)
     session_drift_means_bps: list[float] = field(default_factory=list)
     directional_consensus: float = 0.0
+    cross_session_hit_rates: list[float] = field(default_factory=list)
+    cross_session_hit_rate: float = 1.0
+    cross_session_hit_consensus: float = 1.0
     last_observation_index: int = 0
     # Welford incremental stats — O(1) property access regardless of session length
     _ht_count: int = field(default=0, init=False, repr=False)
@@ -241,6 +244,11 @@ class TransitionKernel:
                     float(value) for value in edge_record.get("session_drift_means_bps", [])
                 ],
                 directional_consensus=float(edge_record.get("directional_consensus", 0.0)),
+                cross_session_hit_rates=[
+                    float(value) for value in edge_record.get("cross_session_hit_rates", [])
+                ],
+                cross_session_hit_rate=float(edge_record.get("cross_session_hit_rate", 0.0)),
+                cross_session_hit_consensus=float(edge_record.get("cross_session_hit_consensus", 0.0)),
                 last_observation_index=int(edge_record.get("count", 0)),
             )
             self.edge_stats[edge] = stats

@@ -462,6 +462,8 @@ def test_routed_live_runner_submits_requests_and_ingests_external_reports() -> N
     config.transition.min_edge_observations = 1
     config.transition.min_edge_training_sessions = 0
     config.transition.min_directional_consensus = 0.0
+    config.transition.min_cross_session_hit_rate = 0.0
+    config.transition.min_cross_session_hit_consensus = 0.0
     config.decision.min_alpha_score = 0.0
     config.decision.entry_probability_threshold = 0.5
     config.decision.transaction_cost_bps = 0.0
@@ -511,6 +513,8 @@ def test_routed_live_runner_can_resume_from_recovery_snapshot() -> None:
     config.transition.min_edge_observations = 1
     config.transition.min_edge_training_sessions = 0
     config.transition.min_directional_consensus = 0.0
+    config.transition.min_cross_session_hit_rate = 0.0
+    config.transition.min_cross_session_hit_consensus = 0.0
     config.decision.min_alpha_score = 0.0
     config.decision.entry_probability_threshold = 0.5
     config.decision.transaction_cost_bps = 0.0
@@ -569,6 +573,8 @@ def test_routed_live_runner_supports_latency_buffered_router_adapter() -> None:
     config.transition.min_edge_observations = 1
     config.transition.min_edge_training_sessions = 0
     config.transition.min_directional_consensus = 0.0
+    config.transition.min_cross_session_hit_rate = 0.0
+    config.transition.min_cross_session_hit_consensus = 0.0
     config.decision.min_alpha_score = 0.0
     config.decision.entry_probability_threshold = 0.5
     config.decision.transaction_cost_bps = 0.0
@@ -609,6 +615,8 @@ def test_routed_live_runner_handles_cancelled_router_reports() -> None:
     config.transition.min_edge_observations = 1
     config.transition.min_edge_training_sessions = 0
     config.transition.min_directional_consensus = 0.0
+    config.transition.min_cross_session_hit_rate = 0.0
+    config.transition.min_cross_session_hit_consensus = 0.0
     config.decision.min_alpha_score = 0.0
     config.decision.entry_probability_threshold = 0.5
     config.decision.transaction_cost_bps = 0.0
@@ -699,6 +707,8 @@ def test_routed_live_runner_reconciles_broker_backed_partial_fill_and_cancel() -
     config.transition.min_edge_observations = 1
     config.transition.min_edge_training_sessions = 0
     config.transition.min_directional_consensus = 0.0
+    config.transition.min_cross_session_hit_rate = 0.0
+    config.transition.min_cross_session_hit_consensus = 0.0
     config.decision.min_alpha_score = 0.0
     config.decision.entry_probability_threshold = 0.5
     config.decision.transaction_cost_bps = 0.0
@@ -806,6 +816,8 @@ def test_routed_live_runner_can_resume_with_open_broker_backed_order() -> None:
     config.transition.min_edge_observations = 1
     config.transition.min_edge_training_sessions = 0
     config.transition.min_directional_consensus = 0.0
+    config.transition.min_cross_session_hit_rate = 0.0
+    config.transition.min_cross_session_hit_consensus = 0.0
     config.decision.min_alpha_score = 0.0
     config.decision.entry_probability_threshold = 0.5
     config.decision.transaction_cost_bps = 0.0

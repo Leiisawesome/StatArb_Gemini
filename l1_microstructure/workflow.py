@@ -63,6 +63,10 @@ class ArtifactDrivenResearchWorkflow:
         self.validation_harness = validation_harness or RollingValidationHarness(
             minimum_edge_training_sessions=self.framework_config.transition.min_edge_training_sessions,
             minimum_directional_consensus=self.framework_config.transition.min_directional_consensus,
+            minimum_cross_session_hit_rate=self.framework_config.transition.min_cross_session_hit_rate,
+            minimum_cross_session_hit_consensus=(
+                self.framework_config.transition.min_cross_session_hit_consensus
+            ),
         )
         self.version = version
         self.store = LocalArtifactStore(artifact_root)
@@ -164,6 +168,10 @@ class ArtifactDrivenResearchWorkflow:
                 "runtime_horizon_ns": self.framework_config.transition.drift_horizon_ns,
                 "minimum_training_sessions": self.framework_config.transition.min_edge_training_sessions,
                 "minimum_directional_consensus": self.framework_config.transition.min_directional_consensus,
+                "minimum_cross_session_hit_rate": self.framework_config.transition.min_cross_session_hit_rate,
+                "minimum_cross_session_hit_consensus": (
+                    self.framework_config.transition.min_cross_session_hit_consensus
+                ),
             },
         )
 
@@ -242,6 +250,10 @@ class ArtifactDrivenResearchWorkflow:
                     "training_session_dates": list(session_dates),
                     "minimum_edge_training_sessions": self.framework_config.transition.min_edge_training_sessions,
                     "minimum_directional_consensus": self.framework_config.transition.min_directional_consensus,
+                    "minimum_cross_session_hit_rate": self.framework_config.transition.min_cross_session_hit_rate,
+                    "minimum_cross_session_hit_consensus": (
+                        self.framework_config.transition.min_cross_session_hit_consensus
+                    ),
                     "replay_transition_count": int(activation_summary["transition_count"]),
                     "replay_actionable_intent_count": int(activation_summary["actionable_intent_count"]),
                     "replay_risk_approved_count": int(activation_summary["risk_approved_count"]),
