@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pandas as pd
+import pytest
 
 from l1_microstructure.artifacts import ArtifactMetadata, LocalArtifactStore
 from l1_microstructure.calibration import CalibrationDataset, EmpiricalRegimeCalibrator, QuantileStateCalibrator
@@ -210,3 +211,67 @@ def test_transition_trainer_uses_equal_weighted_session_consensus() -> None:
     assert edge_payload["cross_session_hit_rates"] == [1.0, 0.0, 1.0]
     assert edge_payload["cross_session_hit_rate"] == 2 / 3
     assert edge_payload["cross_session_hit_consensus"] == 2 / 3
+
+
+def test_frame_transition_training_matches_legacy_statistics_without_raw_samples() -> None:
+    transition_panel = pd.DataFrame(
+        [
+            {
+                "symbol": "AAPL",
+                "from_state": from_state,
+                "to_state": to_state,
+                "regime": "execution_flow",
+                "horizon_ns": horizon_ns,
+                "holding_time_ns": holding_time_ns,
+                "realized_drift_bps": drift_bps,
+                "session_date": session_date,
+            }
+            for horizon_ns in (3_000_000_000, 15_000_000_000)
+            for session_date, from_state, to_state, holding_time_ns, drift_bps in (
+                ("2026-07-17", "a", "b", 1_000, 3.0),
+                ("2026-07-17", "a", "b", 2_000, 1.0),
+                ("2026-07-20", "a", "b", 3_000, -2.0),
+                ("2026-07-20", "a", "c", 4_000, 4.0),
+                ("2026-07-21", "a", "c", 5_000, 2.0),
+            )
+        ]
+    )
+    legacy = EmpiricalTransitionTrainer()
+    compact = EmpiricalTransitionTrainer()
+
+    legacy.fit(legacy.samples_from_frame(transition_panel), runtime_horizon_ns=3_000_000_000)
+    compact.fit_frame(transition_panel, runtime_horizon_ns=3_000_000_000)
+
+    assert legacy.last_payload is not None
+    assert compact.last_payload is not None
+    assert compact.last_payload["available_horizons_ns"] == legacy.last_payload["available_horizons_ns"]
+    assert compact.last_payload["runtime_horizon_ns"] == legacy.last_payload["runtime_horizon_ns"]
+    for horizon_ns in compact.last_payload["available_horizons_ns"]:
+        compact_model = compact.last_payload["horizon_models"][str(horizon_ns)]
+        legacy_model = legacy.last_payload["horizon_models"][str(horizon_ns)]
+        assert compact_model["edge_count"] == legacy_model["edge_count"]
+        assert compact_model["sample_count"] == legacy_model["sample_count"]
+        assert compact_model["edges"].keys() == legacy_model["edges"].keys()
+        for edge_key, compact_edge in compact_model["edges"].items():
+            legacy_edge = legacy_model["edges"][edge_key]
+            assert "holding_times_ns" not in compact_edge
+            assert "drift_samples_bps" not in compact_edge
+            assert compact_edge.keys() == legacy_edge.keys() - {
+                "holding_times_ns",
+                "drift_samples_bps",
+            }
+            for field in compact_edge:
+                if field in {
+                    "transition_probability",
+                    "mean_holding_time_ns",
+                    "drift_mean_bps",
+                    "drift_std_bps",
+                    "session_balanced_drift_mean_bps",
+                    "directional_consensus",
+                    "cross_session_hit_rates",
+                    "cross_session_hit_rate",
+                    "cross_session_hit_consensus",
+                }:
+                    assert compact_edge[field] == pytest.approx(legacy_edge[field])
+                else:
+                    assert compact_edge[field] == legacy_edge[field]

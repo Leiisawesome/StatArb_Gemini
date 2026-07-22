@@ -251,5 +251,13 @@ class TransitionKernel:
                 cross_session_hit_consensus=float(edge_record.get("cross_session_hit_consensus", 0.0)),
                 last_observation_index=int(edge_record.get("count", 0)),
             )
+            if not stats.holding_times_ns and stats.count > 0:
+                stats._ht_count = stats.count
+                stats._ht_mean = float(edge_record.get("mean_holding_time_ns", 0.0))
+            if not stats.drift_samples_bps and stats.count > 0:
+                stats._d_count = stats.count
+                stats._d_mean = float(edge_record.get("drift_mean_bps", 0.0))
+                drift_std_bps = float(edge_record.get("drift_std_bps", 0.0))
+                stats._d_M2 = drift_std_bps * drift_std_bps * max(stats.count - 1, 0)
             self.edge_stats[edge] = stats
             self.outgoing_counts[(edge.from_state, edge.regime)][edge.to_state] = stats.count

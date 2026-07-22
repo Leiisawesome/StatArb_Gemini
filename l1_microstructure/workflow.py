@@ -610,8 +610,10 @@ class ArtifactDrivenResearchWorkflow:
             )
         )
         trainer = EmpiricalTransitionTrainer(version=self.version)
-        transition_samples = trainer.samples_from_frame(transition_panel.frame)
-        trainer.fit(transition_samples, runtime_horizon_ns=self.framework_config.transition.drift_horizon_ns)
+        trainer.fit_frame(
+            transition_panel.frame,
+            runtime_horizon_ns=self.framework_config.transition.drift_horizon_ns,
+        )
         if trainer.last_payload is None:
             raise ValueError("transition trainer did not retain a payload")
         return state_panel, transition_panel, state_artifact, regime_artifact, execution_artifact, trainer.last_payload

@@ -273,6 +273,36 @@ def test_transitions_load_trained_payload_edges() -> None:
     assert stats.cross_session_hit_consensus == 1.0
 
 
+def test_transitions_load_compact_summary_statistics() -> None:
+    kernel = TransitionKernel()
+    kernel.load_trained_payload({
+        "sample_count": 3,
+        "edges": {
+            "e1": {
+                "from_state": "a",
+                "to_state": "b",
+                "regime": "execution_flow",
+                "count": 3,
+                "mean_holding_time_ns": 2_000.0,
+                "drift_mean_bps": 2.0,
+                "drift_std_bps": 1.0,
+                "session_drift_means_bps": [1.5, 2.5],
+                "directional_consensus": 1.0,
+                "cross_session_hit_rates": [1.0, 1.0],
+                "cross_session_hit_rate": 1.0,
+                "cross_session_hit_consensus": 1.0,
+            }
+        },
+    })
+
+    stats = kernel.get_edge(EdgeKey("a", "b", MicrostructureRegime.EXECUTION_FLOW))
+    assert stats.holding_times_ns == []
+    assert stats.drift_samples_bps == []
+    assert stats.mean_holding_time_ns == 2_000.0
+    assert stats.drift_mean_bps == 2.0
+    assert stats.drift_std_bps == 1.0
+
+
 def test_edge_statistics_signal_to_noise_zero_std() -> None:
     """Covers transitions.py line 53: signal_to_noise when std is 0."""
     stats = EdgeStatistics(drift_samples_bps=[1.0, 1.0])
