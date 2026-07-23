@@ -137,6 +137,4 @@ def test_hierarchical_posterior_retains_predictive_uncertainty_for_repeated_outc
     )
 
     assert posterior.std_bps >= 0.5
-    assert posterior.mean_standard_error_bps < posterior.std_bps
-    assert posterior.effective_sample_size == 8.0
     assert posterior.probability_up < 1.0

@@ -152,8 +152,6 @@ class HierarchicalDriftPosterior:
     horizon_ns: int
     mean_bps: float
     std_bps: float
-    mean_standard_error_bps: float
-    effective_sample_size: float
     probability_up: float
     probability_down: float
     threshold_bps: float
@@ -303,8 +301,6 @@ class HierarchicalTransitionRuntime:
             support[_support_name(level)] += weight
 
         std = sqrt(max(variance, 1e-9))
-        effective_sample_size = max(available[-1][1].effective_count, 1.0)
-        mean_standard_error = std / sqrt(effective_sample_size)
         probability_up = 1.0 - _normal_cdf(mean, std, threshold_bps)
         probability_down = _normal_cdf(mean, std, -threshold_bps)
         exact = levels["edge"].get(_edge_key(regime, from_state, to_state))
@@ -312,8 +308,6 @@ class HierarchicalTransitionRuntime:
             horizon_ns=int(horizon_ns),
             mean_bps=float(mean),
             std_bps=float(std),
-            mean_standard_error_bps=float(mean_standard_error),
-            effective_sample_size=float(effective_sample_size),
             probability_up=float(probability_up),
             probability_down=float(probability_down),
             threshold_bps=float(threshold_bps),

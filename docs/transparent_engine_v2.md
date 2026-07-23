@@ -47,12 +47,6 @@ decision for the selected horizon. The directional label threshold remains a
 separate classification boundary and cannot substitute for modeled execution
 cost in the economic gate.
 
-Directional probabilities retain the posterior predictive variance of the
-next outcome. The utility uncertainty term is different: it uses the standard
-error of the hierarchical mean at the most specific supported level. This
-avoids charging one full outcome standard deviation as if it were uncertainty
-in the expected drift estimate.
-
 A v2 run contains state and execution calibration, state-vector, semi-Markov regime, hierarchical transition, and utility artifacts. The validation report binds the SHA-256 payload hash of every model artifact. Published run IDs are immutable, and selection fails closed if an artifact, report, version, symbol, or run association changes.
 
 ## Research workflow

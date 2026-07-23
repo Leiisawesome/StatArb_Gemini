@@ -40,20 +40,11 @@ def _state() -> ObservedState:
     )
 
 
-def _posterior(
-    horizon: int,
-    mean: float,
-    std: float = 0.2,
-    mean_standard_error: float | None = None,
-) -> HierarchicalDriftPosterior:
+def _posterior(horizon: int, mean: float, std: float = 0.2) -> HierarchicalDriftPosterior:
     return HierarchicalDriftPosterior(
         horizon_ns=horizon,
         mean_bps=mean,
         std_bps=std,
-        mean_standard_error_bps=(
-            std / 10.0 if mean_standard_error is None else mean_standard_error
-        ),
-        effective_sample_size=100.0,
         probability_up=0.9 if mean > 0 else 0.1,
         probability_down=0.1 if mean > 0 else 0.9,
         threshold_bps=1.0,
@@ -112,7 +103,7 @@ def test_expected_utility_selects_best_action_and_horizon_with_explanation() -> 
 def test_expected_utility_holds_when_uncertainty_consumes_edge() -> None:
     engine = ExpectedUtilityDecisionEngine(_model())
     decision = engine.decide(
-        (_posterior(3_000, 1.0, std=20.0, mean_standard_error=20.0),),
+        (_posterior(3_000, 1.0, std=20.0),),
         _state(),
         alignment_probability=0.9,
         transition_probability=0.9,
@@ -121,26 +112,6 @@ def test_expected_utility_holds_when_uncertainty_consumes_edge() -> None:
 
     assert decision.action is TradeAction.HOLD
     assert decision.expected_utility_bps == 0.0
-
-
-def test_expected_utility_penalizes_mean_uncertainty_not_outcome_volatility() -> None:
-    engine = ExpectedUtilityDecisionEngine(_model())
-    low_volatility = engine.decide(
-        (_posterior(3_000, 3.0, std=0.2, mean_standard_error=0.1),),
-        _state(),
-        alignment_probability=0.9,
-        transition_probability=0.9,
-        current_risk_fraction=0.0,
-    )
-    high_volatility = engine.decide(
-        (_posterior(3_000, 3.0, std=20.0, mean_standard_error=0.1),),
-        _state(),
-        alignment_probability=0.9,
-        transition_probability=0.9,
-        current_risk_fraction=0.0,
-    )
-
-    assert high_volatility.expected_utility_bps == low_volatility.expected_utility_bps
 
 
 def test_utility_trainer_rejects_future_sample() -> None:

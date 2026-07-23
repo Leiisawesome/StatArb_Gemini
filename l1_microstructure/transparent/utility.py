@@ -330,10 +330,7 @@ class ExpectedUtilityDecisionEngine:
             )
             slippage *= regime_slippage_multiplier
             cost = self.model.fixed_cost_bps + slippage
-            uncertainty = (
-                self.model.uncertainty_penalty_multiplier
-                * posterior.mean_standard_error_bps
-            )
+            uncertainty = self.model.uncertainty_penalty_multiplier * posterior.std_bps
             risk_penalty = self.model.risk_penalty_bps * current_risk_fraction
             for action, direction in ((TradeAction.BUY, 1.0), (TradeAction.SELL, -1.0)):
                 directional_drift = direction * posterior.mean_bps
