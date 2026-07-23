@@ -249,7 +249,13 @@ class TransitionKernel:
                 ],
                 cross_session_hit_rate=float(edge_record.get("cross_session_hit_rate", 0.0)),
                 cross_session_hit_consensus=float(edge_record.get("cross_session_hit_consensus", 0.0)),
-                last_observation_index=int(edge_record.get("count", 0)),
+                # A batch artifact is fresh at its publication boundary. An
+                # edge count is not a position in the global observation
+                # stream; treating it as one can age every fitted edge by
+                # millions of observations and underflow its drift to zero.
+                last_observation_index=int(
+                    edge_record.get("last_observation_index", self.observation_index)
+                ),
             )
             if not stats.holding_times_ns and stats.count > 0:
                 stats._ht_count = stats.count
