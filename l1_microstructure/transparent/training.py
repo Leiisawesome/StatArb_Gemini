@@ -146,7 +146,7 @@ def candidate_transition_samples(
     for index, state in enumerate(states):
         regime = regime_runtime.update(state)
         transition = vector_runtime.update(state)
-        if index == 0:
+        if index == 0 or not transition.is_transition:
             continue
         previous = states[index - 1]
         for horizon_ns in config.transition.drift_horizon_ns_values:

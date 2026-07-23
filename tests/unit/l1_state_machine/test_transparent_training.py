@@ -12,7 +12,11 @@ from l1_microstructure.features import (
     SpreadState,
     VolatilityState,
 )
-from l1_microstructure.transparent import RobustStateVectorTrainer, TransparentModelTrainer
+from l1_microstructure.transparent import (
+    RobustStateVectorTrainer,
+    TransparentModelTrainer,
+    candidate_transition_samples,
+)
 
 
 def _state(index: int) -> ObservedState:
@@ -104,6 +108,17 @@ def test_transparent_model_trainer_builds_complete_split_local_bundle() -> None:
     assert artifacts.utility_model.metadata["trainer"] == "execution_calibration_adapter"
     assert artifacts.utility_model.fixed_cost_bps == config.decision.transaction_cost_bps
     assert artifacts.metadata["candidate_transition_sample_count"] > 0
+    samples = tuple(
+        candidate_transition_samples(
+            tuple(states),
+            artifacts.state_vector_model,
+            artifacts.semi_markov_regime_model,
+            config,
+        )
+    )
+    assert len(samples) == artifacts.hierarchical_transition_model.sample_count
+    assert all(sample.metadata["vector_transition_detected"] is True for sample in samples)
+    assert len(samples) < (len(states) - 1) * len(config.transition.drift_horizons_ms)
 
 
 def test_transparent_model_trainer_rejects_cross_boundary_state() -> None:
