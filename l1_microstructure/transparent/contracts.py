@@ -76,6 +76,7 @@ class EnginePredictionRecord:
     resident_bytes: int = 0
     probability_down: float | None = None
     selected_direction: int | None = None
+    execution_cost_bps: float | None = None
 
     def __post_init__(self) -> None:
         if not 0.0 <= self.probability_up <= 1.0:
@@ -93,6 +94,10 @@ class EnginePredictionRecord:
             raise ValueError("operational measurements cannot be negative")
         if self.selected_direction not in {None, -1, 0, 1}:
             raise ValueError("selected prediction direction must be -1, 0, 1, or omitted")
+        if self.execution_cost_bps is not None and (
+            not np.isfinite(self.execution_cost_bps) or self.execution_cost_bps < 0.0
+        ):
+            raise ValueError("prediction execution cost must be finite and non-negative")
 
     @property
     def target_up(self) -> float:
@@ -135,10 +140,15 @@ class EnginePredictionRecord:
 
     @property
     def signed_net_drift_bps(self) -> float:
+        execution_cost = (
+            self.threshold_bps
+            if self.execution_cost_bps is None
+            else self.execution_cost_bps
+        )
         if self.direction > 0:
-            return self.realized_drift_bps - self.threshold_bps
+            return self.realized_drift_bps - execution_cost
         if self.direction < 0:
-            return -self.realized_drift_bps - self.threshold_bps
+            return -self.realized_drift_bps - execution_cost
         return 0.0
 
 

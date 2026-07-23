@@ -158,10 +158,10 @@ def test_oos_validator_makes_one_runtime_equivalent_utility_choice_across_horizo
         fill_intercept=10.0,
         fill_alignment_weight=0.0,
         fill_spread_penalty=0.0,
-        slippage_bps_by_horizon={"5": 0.0, "10": 0.0},
+        slippage_bps_by_horizon={"5": 0.25, "10": 0.25},
         fill_multiplier_by_regime={},
         slippage_multiplier_by_regime={},
-        fixed_cost_bps=0.0,
+        fixed_cost_bps=0.75,
         uncertainty_penalty_multiplier=0.0,
         risk_penalty_bps=0.0,
         minimum_expected_utility_bps=0.0,
@@ -198,3 +198,4 @@ def test_oos_validator_makes_one_runtime_equivalent_utility_choice_across_horizo
 
     assert report.candidate.decisive_count == 1
     assert report.candidate.decision_rate == 0.5
+    assert report.candidate.mean_decision_net_drift_bps == 4.0

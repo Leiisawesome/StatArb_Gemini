@@ -42,6 +42,11 @@ an inert or loss-making candidate pass. Validation reports created before these
 decision-level metrics and thresholds existed are intentionally rejected and
 must be regenerated from held-out data.
 
+Selected-action net drift subtracts the execution cost used by the utility
+decision for the selected horizon. The directional label threshold remains a
+separate classification boundary and cannot substitute for modeled execution
+cost in the economic gate.
+
 A v2 run contains state and execution calibration, state-vector, semi-Markov regime, hierarchical transition, and utility artifacts. The validation report binds the SHA-256 payload hash of every model artifact. Published run IDs are immutable, and selection fails closed if an artifact, report, version, symbol, or run association changes.
 
 ## Research workflow

@@ -186,6 +186,7 @@ class TransparentOOSValidator:
 
                 selected_action = None
                 selected_horizon = None
+                selected_execution_cost_bps = None
                 first_sample = candidate_items[0][0]
                 candidate_detected = bool(first_sample.metadata.get("candidate_detected", True))
                 if any(
@@ -212,6 +213,13 @@ class TransparentOOSValidator:
                         TradeAction.HOLD: 0,
                     }[decision.action]
                     selected_horizon = decision.horizon_ns
+                    if decision.action is not TradeAction.HOLD:
+                        selected_execution_cost_bps = next(
+                            alternative.expected_cost_bps
+                            for alternative in decision.alternatives
+                            if alternative.action is decision.action
+                            and alternative.horizon_ns == decision.horizon_ns
+                        )
                 else:
                     decision_latency = 0
                     if not candidate_detected:
@@ -232,6 +240,11 @@ class TransparentOOSValidator:
                             + (decision_latency if sample.horizon_ns == selected_horizon else 0),
                             resident_bytes=candidate_bytes,
                             selected_direction=selected_direction,
+                            execution_cost_bps=(
+                                selected_execution_cost_bps
+                                if selected_direction in {-1, 1}
+                                else None
+                            ),
                         )
                     )
         baseline = evaluate_prediction_records(baseline_records)

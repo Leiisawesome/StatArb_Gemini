@@ -144,3 +144,23 @@ def test_forecast_quality_is_independent_of_executable_hold_action() -> None:
     assert evaluation.decision_rate == 0.0
     assert evaluation.decision_hit_rate == 0.0
     assert evaluation.mean_decision_net_drift_bps == 0.0
+
+
+def test_selected_action_net_drift_uses_explicit_execution_cost() -> None:
+    record = EnginePredictionRecord(
+        probability_up=0.9,
+        probability_down=0.05,
+        realized_drift_bps=3.0,
+        threshold_bps=1.0,
+        edge_seen=True,
+        latency_ns=10,
+        selected_direction=1,
+        execution_cost_bps=2.0,
+    )
+
+    assert record.target_up == 1.0
+    assert record.signed_net_drift_bps == 1.0
+    assert evaluate_prediction_records((record,)).mean_decision_net_drift_bps == 1.0
+
+    with pytest.raises(ValueError, match="execution cost"):
+        replace(record, execution_cost_bps=-0.1)
