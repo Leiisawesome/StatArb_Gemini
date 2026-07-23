@@ -44,7 +44,7 @@ class TransitionConfig:
 
     @property
     def drift_horizon_ns(self) -> int:
-        return self.drift_horizon_ns_values[0]
+        return max(int(self.drift_horizon_ms), 1) * 1_000_000
 
     @property
     def drift_horizon_ns_values(self) -> tuple[int, ...]:

@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from l1_microstructure.cli import main
+from l1_microstructure.cli import _framework_config, main
 from l1_microstructure.events import MarketEvent
 from l1_microstructure.execution import ExecutionReport
 from l1_microstructure.features import FeatureEngine
@@ -96,6 +96,15 @@ def test_cli_workflow_command_runs_end_to_end(tmp_path, capsys) -> None:
     assert payload["state_panel_rows"] > 0
     assert payload["artifact_ids"]["transition_model_id"]
     assert "validation_failures" in payload
+
+
+def test_cli_framework_config_selects_an_explicit_trained_runtime_horizon() -> None:
+    config = _framework_config(None, runtime_horizon_ms=15_000)
+
+    assert config.transition.drift_horizon_ns == 15_000_000_000
+
+    with pytest.raises(ValueError, match="configured training horizons"):
+        _framework_config(None, runtime_horizon_ms=7_000)
 
 
 def test_cli_workflow_accepts_repeated_trade_dates_for_walk_forward_validation(tmp_path, capsys) -> None:

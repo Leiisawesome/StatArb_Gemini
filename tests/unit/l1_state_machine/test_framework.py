@@ -655,6 +655,35 @@ def test_pipeline_resolves_forward_drift_outcomes() -> None:
     assert "drift_mean_bps" in summary.columns
 
 
+def test_state_machine_uses_validated_artifact_runtime_horizon_without_mutating_caller_config() -> None:
+    config = FrameworkConfig()
+    artifacts = RuntimeArtifactBundle(
+        transition_model={
+            "runtime_horizon_ns": 15_000_000_000,
+            "sample_count": 0,
+            "edges": {},
+        }
+    )
+
+    machine = L1MicrostructureStateMachine(config, runtime_artifacts=artifacts)
+
+    assert config.transition.drift_horizon_ns == 3_000_000_000
+    assert machine.config.transition.drift_horizon_ns == 15_000_000_000
+
+
+def test_state_machine_rejects_invalid_artifact_runtime_horizon() -> None:
+    artifacts = RuntimeArtifactBundle(
+        transition_model={
+            "runtime_horizon_ns": 1_500_000,
+            "sample_count": 0,
+            "edges": {},
+        }
+    )
+
+    with pytest.raises(ValueError, match="positive whole number of milliseconds"):
+        L1MicrostructureStateMachine(runtime_artifacts=artifacts)
+
+
 def test_state_machine_rejects_events_for_a_different_symbol() -> None:
     machine = L1MicrostructureStateMachine()
     machine.on_event(QuoteEvent("AAPL", 1_000_000_000, 100.0, 100.01, 100, 100))

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Deque, Iterable
 
 import numpy as np
@@ -42,8 +42,8 @@ class L1MicrostructureStateMachine:
         runtime_artifacts: RuntimeArtifactBundle | None = None,
         route_orders_externally: bool = False,
     ):
-        self.config = config or FrameworkConfig()
         self.runtime_artifacts = runtime_artifacts or RuntimeArtifactBundle()
+        self.config = self._config_for_runtime_artifacts(config or FrameworkConfig())
         self.route_orders_externally = route_orders_externally
         artifact_symbols = {
             artifact.symbol
@@ -86,6 +86,21 @@ class L1MicrostructureStateMachine:
         self.return_history: dict[str, Deque[float]] = {}
         self.realized_volatility_by_symbol: dict[str, float] = {}
         self.late_event_count: int = 0
+
+    def _config_for_runtime_artifacts(self, config: FrameworkConfig) -> FrameworkConfig:
+        transition_model = self.runtime_artifacts.transition_model
+        if not isinstance(transition_model, dict) or "runtime_horizon_ns" not in transition_model:
+            return config
+        runtime_horizon_ns = int(transition_model["runtime_horizon_ns"])
+        if runtime_horizon_ns <= 0 or runtime_horizon_ns % 1_000_000 != 0:
+            raise ValueError("transition model runtime horizon must be a positive whole number of milliseconds")
+        runtime_horizon_ms = runtime_horizon_ns // 1_000_000
+        if config.transition.drift_horizon_ms == runtime_horizon_ms:
+            return config
+        return replace(
+            config,
+            transition=replace(config.transition, drift_horizon_ms=runtime_horizon_ms),
+        )
 
     def snapshot_state(self) -> StateMachineRecoverySnapshot:
         return StateMachineRecoveryCodec.snapshot(self)

@@ -87,6 +87,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     workflow_parser.add_argument("--transition-threshold", type=float, default=None)
     workflow_parser.add_argument(
+        "--runtime-horizon-ms",
+        type=int,
+        default=None,
+        help="runtime drift horizon; must be one of the configured training horizons",
+    )
+    workflow_parser.add_argument(
         "--allow-unexecuted-validation",
         action="store_true",
         help="research-only override that permits validation without execution or bootstrap evidence",
@@ -172,10 +178,22 @@ def _add_quality_gate_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--max-unseen-edge-rate", type=float, default=None)
 
 
-def _framework_config(transition_threshold: float | None) -> FrameworkConfig:
+def _framework_config(
+    transition_threshold: float | None,
+    runtime_horizon_ms: int | None = None,
+) -> FrameworkConfig:
     config = FrameworkConfig()
     if transition_threshold is not None:
         config.transition.mahalanobis_threshold = transition_threshold
+    if runtime_horizon_ms is not None:
+        if runtime_horizon_ms <= 0:
+            raise ValueError("runtime horizon must be positive")
+        if runtime_horizon_ms not in config.transition.drift_horizons_ms:
+            raise ValueError(
+                "runtime horizon must be one of the configured training horizons: "
+                f"{config.transition.drift_horizons_ms}"
+            )
+        config.transition.drift_horizon_ms = runtime_horizon_ms
     return config
 
 
@@ -204,7 +222,7 @@ def _run_workflow_command(args: argparse.Namespace) -> int:
     ]
     workflow = ArtifactDrivenResearchWorkflow(
         args.artifact_root,
-        framework_config=_framework_config(args.transition_threshold),
+        framework_config=_framework_config(args.transition_threshold, args.runtime_horizon_ms),
         validation_harness=(
             RollingValidationHarness(
                 minimum_fill_rate=0.0,

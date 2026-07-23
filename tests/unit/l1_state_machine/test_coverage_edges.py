@@ -63,6 +63,20 @@ def test_transition_config_drift_horizon_fallback() -> None:
     assert values[0] == 1_000_000
 
 
+def test_transition_config_keeps_runtime_horizon_distinct_from_training_horizons() -> None:
+    config = TransitionConfig(
+        drift_horizon_ms=15_000,
+        drift_horizons_ms=(3_000, 15_000, 60_000),
+    )
+
+    assert config.drift_horizon_ns == 15_000_000_000
+    assert config.drift_horizon_ns_values == (
+        3_000_000_000,
+        15_000_000_000,
+        60_000_000_000,
+    )
+
+
 def test_decision_engine_sell_path_and_normal_cdf_edge() -> None:
     """Covers decision.py: SELL path and _normal_cdf with std<=0."""
     config = FrameworkConfig()
