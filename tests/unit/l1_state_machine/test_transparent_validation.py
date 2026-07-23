@@ -51,6 +51,10 @@ def test_oos_validator_compares_identical_resolved_samples_and_passes_fixed_gate
         maximum_latency_ratio=1.0,
         maximum_memory_ratio=1_000.0,
         minimum_candidate_samples=6,
+        minimum_candidate_decisions=1,
+        minimum_candidate_decision_rate=0.0,
+        minimum_decision_hit_rate=0.0,
+        minimum_mean_decision_net_drift_bps=-10.0,
     )
     baseline = {"horizon_models": {"5": {"edges": {}}}}
 

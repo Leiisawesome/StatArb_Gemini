@@ -33,6 +33,15 @@ horizon, matching runtime behavior. Shadow disagreement counts are exact;
 serialized comparison examples and latency samples are deterministically
 bounded so a full-day report remains operationally reviewable.
 
+Promotion also has absolute actionability gates. By default, a candidate must
+select at least 100 actions, act on at least 0.01% of shared opportunities,
+achieve at least a 52% hit rate on those selected actions, and produce
+non-negative mean net drift per selected action. The full-opportunity net-drift
+comparison remains useful, but cannot be diluted by HOLD observations to make
+an inert or loss-making candidate pass. Validation reports created before these
+decision-level metrics and thresholds existed are intentionally rejected and
+must be regenerated from held-out data.
+
 A v2 run contains state and execution calibration, state-vector, semi-Markov regime, hierarchical transition, and utility artifacts. The validation report binds the SHA-256 payload hash of every model artifact. Published run IDs are immutable, and selection fails closed if an artifact, report, version, symbol, or run association changes.
 
 ## Research workflow

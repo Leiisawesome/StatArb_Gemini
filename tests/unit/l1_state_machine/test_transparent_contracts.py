@@ -57,8 +57,10 @@ def test_prediction_evaluation_is_deterministic_and_calibrated() -> None:
     assert accurate.log_loss < weak.log_loss
     assert accurate.calibration_error < weak.calibration_error
     assert accurate.directional_hit_rate == 1.0
+    assert accurate.decision_hit_rate == 1.0
     assert accurate.edge_coverage == 0.8
     assert accurate.mean_signed_net_drift_bps == 2.0
+    assert accurate.mean_decision_net_drift_bps == 2.0
 
 
 def test_v1_baseline_metrics_match_frozen_golden_snapshot() -> None:
@@ -82,6 +84,17 @@ def test_promotion_gate_requires_calibration_economics_and_bounded_cost() -> Non
     failed = TransparentPromotionGate().evaluate(baseline, slow)
     assert failed.passed is False
     assert next(check for check in failed.checks if check.code == "performance.latency").passed is False
+
+    inert = replace(
+        candidate,
+        decisive_count=0,
+        decision_rate=0.0,
+        decision_hit_rate=0.0,
+        mean_decision_net_drift_bps=0.0,
+    )
+    inert_report = TransparentPromotionGate().evaluate(baseline, inert)
+    assert inert_report.passed is False
+    assert next(check for check in inert_report.checks if check.code == "decisions.minimum").passed is False
 
 
 def test_promotion_thresholds_reject_post_hoc_invalid_values() -> None:
@@ -129,3 +142,5 @@ def test_forecast_quality_is_independent_of_executable_hold_action() -> None:
     assert evaluation.mean_signed_net_drift_bps == 0.0
     assert evaluation.decisive_count == 0
     assert evaluation.decision_rate == 0.0
+    assert evaluation.decision_hit_rate == 0.0
+    assert evaluation.mean_decision_net_drift_bps == 0.0
