@@ -197,6 +197,7 @@ class StateMachineRecoveryCodec:
             deepcopy(feature.volatility_history),
             maxlen=machine.feature_engine.volatility_history.maxlen,
         )
+        machine.feature_engine.rebuild_rolling_caches()
         machine.feature_engine.flicker_baseline = feature.flicker_baseline
         machine.feature_engine.flicker_intensity = feature.flicker_intensity
         machine.feature_engine.last_quote_ts = feature.last_quote_ts

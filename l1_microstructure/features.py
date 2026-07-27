@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from bisect import bisect_left, insort
 from collections import deque
 from dataclasses import dataclass
 from enum import Enum
+from math import floor, log, sqrt
 from typing import Deque, Iterable
 
 import numpy as np
@@ -91,6 +93,18 @@ class FeatureEngine:
         self.trade_pressure_window: Deque[tuple[int, float]] = deque()
         self.spread_norm_history: Deque[float] = deque(maxlen=self.config.quantile_history)
         self.volatility_history: Deque[float] = deque(maxlen=self.config.quantile_history)
+        self._microprice_returns: Deque[float] = deque()
+        self._microprice_return_sum = 0.0
+        self._microprice_return_sum_squares = 0.0
+        self._microprice_cache_tail: tuple[int, float] | None = None
+        self._trade_pressure_signed_sum = 0.0
+        self._trade_pressure_gross_sum = 0.0
+        self._trade_pressure_cache_tail: tuple[int, float] | None = None
+        self._trade_pressure_cache_count = 0
+        self._spread_norm_sorted: list[float] = []
+        self._spread_norm_cache_tail: float | None = None
+        self._volatility_sorted: list[float] = []
+        self._volatility_cache_tail: float | None = None
         self.flicker_baseline = (
             self.state_calibration.flicker_baseline if self.state_calibration is not None else self.config.flicker_baseline_intensity
         )
@@ -117,8 +131,18 @@ class FeatureEngine:
         trade_pressure = self._trade_pressure(event.timestamp_ns)
         flicker_intensity = self._current_flicker_intensity(event.timestamp_ns)
 
-        self.spread_norm_history.append(spread_norm)
-        self.volatility_history.append(realized_volatility)
+        self._append_quantile_value(
+            self.spread_norm_history,
+            self._spread_norm_sorted,
+            spread_norm,
+        )
+        self._spread_norm_cache_tail = spread_norm
+        self._append_quantile_value(
+            self.volatility_history,
+            self._volatility_sorted,
+            realized_volatility,
+        )
+        self._volatility_cache_tail = realized_volatility
 
         return ObservedState(
             symbol=self.current_book.symbol,
@@ -151,12 +175,26 @@ class FeatureEngine:
             signed_volume *= -1.0
         elif side is TradeSide.UNKNOWN:
             signed_volume = 0.0
-        self.trade_pressure_window.append((trade.timestamp_ns, signed_volume))
-        self._prune(self.trade_pressure_window, trade.timestamp_ns, self.config.trade_window_seconds)
+        self._ensure_trade_pressure_cache()
+        item = (trade.timestamp_ns, signed_volume)
+        self.trade_pressure_window.append(item)
+        self._trade_pressure_signed_sum += signed_volume
+        self._trade_pressure_gross_sum += abs(signed_volume)
+        self._trade_pressure_cache_tail = item
+        self._prune_trade_pressure(trade.timestamp_ns)
 
     def _update_microprice_history(self, timestamp_ns: int, microprice: float) -> None:
-        self.microprice_history.append((timestamp_ns, microprice))
-        self._prune(self.microprice_history, timestamp_ns, self.config.micro_vol_window_seconds)
+        self._ensure_microprice_cache()
+        if self.microprice_history:
+            previous_price = self.microprice_history[-1][1]
+            log_return = self._log_price(microprice) - self._log_price(previous_price)
+            self._microprice_returns.append(log_return)
+            self._microprice_return_sum += log_return
+            self._microprice_return_sum_squares += log_return * log_return
+        item = (timestamp_ns, microprice)
+        self.microprice_history.append(item)
+        self._microprice_cache_tail = item
+        self._prune_microprices(timestamp_ns)
 
     def _update_flicker_intensity(self, timestamp_ns: int) -> None:
         if self.last_quote_ts is None:
@@ -214,29 +252,39 @@ class FeatureEngine:
         return float(2.0 * posterior_mean - 1.0)
 
     def _trade_pressure(self, timestamp_ns: int) -> float:
-        self._prune(self.trade_pressure_window, timestamp_ns, self.config.trade_window_seconds)
+        self._ensure_trade_pressure_cache()
+        self._prune_trade_pressure(timestamp_ns)
         if not self.trade_pressure_window:
             return 0.0
-        signed = sum(volume for _, volume in self.trade_pressure_window)
-        gross = sum(abs(volume) for _, volume in self.trade_pressure_window)
-        return float(signed / gross) if gross > 0 else 0.0
+        return (
+            float(self._trade_pressure_signed_sum / self._trade_pressure_gross_sum)
+            if self._trade_pressure_gross_sum > 0
+            else 0.0
+        )
 
     def _realized_volatility(self, timestamp_ns: int) -> float:
-        self._prune(self.microprice_history, timestamp_ns, self.config.micro_vol_window_seconds)
+        self._ensure_microprice_cache()
+        self._prune_microprices(timestamp_ns)
         if len(self.microprice_history) < 3:
             return self.config.minimum_sigma
-        prices = np.array([price for _, price in self.microprice_history], dtype=float)
-        log_returns = np.diff(np.log(np.maximum(prices, self.config.minimum_sigma)))
-        if log_returns.size == 0:
+        count = len(self._microprice_returns)
+        if count == 0:
             return self.config.minimum_sigma
-        return float(np.std(log_returns))
+        mean = self._microprice_return_sum / count
+        variance = max(self._microprice_return_sum_squares / count - mean * mean, 0.0)
+        return float(sqrt(variance))
 
     def _spread_state(self, spread_norm: float) -> SpreadState:
         surface = self._active_surface()
         if surface is not None:
             low, high = surface.spread_quantiles
         else:
-            low, high = self._rolling_tertiles(self.spread_norm_history, (0.75, 1.75))
+            self._ensure_quantile_cache(
+                self.spread_norm_history,
+                self._spread_norm_sorted,
+                "_spread_norm_cache_tail",
+            )
+            low, high = self._rolling_tertiles_sorted(self._spread_norm_sorted, (0.75, 1.75))
         if spread_norm <= low:
             return SpreadState.TIGHT
         if spread_norm >= high:
@@ -264,7 +312,12 @@ class FeatureEngine:
         if surface is not None:
             low, high = surface.volatility_quantiles
         else:
-            low, high = self._rolling_tertiles(self.volatility_history, (5e-4, 2e-3))
+            self._ensure_quantile_cache(
+                self.volatility_history,
+                self._volatility_sorted,
+                "_volatility_cache_tail",
+            )
+            low, high = self._rolling_tertiles_sorted(self._volatility_sorted, (5e-4, 2e-3))
         if realized_volatility <= low:
             return VolatilityState.QUIET
         if realized_volatility >= high:
@@ -286,11 +339,129 @@ class FeatureEngine:
             sample_count=0,
         )
 
+    def rebuild_rolling_caches(self) -> None:
+        """Rebuild derived rolling state after snapshot recovery or direct restoration."""
+
+        self._rebuild_microprice_cache()
+        self._rebuild_trade_pressure_cache()
+        self._rebuild_quantile_cache(
+            self.spread_norm_history,
+            self._spread_norm_sorted,
+            "_spread_norm_cache_tail",
+        )
+        self._rebuild_quantile_cache(
+            self.volatility_history,
+            self._volatility_sorted,
+            "_volatility_cache_tail",
+        )
+
+    def _ensure_microprice_cache(self) -> None:
+        expected_returns = max(len(self.microprice_history) - 1, 0)
+        tail = self.microprice_history[-1] if self.microprice_history else None
+        if len(self._microprice_returns) != expected_returns or self._microprice_cache_tail != tail:
+            self._rebuild_microprice_cache()
+
+    def _rebuild_microprice_cache(self) -> None:
+        self._microprice_returns.clear()
+        self._microprice_return_sum = 0.0
+        self._microprice_return_sum_squares = 0.0
+        previous_price: float | None = None
+        for _, price in self.microprice_history:
+            if previous_price is not None:
+                value = self._log_price(price) - self._log_price(previous_price)
+                self._microprice_returns.append(value)
+                self._microprice_return_sum += value
+                self._microprice_return_sum_squares += value * value
+            previous_price = price
+        self._microprice_cache_tail = self.microprice_history[-1] if self.microprice_history else None
+
+    def _prune_microprices(self, timestamp_ns: int) -> None:
+        threshold_ns = timestamp_ns - int(self.config.micro_vol_window_seconds * 1_000_000_000)
+        while self.microprice_history and self.microprice_history[0][0] < threshold_ns:
+            self.microprice_history.popleft()
+            if self._microprice_returns:
+                removed = self._microprice_returns.popleft()
+                self._microprice_return_sum -= removed
+                self._microprice_return_sum_squares -= removed * removed
+        self._microprice_cache_tail = self.microprice_history[-1] if self.microprice_history else None
+
+    def _ensure_trade_pressure_cache(self) -> None:
+        tail = self.trade_pressure_window[-1] if self.trade_pressure_window else None
+        if (
+            self._trade_pressure_cache_count != len(self.trade_pressure_window)
+            or self._trade_pressure_cache_tail != tail
+        ):
+            self._rebuild_trade_pressure_cache()
+
+    def _rebuild_trade_pressure_cache(self) -> None:
+        self._trade_pressure_signed_sum = sum(value for _, value in self.trade_pressure_window)
+        self._trade_pressure_gross_sum = sum(abs(value) for _, value in self.trade_pressure_window)
+        self._trade_pressure_cache_tail = self.trade_pressure_window[-1] if self.trade_pressure_window else None
+        self._trade_pressure_cache_count = len(self.trade_pressure_window)
+
+    def _prune_trade_pressure(self, timestamp_ns: int) -> None:
+        threshold_ns = timestamp_ns - int(self.config.trade_window_seconds * 1_000_000_000)
+        while self.trade_pressure_window and self.trade_pressure_window[0][0] < threshold_ns:
+            _, removed = self.trade_pressure_window.popleft()
+            self._trade_pressure_signed_sum -= removed
+            self._trade_pressure_gross_sum -= abs(removed)
+        self._trade_pressure_cache_tail = self.trade_pressure_window[-1] if self.trade_pressure_window else None
+        self._trade_pressure_cache_count = len(self.trade_pressure_window)
+
+    def _ensure_quantile_cache(
+        self,
+        history: Deque[float],
+        sorted_values: list[float],
+        tail_attribute: str,
+    ) -> None:
+        tail = history[-1] if history else None
+        if len(sorted_values) != len(history) or getattr(self, tail_attribute) != tail:
+            self._rebuild_quantile_cache(history, sorted_values, tail_attribute)
+
+    def _rebuild_quantile_cache(
+        self,
+        history: Deque[float],
+        sorted_values: list[float],
+        tail_attribute: str,
+    ) -> None:
+        sorted_values[:] = sorted(history)
+        setattr(self, tail_attribute, history[-1] if history else None)
+
     @staticmethod
-    def _prune(window: Deque[tuple[int, float]] | Deque[tuple[int, float] | tuple[int, int]] | Deque[tuple[int, float] | tuple[int, int] | tuple[int, float]], timestamp_ns: int, horizon_seconds: float) -> None:
-        threshold_ns = timestamp_ns - int(horizon_seconds * 1_000_000_000)
-        while window and window[0][0] < threshold_ns:
-            window.popleft()
+    def _append_quantile_value(
+        history: Deque[float],
+        sorted_values: list[float],
+        value: float,
+    ) -> None:
+        if history.maxlen is not None and len(history) == history.maxlen:
+            removed = history[0]
+            sorted_values.pop(bisect_left(sorted_values, removed))
+        history.append(value)
+        insort(sorted_values, value)
+
+    def _log_price(self, price: float) -> float:
+        return log(max(price, self.config.minimum_sigma))
+
+    @classmethod
+    def _rolling_tertiles_sorted(
+        cls,
+        sorted_values: list[float],
+        fallback: tuple[float, float],
+    ) -> tuple[float, float]:
+        if len(sorted_values) < 8:
+            return fallback
+        return cls._linear_quantile(sorted_values, 1.0 / 3.0), cls._linear_quantile(
+            sorted_values,
+            2.0 / 3.0,
+        )
+
+    @staticmethod
+    def _linear_quantile(sorted_values: list[float], quantile: float) -> float:
+        position = quantile * (len(sorted_values) - 1)
+        lower = floor(position)
+        upper = min(lower + 1, len(sorted_values) - 1)
+        weight = position - lower
+        return float(sorted_values[lower] + weight * (sorted_values[upper] - sorted_values[lower]))
 
     @staticmethod
     def _rolling_tertiles(history: Iterable[float], fallback: tuple[float, float]) -> tuple[float, float]:

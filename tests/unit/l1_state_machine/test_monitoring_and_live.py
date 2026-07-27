@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Barrier, Event, Lock
 
 import pytest
 
@@ -12,7 +14,9 @@ from l1_microstructure.datasets import PipelineTransitionDatasetBuilder
 from l1_microstructure.ingest import LiveSubscriptionRequest
 from l1_microstructure.live import (
     BrokerOrder,
+    BrokerOrderSide,
     BrokerOrderStatus,
+    BrokerOrderType,
     IBKRBrokerOrderRouter,
     IBKRConnectionConfig,
     RouteAcknowledgement,
@@ -27,6 +31,7 @@ from l1_microstructure.monitoring import (
     InMemoryMonitoringSink,
     JsonlMonitoringSink,
     OperationalAlertManager,
+    RuntimeSnapshot,
 )
 from l1_microstructure.training import EmpiricalTransitionTrainer
 from tests.unit.l1_state_machine.support import FixtureMarketDataSource as InMemoryMassiveDataSource
@@ -151,6 +156,34 @@ def test_in_memory_monitoring_sink_collects_runtime_snapshots() -> None:
     assert "edge_activation_count" in frame.columns
 
 
+def test_in_memory_monitoring_sink_compacts_full_replay_evidence_deterministically() -> None:
+    sink = InMemoryMonitoringSink(max_snapshots=4)
+    snapshots = [
+        RuntimeSnapshot(
+            timestamp_ns=index,
+            state_label="state",
+            dominant_regime="regime",
+            entropy=0.0,
+            alpha_score=0.0,
+            metadata={},
+        )
+        for index in range(1, 34)
+    ]
+
+    for snapshot in snapshots:
+        sink.publish(snapshot)
+
+    assert sink.published_snapshot_count == 33
+    assert sink.sampling_stride == 8
+    assert len(sink.snapshots) <= 4
+    assert [snapshot.timestamp_ns for snapshot in sink.snapshots] == [8, 16, 24, 32]
+
+
+def test_in_memory_monitoring_sink_rejects_non_positive_limit() -> None:
+    with pytest.raises(ValueError, match="max_snapshots must be positive"):
+        InMemoryMonitoringSink(max_snapshots=0)
+
+
 def test_jsonl_monitoring_sink_writes_snapshots(tmp_path) -> None:
     source = InMemoryMassiveDataSource(
         [
@@ -209,6 +242,108 @@ def test_operational_alert_manager_deduplicates_by_category_code_and_symbol() ->
     assert [alert.message for alert in sink.alerts] == ["first rejection", "later rejection"]
 
 
+def test_operational_alert_manager_records_sink_failure_without_losing_alert() -> None:
+    class FailingSink:
+        def publish_alert(self, alert) -> None:
+            raise RuntimeError(f"notification unavailable for {alert.code}")
+
+    manager = OperationalAlertManager(FailingSink(), deduplication_window_ns=100, clock=lambda: 2_000)
+
+    first = manager.emit(
+        AlertSeverity.CRITICAL,
+        AlertCategory.RUNTIME,
+        "runtime_halted",
+        "runtime halted safely",
+        timestamp_ns=1_000,
+    )
+    duplicate = manager.emit(
+        AlertSeverity.CRITICAL,
+        AlertCategory.RUNTIME,
+        "runtime_halted",
+        "duplicate halt",
+        timestamp_ns=1_050,
+    )
+
+    assert first is not None
+    assert duplicate is None
+    assert manager.recent_dicts() == [first.to_dict()]
+    assert manager.delivery_diagnostics() == {
+        "failure_count": 1,
+        "recent_failures": [
+            {
+                "timestamp_ns": 2_000,
+                "alert_timestamp_ns": 1_000,
+                "alert_key": "runtime:runtime_halted:*",
+                "sink_type": "FailingSink",
+                "error_type": "RuntimeError",
+                "error": "notification unavailable for runtime_halted",
+            }
+        ],
+    }
+
+
+def test_operational_alert_history_remains_available_while_sink_is_blocked() -> None:
+    class BlockingSink:
+        def __init__(self) -> None:
+            self.started = Event()
+            self.release = Event()
+
+        def publish_alert(self, _alert) -> None:
+            self.started.set()
+            assert self.release.wait(timeout=2)
+
+    sink = BlockingSink()
+    manager = OperationalAlertManager(sink, deduplication_window_ns=0)
+    executor = ThreadPoolExecutor(max_workers=2)
+    future = executor.submit(
+        manager.emit,
+        AlertSeverity.WARNING,
+        AlertCategory.MARKET_DATA,
+        "market_data_delayed",
+        "market data delayed",
+    )
+    try:
+        assert sink.started.wait(timeout=1)
+        assert len(executor.submit(manager.recent).result(timeout=1)) == 1
+    finally:
+        sink.release.set()
+        future.result(timeout=1)
+        executor.shutdown(wait=True)
+
+
+def test_operational_alert_manager_deduplicates_concurrent_emissions() -> None:
+    class ThreadSafeSink:
+        def __init__(self) -> None:
+            self.alerts = []
+            self.lock = Lock()
+
+        def publish_alert(self, alert) -> None:
+            with self.lock:
+                self.alerts.append(alert)
+
+    sink = ThreadSafeSink()
+    manager = OperationalAlertManager(sink, deduplication_window_ns=100)
+    barrier = Barrier(8)
+
+    def emit_once(index: int):
+        barrier.wait(timeout=1)
+        return manager.emit(
+            AlertSeverity.ERROR,
+            AlertCategory.ORDER_ROUTING,
+            "order_rejected",
+            f"rejection {index}",
+            symbol="AAPL",
+            timestamp_ns=1_000,
+        )
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        results = list(executor.map(emit_once, range(8)))
+
+    assert sum(result is not None for result in results) == 1
+    assert len(manager.recent()) == 1
+    assert len(sink.alerts) == 1
+
+
 def test_jsonl_monitoring_sink_writes_typed_alerts(tmp_path) -> None:
     path = Path(tmp_path) / "alerts.jsonl"
     sink = JsonlMonitoringSink(path)
@@ -248,9 +383,35 @@ def test_simulator_paper_runner_produces_update_and_execution_summary() -> None:
 
     runner.start(RunnerConfig(symbols=("AAPL",), mode="paper", latency_ms=100))
     summary = runner.execution_summary()
+    activation = runner.activation_summary()
 
     assert summary["update_count"] > 0.0
     assert summary["fill_count"] >= 0.0
+    assert activation["transition_count"] == sum(activation["intent_action_counts"].values())
+    assert activation["intent_reason_counts"]["insufficient observations"] > 0
+    assert activation["risk_reason_counts"]["no actionable trade"] > 0
+
+
+def test_simulator_paper_runner_can_discard_updates_without_losing_summary() -> None:
+    source = InMemoryMassiveDataSource(
+        [
+            {"ev": "Q", "sym": "AAPL", "t": 1710163800000000000, "bp": 100.0, "ap": 100.02, "bs": 100, "as": 100},
+            {"ev": "Q", "sym": "AAPL", "t": 1710163801000000000, "bp": 100.01, "ap": 100.03, "bs": 200, "as": 80},
+            {"ev": "T", "sym": "AAPL", "t": 1710163802000000000, "p": 100.03, "s": 50, "side": "buy"},
+        ]
+    )
+    events = list(source.subscribe_live(LiveSubscriptionRequest(symbols=("AAPL",))))
+    config = RunnerConfig(symbols=("AAPL",), mode="paper", latency_ms=100)
+    retaining_runner = SimulatorPaperTradingRunner(events=events)
+    compact_runner = SimulatorPaperTradingRunner(events=events, retain_updates=False)
+
+    retaining_runner.start(config)
+    compact_runner.start(config)
+
+    assert retaining_runner.updates
+    assert compact_runner.updates == []
+    assert compact_runner.execution_summary() == retaining_runner.execution_summary()
+    assert compact_runner.monitoring_frame().equals(retaining_runner.monitoring_frame())
 
 
 def test_routed_live_runner_submits_requests_and_ingests_external_reports() -> None:
@@ -299,6 +460,10 @@ def test_routed_live_runner_submits_requests_and_ingests_external_reports() -> N
     config = FrameworkConfig()
     config.transition.mahalanobis_threshold = 0.0
     config.transition.min_edge_observations = 1
+    config.transition.min_edge_training_sessions = 0
+    config.transition.min_directional_consensus = 0.0
+    config.transition.min_cross_session_hit_rate = 0.0
+    config.transition.min_cross_session_hit_consensus = 0.0
     config.decision.min_alpha_score = 0.0
     config.decision.entry_probability_threshold = 0.5
     config.decision.transaction_cost_bps = 0.0
@@ -346,6 +511,10 @@ def test_routed_live_runner_can_resume_from_recovery_snapshot() -> None:
     config = FrameworkConfig()
     config.transition.mahalanobis_threshold = 0.0
     config.transition.min_edge_observations = 1
+    config.transition.min_edge_training_sessions = 0
+    config.transition.min_directional_consensus = 0.0
+    config.transition.min_cross_session_hit_rate = 0.0
+    config.transition.min_cross_session_hit_consensus = 0.0
     config.decision.min_alpha_score = 0.0
     config.decision.entry_probability_threshold = 0.5
     config.decision.transaction_cost_bps = 0.0
@@ -402,6 +571,10 @@ def test_routed_live_runner_supports_latency_buffered_router_adapter() -> None:
     config = FrameworkConfig()
     config.transition.mahalanobis_threshold = 0.0
     config.transition.min_edge_observations = 1
+    config.transition.min_edge_training_sessions = 0
+    config.transition.min_directional_consensus = 0.0
+    config.transition.min_cross_session_hit_rate = 0.0
+    config.transition.min_cross_session_hit_consensus = 0.0
     config.decision.min_alpha_score = 0.0
     config.decision.entry_probability_threshold = 0.5
     config.decision.transaction_cost_bps = 0.0
@@ -440,6 +613,10 @@ def test_routed_live_runner_handles_cancelled_router_reports() -> None:
     config = FrameworkConfig()
     config.transition.mahalanobis_threshold = 0.0
     config.transition.min_edge_observations = 1
+    config.transition.min_edge_training_sessions = 0
+    config.transition.min_directional_consensus = 0.0
+    config.transition.min_cross_session_hit_rate = 0.0
+    config.transition.min_cross_session_hit_consensus = 0.0
     config.decision.min_alpha_score = 0.0
     config.decision.entry_probability_threshold = 0.5
     config.decision.transaction_cost_bps = 0.0
@@ -528,6 +705,10 @@ def test_routed_live_runner_reconciles_broker_backed_partial_fill_and_cancel() -
     config = FrameworkConfig()
     config.transition.mahalanobis_threshold = 0.0
     config.transition.min_edge_observations = 1
+    config.transition.min_edge_training_sessions = 0
+    config.transition.min_directional_consensus = 0.0
+    config.transition.min_cross_session_hit_rate = 0.0
+    config.transition.min_cross_session_hit_consensus = 0.0
     config.decision.min_alpha_score = 0.0
     config.decision.entry_probability_threshold = 0.5
     config.decision.transaction_cost_bps = 0.0
@@ -633,6 +814,10 @@ def test_routed_live_runner_can_resume_with_open_broker_backed_order() -> None:
     config = FrameworkConfig()
     config.transition.mahalanobis_threshold = 0.0
     config.transition.min_edge_observations = 1
+    config.transition.min_edge_training_sessions = 0
+    config.transition.min_directional_consensus = 0.0
+    config.transition.min_cross_session_hit_rate = 0.0
+    config.transition.min_cross_session_hit_consensus = 0.0
     config.decision.min_alpha_score = 0.0
     config.decision.entry_probability_threshold = 0.5
     config.decision.transaction_cost_bps = 0.0
@@ -1140,3 +1325,42 @@ def test_ibkr_native_ignores_order_timing_warning() -> None:
 
     assert session._last_error is None
     assert session._orders["3"].status is BrokerOrderStatus.SUBMITTED
+
+
+def test_ibkr_native_reconciliation_is_account_and_client_wide() -> None:
+    from l1_microstructure.live._ibkr_native import IBKRNativeBrokerSession
+
+    config = IBKRConnectionConfig(
+        host="127.0.0.1",
+        port=4002,
+        client_id=999,
+        account_id="DU123456",
+    )
+    session = IBKRNativeBrokerSession(config)
+    contract = session._stock_contract("AAPL")
+    order_state = type("OrderState", (), {"status": "Submitted"})()
+    other_order = session._build_order(BrokerOrderSide.BUY, 1.0, BrokerOrderType.MARKET, None)
+    other_order.account = "DU999999"
+    own_order = session._build_order(BrokerOrderSide.BUY, 1.0, BrokerOrderType.MARKET, None)
+
+    session.on_position("DU999999", contract, 9.0, 90.0)
+    session.on_position("DU123456", contract, 1.0, 100.0)
+    session.on_open_order(1, contract, other_order, order_state)
+
+    class FakeApp:
+        def __init__(self) -> None:
+            self.all_open_order_requests = 0
+
+        def reqAllOpenOrders(self) -> None:  # noqa: N802
+            self.all_open_order_requests += 1
+            session.on_open_order(2, contract, own_order, order_state)
+            session.on_open_order_end()
+
+    app = FakeApp()
+    session._app = app
+    session._refresh_open_orders()
+
+    assert session._positions == {"AAPL": {"account": "DU123456", "quantity": 1.0, "average_cost": 100.0}}
+    assert "1" not in session._orders
+    assert session._last_open_order_ids == {"2"}
+    assert app.all_open_order_requests == 1

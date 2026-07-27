@@ -10,7 +10,7 @@ import heapq
 import json
 import os
 from pathlib import Path
-from queue import Queue
+from queue import Empty, Queue
 from threading import Thread
 from typing import Any, Callable, Iterable
 from urllib.parse import urlparse
@@ -83,7 +83,12 @@ class MassiveWebSocketConfig:
     raw_subscriptions: tuple[str, ...] = ()
     verbose: bool = False
     max_reconnects: int | None = 5
+    reorder_window_seconds: float = 0.25
     connect_kwargs: dict[str, object] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.reorder_window_seconds < 0.0:
+            raise ValueError("Massive websocket reorder window cannot be negative")
 
 
 class MassiveRESTDataSource(MassiveEventFilterMixin, MarketDataSource):
@@ -308,14 +313,42 @@ class MassiveWebSocketDataSource(MassiveEventFilterMixin, MarketDataSource):
         thread = Thread(target=run_client, daemon=True)
         thread.start()
 
+        reorder_window_ns = int(self.websocket_config.reorder_window_seconds * 1_000_000_000)
+        buffer: list[tuple[int, int, int, int, MarketEvent]] = []
+        arrival_sequence = 0
+        maximum_timestamp_ns = -1
+
+        def release_ready(*, flush: bool = False) -> Iterable[MarketEvent]:
+            watermark = maximum_timestamp_ns - reorder_window_ns
+            while buffer and (flush or buffer[0][0] <= watermark):
+                yield heapq.heappop(buffer)[-1]
+
         try:
             while True:
-                kind, payload = event_queue.get()
+                try:
+                    timeout = self.websocket_config.reorder_window_seconds if buffer else None
+                    kind, payload = event_queue.get(timeout=timeout)
+                except Empty:
+                    yield from release_ready(flush=True)
+                    continue
                 if kind == "event":
-                    yield payload
+                    event = payload
+                    if reorder_window_ns == 0:
+                        yield event
+                        continue
+                    arrival_sequence += 1
+                    maximum_timestamp_ns = max(maximum_timestamp_ns, event.timestamp_ns)
+                    timestamp_ns, sequence_number, event_priority = event_sort_key(event)
+                    heapq.heappush(
+                        buffer,
+                        (timestamp_ns, sequence_number, event_priority, arrival_sequence, event),
+                    )
+                    yield from release_ready()
                     continue
                 if kind == "error":
+                    yield from release_ready(flush=True)
                     raise payload
+                yield from release_ready(flush=True)
                 break
         finally:
             try:

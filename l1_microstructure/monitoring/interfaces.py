@@ -70,3 +70,17 @@ class MonitoringSink(Protocol):
 class AlertSink(Protocol):
     def publish_alert(self, alert: OperationalAlert) -> None:
         """Deliver a typed operational alert."""
+
+
+class AlertStore(Protocol):
+    def append_alert(self, alert: OperationalAlert) -> None:
+        """Persist a newly accepted alert without delivering it."""
+
+    def append_delivery_failure(self, failure: dict[str, Any]) -> None:
+        """Persist notification-delivery diagnostics."""
+
+    def load_recent_alerts(self, limit: int) -> list[OperationalAlert]:
+        """Load alerts in oldest-to-newest order without delivering them."""
+
+    def load_delivery_diagnostics(self, limit: int) -> dict[str, Any]:
+        """Load the cumulative failure count and bounded recent failures."""

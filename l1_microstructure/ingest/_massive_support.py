@@ -150,15 +150,18 @@ class MassivePayloadNormalizer(EventNormalizer):
             raise TypeError("MassivePayloadNormalizer expects dict-like payloads or normalized events")
 
         event_type = str(payload.get("ev") or payload.get("event_type") or payload.get("type") or "").lower()
-        if event_type in {"q", "quote"}:
-            return self._normalize_quote(payload)
-        if event_type in {"t", "trade"}:
-            return self._normalize_trade(payload)
+        try:
+            if event_type in {"q", "quote"}:
+                return self._normalize_quote(payload)
+            if event_type in {"t", "trade"}:
+                return self._normalize_trade(payload)
 
-        if {"bid_price", "ask_price"}.issubset(payload) or {"bp", "ap"}.issubset(payload):
-            return self._normalize_quote(payload)
-        if "price" in payload or "p" in payload:
-            return self._normalize_trade(payload)
+            if {"bid_price", "ask_price"}.issubset(payload) or {"bp", "ap"}.issubset(payload):
+                return self._normalize_quote(payload)
+            if "price" in payload or "p" in payload:
+                return self._normalize_trade(payload)
+        except (KeyError, TypeError, ValueError, OverflowError):
+            return None
         return None
 
     def _normalize_quote(self, payload: dict[str, Any]) -> QuoteEvent:

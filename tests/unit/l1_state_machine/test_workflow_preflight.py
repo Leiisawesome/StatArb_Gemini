@@ -79,6 +79,7 @@ def test_cli_workflow_preflight_supports_manifest_listing_and_historical_replay(
                 "2024-03-11",
                 "--transition-threshold",
                 "0.0",
+                "--allow-unexecuted-validation",
             ]
         )
         assert workflow_exit == 0
@@ -137,6 +138,7 @@ def test_cli_workflow_preflight_accepts_quality_gate_for_historical_replay(tmp_p
                 "2024-03-11",
                 "--transition-threshold",
                 "0.0",
+                "--allow-unexecuted-validation",
             ]
         )
         assert workflow_exit == 0

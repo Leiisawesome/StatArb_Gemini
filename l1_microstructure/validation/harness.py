@@ -8,6 +8,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from l1_microstructure.session_evidence import leave_one_session_out_hit_evidence
+
 from .interfaces import RegimeSplitSpec, ValidationReport
 
 
@@ -16,14 +18,19 @@ class RollingValidationHarness:
     minimum_test_rows: int = 1
     minimum_regime_coverage: float = 0.5
     minimum_hit_rate: float = 0.5
+    minimum_directional_test_rows: int = 30
+    minimum_edge_training_sessions: int = 4
+    minimum_directional_consensus: float = 0.60
+    minimum_cross_session_hit_rate: float = 0.50
+    minimum_cross_session_hit_consensus: float = 0.60
     minimum_decay_ratio: float = 0.25
-    minimum_fill_rate: float = 0.0
-    maximum_cancel_rate: float = 1.0
-    maximum_drift_tracking_error_bps: float = float("inf")
-    bootstrap_sample_count: int = 0
+    minimum_fill_rate: float = 0.01
+    maximum_cancel_rate: float = 0.50
+    maximum_drift_tracking_error_bps: float = 2.0
+    bootstrap_sample_count: int = 128
     bootstrap_confidence_level: float = 0.90
-    minimum_bootstrap_hit_rate_lower_bound: float = 0.0
-    minimum_bootstrap_decay_ratio_lower_bound: float = 0.0
+    minimum_bootstrap_hit_rate_lower_bound: float = 0.50
+    minimum_bootstrap_decay_ratio_lower_bound: float = 0.25
     bootstrap_random_seed: int = 7
     timestamp_column: str = "timestamp"
     regime_column: str = "regime"
@@ -66,6 +73,13 @@ class RollingValidationHarness:
         metadata = {
             "split_count": len(splits),
             "per_split": split_summaries,
+            "session_consensus_policy": {
+                "minimum_training_sessions": self.minimum_edge_training_sessions,
+                "minimum_directional_consensus": self.minimum_directional_consensus,
+                "minimum_cross_session_hit_rate": self.minimum_cross_session_hit_rate,
+                "minimum_cross_session_hit_consensus": self.minimum_cross_session_hit_consensus,
+                "minimum_directional_test_rows": self.minimum_directional_test_rows,
+            },
         }
         return ValidationReport(passed=not failures, summary=summary, failures=tuple(failures), metadata=metadata)
 
@@ -90,13 +104,21 @@ class RollingValidationHarness:
         regime_coverage = len(train_regimes & test_regimes) / max(len(test_regimes), 1)
 
         test_rows = int(len(test_frame))
-        hit_rate = float((test_frame[self.drift_column] > 0.0).mean()) if test_rows else 0.0
+        predicted_drifts = self._predicted_drifts(train_frame, test_frame)
+        realized_drifts = test_frame[self.drift_column].to_numpy(dtype=float)
+        directional_mask = np.isfinite(predicted_drifts) & (predicted_drifts != 0.0)
+        directional_test_rows = int(np.sum(directional_mask))
+        hit_rate = (
+            float(np.mean(predicted_drifts[directional_mask] * realized_drifts[directional_mask] > 0.0))
+            if directional_test_rows
+            else 0.0
+        )
         unseen_edge_rate = self._unseen_edge_rate(train_frame, test_frame)
         fill_rate = self._execution_mean(execution_test_frame, self.execution_fill_rate_column)
         cancel_rate = self._execution_mean(execution_test_frame, self.execution_cancel_rate_column)
         drift_tracking_error = self._drift_tracking_error(execution_test_frame)
         kill_switch_rate = self._kill_switch_rate(execution_test_frame)
-        bootstrap_metrics = self._bootstrap_metrics(train_frame, test_frame)
+        bootstrap_metrics = self._bootstrap_metrics(train_frame, test_frame, predicted_drifts)
 
         return {
             "train_rows": float(len(train_frame)),
@@ -104,6 +126,8 @@ class RollingValidationHarness:
             "train_abs_mean_drift_bps": train_abs_mean,
             "test_abs_mean_drift_bps": test_abs_mean,
             "test_hit_rate": hit_rate,
+            "directional_test_rows": float(directional_test_rows),
+            "directional_coverage": directional_test_rows / max(test_rows, 1),
             "regime_coverage": float(regime_coverage),
             "drift_decay_ratio": float(decay_ratio),
             "unseen_edge_rate": float(unseen_edge_rate),
@@ -113,6 +137,56 @@ class RollingValidationHarness:
             "kill_switch_rate": float(kill_switch_rate),
             **bootstrap_metrics,
         }
+
+    def _predicted_drifts(self, train_frame: pd.DataFrame, test_frame: pd.DataFrame) -> np.ndarray:
+        if train_frame.empty or test_frame.empty:
+            return np.full(len(test_frame), np.nan, dtype=float)
+        edge_columns = [self.edge_from_column, self.edge_to_column, self.regime_column]
+        if (
+            "session_date" in train_frame.columns
+            and train_frame["session_date"].nunique() >= self.minimum_edge_training_sessions
+        ):
+            evidence_frame = train_frame[[*edge_columns, "session_date", self.drift_column]].copy()
+            evidence_frame["positive"] = (evidence_frame[self.drift_column] > 0.0).astype("int64")
+            evidence_frame["negative"] = (evidence_frame[self.drift_column] < 0.0).astype("int64")
+            session_edge_means = evidence_frame.groupby(
+                [*edge_columns, "session_date"], dropna=False
+            ).agg(
+                session_mean=(self.drift_column, "mean"),
+                sample_count=(self.drift_column, "size"),
+                positive_count=("positive", "sum"),
+                negative_count=("negative", "sum"),
+            ).reset_index()
+            records: dict[tuple[object, ...], float] = {}
+            for edge_values, edge_sessions in session_edge_means.groupby(edge_columns, dropna=False):
+                session_means = edge_sessions["session_mean"].to_numpy(dtype=float)
+                balanced_mean = float(np.mean(session_means))
+                if balanced_mean > 0.0:
+                    consensus = float(np.mean(session_means > 0.0))
+                elif balanced_mean < 0.0:
+                    consensus = float(np.mean(session_means < 0.0))
+                else:
+                    consensus = 0.0
+                cross_session_evidence = leave_one_session_out_hit_evidence(
+                    session_means,
+                    edge_sessions["positive_count"].to_numpy(dtype=int),
+                    edge_sessions["negative_count"].to_numpy(dtype=int),
+                    edge_sessions["sample_count"].to_numpy(dtype=int),
+                )
+                if (
+                    len(session_means) >= self.minimum_edge_training_sessions
+                    and consensus >= self.minimum_directional_consensus
+                    and cross_session_evidence.mean_hit_rate >= self.minimum_cross_session_hit_rate
+                    and cross_session_evidence.consensus >= self.minimum_cross_session_hit_consensus
+                ):
+                    edge_key = edge_values if isinstance(edge_values, tuple) else (edge_values,)
+                    records[edge_key] = balanced_mean
+            test_edges = [tuple(values) for values in test_frame[edge_columns].itertuples(index=False, name=None)]
+            return np.array([records.get(edge, np.nan) for edge in test_edges], dtype=float)
+
+        edge_means = train_frame.groupby(edge_columns, dropna=False)[self.drift_column].mean()
+        test_edges = pd.MultiIndex.from_frame(test_frame[edge_columns])
+        return edge_means.reindex(test_edges).to_numpy(dtype=float)
 
     def _unseen_edge_rate(self, train_frame: pd.DataFrame, test_frame: pd.DataFrame) -> float:
         if test_frame.empty:
@@ -140,6 +214,8 @@ class RollingValidationHarness:
             failures.append(f"{label}: insufficient regime coverage")
         if split_summary["test_hit_rate"] < self.minimum_hit_rate:
             failures.append(f"{label}: hit rate below threshold")
+        if split_summary["directional_test_rows"] < self.minimum_directional_test_rows:
+            failures.append(f"{label}: insufficient stable directional observations")
         if split_summary["drift_decay_ratio"] < self.minimum_decay_ratio:
             failures.append(f"{label}: excessive drift decay")
         if split_summary["unseen_edge_rate"] >= 1.0:
@@ -165,6 +241,8 @@ class RollingValidationHarness:
             "train_abs_mean_drift_bps",
             "test_abs_mean_drift_bps",
             "test_hit_rate",
+            "directional_test_rows",
+            "directional_coverage",
             "regime_coverage",
             "drift_decay_ratio",
             "unseen_edge_rate",
@@ -184,7 +262,12 @@ class RollingValidationHarness:
             for key in keys
         }
 
-    def _bootstrap_metrics(self, train_frame: pd.DataFrame, test_frame: pd.DataFrame) -> dict[str, float]:
+    def _bootstrap_metrics(
+        self,
+        train_frame: pd.DataFrame,
+        test_frame: pd.DataFrame,
+        predicted_drifts: np.ndarray | None = None,
+    ) -> dict[str, float]:
         empty = {
             "bootstrap_hit_rate_mean": 0.0,
             "bootstrap_hit_rate_lower_bound": 0.0,
@@ -199,6 +282,10 @@ class RollingValidationHarness:
         train_abs_mean = float(train_frame[self.drift_column].abs().mean()) if not train_frame.empty else 0.0
         rng = np.random.default_rng(self.bootstrap_random_seed)
         test_drifts = test_frame[self.drift_column].to_numpy(dtype=float)
+        if predicted_drifts is None:
+            predicted_drifts = self._predicted_drifts(train_frame, test_frame)
+        directional_mask = np.isfinite(predicted_drifts) & (predicted_drifts != 0.0)
+        signed_outcomes = predicted_drifts[directional_mask] * test_drifts[directional_mask]
         # Bound each allocation while moving the bootstrap's inner loop into NumPy.
         chunk_size = max(1, min(self.bootstrap_sample_count, 1_000_000 // len(test_drifts)))
         hit_rate_chunks: list[np.ndarray] = []
@@ -206,9 +293,15 @@ class RollingValidationHarness:
         remaining = self.bootstrap_sample_count
         while remaining:
             sample_count = min(chunk_size, remaining)
-            samples = rng.choice(test_drifts, size=(sample_count, len(test_drifts)), replace=True)
-            hit_rate_chunks.append(np.mean(samples > 0.0, axis=1))
-            decay_ratio_chunks.append(np.mean(np.abs(samples), axis=1) / max(train_abs_mean, 1e-9))
+            indexes = rng.integers(0, len(test_drifts), size=(sample_count, len(test_drifts)))
+            if len(signed_outcomes):
+                signal_indexes = rng.integers(0, len(signed_outcomes), size=(sample_count, len(signed_outcomes)))
+                hit_rate_chunks.append(np.mean(signed_outcomes[signal_indexes] > 0.0, axis=1))
+            else:
+                hit_rate_chunks.append(np.zeros(sample_count, dtype=float))
+            decay_ratio_chunks.append(
+                np.mean(np.abs(test_drifts[indexes]), axis=1) / max(train_abs_mean, 1e-9)
+            )
             remaining -= sample_count
 
         hit_rates = np.concatenate(hit_rate_chunks)

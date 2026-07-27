@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any
+
+from l1_microstructure.retry import RetryPolicy
 
 
 class OperatingMode(str, Enum):
@@ -34,10 +36,41 @@ class SessionPolicy:
 
 @dataclass(frozen=True, slots=True)
 class ModelQualityPolicy:
-    minimum_fill_rate: float | None = None
-    maximum_cancel_rate: float | None = None
-    maximum_drift_tracking_error_bps: float | None = None
-    maximum_unseen_edge_rate: float | None = None
+    minimum_fill_rate: float | None = 0.01
+    maximum_cancel_rate: float | None = 0.50
+    maximum_drift_tracking_error_bps: float | None = 2.0
+    maximum_unseen_edge_rate: float | None = 0.05
+
+
+@dataclass(frozen=True, slots=True)
+class InfrastructureRetryPolicies:
+    market_data: RetryPolicy = field(
+        default_factory=lambda: RetryPolicy(
+            max_attempts=5,
+            initial_delay_seconds=1.0,
+            backoff_multiplier=2.0,
+            maximum_delay_seconds=15.0,
+            jitter_fraction=0.1,
+        )
+    )
+    broker_connection: RetryPolicy = field(
+        default_factory=lambda: RetryPolicy(
+            max_attempts=3,
+            initial_delay_seconds=0.5,
+            backoff_multiplier=2.0,
+            maximum_delay_seconds=5.0,
+            jitter_fraction=0.1,
+        )
+    )
+    broker_read: RetryPolicy = field(
+        default_factory=lambda: RetryPolicy(
+            max_attempts=3,
+            initial_delay_seconds=0.25,
+            backoff_multiplier=2.0,
+            maximum_delay_seconds=2.0,
+            jitter_fraction=0.1,
+        )
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +78,7 @@ class ProductionConfig:
     symbols: tuple[str, ...]
     artifact_root: Path
     promoted_run_ids: dict[str, str]
+    transparent_shadow_run_ids: dict[str, str] = field(default_factory=dict)
     database_path: Path = Path("var/trading.sqlite3")
     mode: OperatingMode = OperatingMode.PAPER
     broker_env_file: Path | None = Path("broker.env")
@@ -57,6 +91,7 @@ class ProductionConfig:
     risk: RiskLimits = field(default_factory=RiskLimits)
     session: SessionPolicy = field(default_factory=SessionPolicy)
     model_quality: ModelQualityPolicy = field(default_factory=ModelQualityPolicy)
+    retry: InfrastructureRetryPolicies = field(default_factory=InfrastructureRetryPolicies)
     live_risk_acknowledgement: str | None = None
 
     def __post_init__(self) -> None:
@@ -66,9 +101,25 @@ class ProductionConfig:
         if len(set(normalized)) != len(normalized):
             raise ValueError("production symbols must be unique")
         object.__setattr__(self, "symbols", normalized)
+        promoted = {str(symbol).strip().upper(): str(run_id) for symbol, run_id in self.promoted_run_ids.items()}
+        shadow = {
+            str(symbol).strip().upper(): str(run_id)
+            for symbol, run_id in self.transparent_shadow_run_ids.items()
+        }
+        if len(promoted) != len(self.promoted_run_ids) or len(shadow) != len(self.transparent_shadow_run_ids):
+            raise ValueError("artifact run-id mappings contain duplicate symbols")
+        object.__setattr__(self, "promoted_run_ids", promoted)
+        object.__setattr__(self, "transparent_shadow_run_ids", shadow)
         missing_models = [symbol for symbol in normalized if not self.promoted_run_ids.get(symbol)]
         if missing_models:
             raise ValueError(f"missing promoted run ids for symbols: {missing_models}")
+        unknown_shadow_symbols = sorted(set(self.transparent_shadow_run_ids).difference(normalized))
+        if unknown_shadow_symbols:
+            raise ValueError(f"transparent shadow runs contain unknown symbols: {unknown_shadow_symbols}")
+        if self.transparent_shadow_run_ids:
+            missing_shadow = [symbol for symbol in normalized if not self.transparent_shadow_run_ids.get(symbol)]
+            if missing_shadow:
+                raise ValueError(f"missing transparent shadow run ids for symbols: {missing_shadow}")
         if self.api_host not in {"127.0.0.1", "::1", "localhost"}:
             raise ValueError("production API must bind to localhost")
         if self.event_stale_after_seconds <= 0:
@@ -103,12 +154,25 @@ class ProductionConfig:
         risk = RiskLimits(**dict(payload.pop("risk", {})))
         session = SessionPolicy(**dict(payload.pop("session", {})))
         model_quality = ModelQualityPolicy(**dict(payload.pop("model_quality", {})))
+        retry_payload = dict(payload.pop("retry", {}))
+        default_retry = InfrastructureRetryPolicies()
+
+        def retry_policy(name: str) -> RetryPolicy:
+            values = asdict(getattr(default_retry, name))
+            values.update(dict(retry_payload.get(name, {})))
+            return RetryPolicy(**values)
+
+        retry = InfrastructureRetryPolicies(
+            market_data=retry_policy("market_data"),
+            broker_connection=retry_policy("broker_connection"),
+            broker_read=retry_policy("broker_read"),
+        )
         for key in ("artifact_root", "database_path", "broker_env_file"):
             if payload.get(key) is not None:
                 payload[key] = Path(payload[key]).expanduser()
         payload["symbols"] = tuple(payload["symbols"])
         payload["mode"] = OperatingMode(payload.get("mode", OperatingMode.PAPER.value))
-        return cls(risk=risk, session=session, model_quality=model_quality, **payload)
+        return cls(risk=risk, session=session, model_quality=model_quality, retry=retry, **payload)
 
     def public_dict(self) -> dict[str, Any]:
         return {
@@ -116,10 +180,21 @@ class ProductionConfig:
             "artifact_root": str(self.artifact_root),
             "database_path": str(self.database_path),
             "mode": self.mode.value,
+            "promoted_run_ids": dict(self.promoted_run_ids),
+            "transparent_shadow_run_ids": dict(self.transparent_shadow_run_ids),
             "api_host": self.api_host,
             "api_port": self.api_port,
             "event_stale_after_seconds": self.event_stale_after_seconds,
             "warmup_seconds": self.warmup_seconds,
+            "reconnect_backoff_seconds": self.reconnect_backoff_seconds,
+            "flatten_timeout_seconds": self.flatten_timeout_seconds,
+            "risk": asdict(self.risk),
+            "session": asdict(self.session),
+            "retry": {
+                "market_data": asdict(self.retry.market_data),
+                "broker_connection": asdict(self.retry.broker_connection),
+                "broker_read": asdict(self.retry.broker_read),
+            },
             "model_quality": {
                 "minimum_fill_rate": self.model_quality.minimum_fill_rate,
                 "maximum_cancel_rate": self.model_quality.maximum_cancel_rate,

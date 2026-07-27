@@ -106,7 +106,7 @@ class DecisionEngine:
             state.realized_volatility * 10_000.0,
             0.1,
         )
-        posterior = self.estimate_posterior(edge_stats.drift_samples_bps, threshold_bps)
+        posterior = self.estimate_posterior(edge_stats.posterior_samples_bps, threshold_bps)
         observation_confidence = self._observation_confidence(posterior, regime)
 
         if edge_stats.count < self.transition_config.min_edge_observations:
@@ -116,6 +116,42 @@ class DecisionEngine:
                 posterior,
                 regime.expected_holding_time_ns,
                 "insufficient observations",
+                observation_confidence=observation_confidence,
+            )
+        if edge_stats.training_session_count < self.transition_config.min_edge_training_sessions:
+            return TradeIntent(
+                TradeAction.HOLD,
+                edge,
+                posterior,
+                regime.expected_holding_time_ns,
+                "insufficient session support",
+                observation_confidence=observation_confidence,
+            )
+        if edge_stats.directional_consensus < self.transition_config.min_directional_consensus:
+            return TradeIntent(
+                TradeAction.HOLD,
+                edge,
+                posterior,
+                regime.expected_holding_time_ns,
+                "unstable session direction",
+                observation_confidence=observation_confidence,
+            )
+        if edge_stats.cross_session_hit_rate < self.transition_config.min_cross_session_hit_rate:
+            return TradeIntent(
+                TradeAction.HOLD,
+                edge,
+                posterior,
+                regime.expected_holding_time_ns,
+                "weak cross-session hit rate",
+                observation_confidence=observation_confidence,
+            )
+        if edge_stats.cross_session_hit_consensus < self.transition_config.min_cross_session_hit_consensus:
+            return TradeIntent(
+                TradeAction.HOLD,
+                edge,
+                posterior,
+                regime.expected_holding_time_ns,
+                "unstable cross-session hit rate",
                 observation_confidence=observation_confidence,
             )
         if diagnostic.alpha_score < self.config.min_alpha_score:

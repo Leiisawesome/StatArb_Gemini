@@ -61,3 +61,15 @@ class ProductionOrderRouter(OrderRouter, Protocol):
 
     def reconciliation_snapshot(self) -> dict[str, Any]:
         """Return broker positions and open orders for startup reconciliation."""
+
+    def snapshot_recovery_state(self) -> Any | None:
+        """Return the typed state required to recover tracked broker orders."""
+
+    def validate_recovery_state(self, state: Any | None, symbols: tuple[str, ...]) -> None:
+        """Validate durable recovery state before it can mutate router tracking."""
+
+    def restore_recovery_state(self, state: Any | None) -> None:
+        """Rehydrate tracked broker orders from validated durable state."""
+
+    def recovery_reconciliations(self) -> list[Any]:
+        """Return the broker result for each attempted order rehydration."""

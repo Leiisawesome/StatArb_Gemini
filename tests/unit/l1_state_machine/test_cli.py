@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 import json
 from datetime import datetime
+from types import SimpleNamespace
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
@@ -97,6 +98,116 @@ def test_cli_workflow_command_runs_end_to_end(tmp_path, capsys) -> None:
     assert "validation_failures" in payload
 
 
+def test_cli_workflow_accepts_repeated_trade_dates_for_walk_forward_validation(tmp_path, capsys) -> None:
+    dated_payloads = [
+        {**payload, "t": int(payload["t"]) + day_offset * 24 * 60 * 60 * 1_000_000_000}
+        for day_offset in range(5)
+        for payload in _payloads()
+    ]
+    source = FixtureMarketDataSource(dated_payloads)
+
+    with patch("l1_microstructure.cli._historical_source", return_value=source):
+        exit_code = main(
+            [
+                "workflow",
+                "--artifact-root",
+                str(tmp_path / "artifacts"),
+                "--symbol",
+                "AAPL",
+                "--trade-date",
+                "2024-03-11",
+                "--trade-date",
+                "2024-03-12",
+                "--trade-date",
+                "2024-03-13",
+                "--trade-date",
+                "2024-03-14",
+                "--trade-date",
+                "2024-03-15",
+                "--transition-threshold",
+                "0.0",
+                "--allow-unexecuted-validation",
+            ]
+        )
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["trade_dates"] == [
+        "2024-03-11",
+        "2024-03-12",
+        "2024-03-13",
+        "2024-03-14",
+        "2024-03-15",
+    ]
+    assert payload["activation_summary"]["transition_count"] > 0
+
+
+def test_cli_transparent_workflow_reports_validation_and_artifacts(tmp_path, capsys) -> None:
+    report = SimpleNamespace(to_dict=lambda: {"passed": True})
+    manifest = SimpleNamespace(artifact_ids={"state_vector_model": "vector-id"})
+    result = SimpleNamespace(
+        symbol="AAPL",
+        run_id="aapl-v2-approved",
+        split_count=3,
+        manifest=manifest,
+        validation_report=report,
+    )
+    with (
+        _patched_cli_sources(),
+        patch("l1_microstructure.cli.TransparentArtifactDrivenWorkflow") as workflow_type,
+    ):
+        workflow_type.return_value.run.return_value = result
+        exit_code = main(
+            [
+                "transparent-workflow",
+                "--artifact-root",
+                str(tmp_path / "artifacts"),
+                "--symbol",
+                "AAPL",
+                "--trade-date",
+                "2024-03-11",
+                "--run-id",
+                "aapl-v2-approved",
+            ]
+        )
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["run_id"] == "aapl-v2-approved"
+    assert payload["validation"] == {"passed": True}
+    assert payload["artifact_ids"]["state_vector_model"] == "vector-id"
+
+
+def test_cli_lists_only_validation_approved_transparent_runs(tmp_path, capsys) -> None:
+    manifest = SimpleNamespace(
+        run_id="aapl-v2-approved",
+        trade_date="2024-03-11",
+        created_at="2024-03-12T00:00:00+00:00",
+        engine_version="v2",
+        artifact_ids={"state_vector_model": "vector-id"},
+        metadata={"validation_passed": True},
+    )
+    with patch("l1_microstructure.cli.TransparentArtifactSelector") as selector_type:
+        selector_type.return_value.list_manifests.return_value = [manifest]
+        exit_code = main(
+            [
+                "list-transparent-runs",
+                "--artifact-root",
+                str(tmp_path / "artifacts"),
+                "--symbol",
+                "AAPL",
+                "--passing-only",
+            ]
+        )
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["passing_only"] is True
+    assert payload["run_count"] == 1
+    assert payload["runs"][0]["run_id"] == "aapl-v2-approved"
+    selector_type.return_value.list_manifests.assert_called_once_with("AAPL", passing_only=True)
+
+
 def test_cli_paper_historical_uses_latest_artifacts(tmp_path, capsys) -> None:
     artifact_root = tmp_path / "artifacts"
     with _patched_cli_sources():
@@ -111,6 +222,7 @@ def test_cli_paper_historical_uses_latest_artifacts(tmp_path, capsys) -> None:
                 "2024-03-11",
                 "--transition-threshold",
                 "0.0",
+                "--allow-unexecuted-validation",
             ]
         )
         assert workflow_exit == 0
@@ -214,8 +326,8 @@ def test_cli_list_runs_can_filter_to_passing_runs(tmp_path, capsys) -> None:
     assert exit_code == 0
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["passing_only"] is True
-    assert payload["run_count"] >= 1
-    assert payload["runs"][0]["run_id"] == workflow_payload["run_id"]
+    assert payload["run_count"] == 0
+    assert workflow_payload["validation_passed"] is False
 
 
 def test_cli_list_runs_can_filter_by_quality_gate(tmp_path, capsys) -> None:
@@ -232,6 +344,7 @@ def test_cli_list_runs_can_filter_by_quality_gate(tmp_path, capsys) -> None:
                 "2024-03-11",
                 "--transition-threshold",
                 "0.0",
+                "--allow-unexecuted-validation",
             ]
         )
         assert workflow_exit == 0
@@ -285,6 +398,7 @@ def test_cli_paper_historical_can_require_validation_passing_bundle(tmp_path, ca
                 "2024-03-11",
                 "--transition-threshold",
                 "0.0",
+                "--allow-unexecuted-validation",
             ]
         )
         assert workflow_exit == 0
@@ -326,6 +440,7 @@ def test_cli_paper_historical_accepts_quality_gate(tmp_path, capsys) -> None:
                 "2024-03-11",
                 "--transition-threshold",
                 "0.0",
+                "--allow-unexecuted-validation",
             ]
         )
         assert workflow_exit == 0

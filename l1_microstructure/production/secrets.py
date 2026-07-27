@@ -1,4 +1,4 @@
-"""macOS Keychain-backed production secret resolution."""
+"""System-keyring-backed production secret resolution."""
 
 from __future__ import annotations
 
@@ -10,7 +10,10 @@ _SERVICE = "statarb-gemini"
 
 
 def get_secret(name: str, *, allow_environment: bool = True) -> str | None:
-    value = keyring.get_password(_SERVICE, name)
+    try:
+        value = keyring.get_password(_SERVICE, name)
+    except keyring.errors.KeyringError:
+        value = None
     if value:
         return value
     return os.environ.get(name) if allow_environment else None

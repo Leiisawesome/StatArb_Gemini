@@ -14,6 +14,7 @@ Use the repository documents by role:
 4. `docs/l1_microstructure_thesis_edge_and_state_vector.md` explains how edge comes from the state vector and transitions.
 5. `docs/l1_microstructure_package_plan.md` describes the implemented package structure, contract seams, and remaining roadmap.
 6. `docs/production_operator_guide.md` covers the supervised daemon, terminal console, safety controls, and paper qualification.
+7. `docs/transparent_engine_v2.md` defines the stronger transparent engine, promotion gates, and frozen paper shadow campaign.
 
 ## What `l1_microstructure` is
 
@@ -114,7 +115,9 @@ Current commands implemented by `l1_microstructure/cli.py` are:
 | Command | Purpose |
 | --- | --- |
 | `workflow` | Load historical data, build artifacts, validate, replay, and persist a run manifest |
+| `transparent-workflow` | Build and validate a transparent v2 shadow candidate from historical data |
 | `list-runs` | Inspect saved run manifests and filter by date, pass/fail, or quality gates |
+| `list-transparent-runs` | Inspect transparent v2 manifests and filter to validation-approved runs |
 | `paper-historical` | Load a stored artifact bundle and run the paper path against historical data |
 | `paper-live` | Load a stored artifact bundle and run the paper path against the live subscription flow |
 | `live-routed` | Exercise the lightweight routed boundary against a paper broker account |
@@ -123,15 +126,26 @@ Current commands implemented by `l1_microstructure/cli.py` are:
 
 ### Example commands
 
-Build a workflow run for one symbol and one trade date:
+Build a leakage-safe expanding walk-forward run by repeating `--trade-date` for completed sessions:
 
 ```powershell
 python -m l1_microstructure workflow `
   --artifact-root output/l1_microstructure_artifacts `
   --symbol AAPL `
+  --trade-date 2024-03-06 `
+  --trade-date 2024-03-07 `
+  --trade-date 2024-03-08 `
   --trade-date 2024-03-11 `
-  --transition-threshold 0.0
+  --trade-date 2024-03-12
 ```
+
+After the configured minimum of four training sessions, each later session is
+evaluated against prior sessions only. Edge direction uses equal-weighted
+per-session means and abstains when session support, sign consensus, or
+leave-one-session-out directional reliability is weak.
+Feature, regime, transition, and replay state reset at every session boundary. A single
+`--trade-date` remains available for smoke testing and uses the legacy intraday
+half split.
 
 Inspect saved runs:
 
@@ -340,7 +354,8 @@ Initial setup:
 ```bash
 uv sync --extra dev
 trading-secret MASSIVE_API_KEY
-trading-secret TRADING_CONSOLE_TOKEN
+trading-secret MASSIVE_API_KEY --validate
+trading-secret TRADING_CONSOLE_TOKEN --generate
 cp config/production.example.json config/production.json
 ```
 
@@ -350,6 +365,71 @@ After replacing the promoted run ids in `config/production.json`, start paper mo
 trading-daemon --config config/production.json
 trading-console
 ```
+
+The daemon performs a read-only, redacted configuration preflight before it
+constructs market-data or broker clients. Missing credentials, unavailable or
+unapproved artifacts, unwritable ledger paths, and paper/live account-mode
+mismatches fail startup before any routing boundary is opened.
+
+Run only that gate with machine-readable JSON output:
+
+```bash
+trading-daemon --config config/production.json --preflight
+```
+
+The command exits `0` on success or `2` on a failed check and never constructs
+runtime infrastructure.
+
+The authenticated daemon API separates `/health` liveness from `/ready` trading
+eligibility. `/ready` returns HTTP `503` with stable machine-readable check codes
+until lifecycle, kill-switch, model, warmup, market-data, broker, and
+reconciliation requirements pass. `/status` retains the detailed operator view
+used by `trading-console`.
+
+Run the deterministic offline production safety drills before paper-session
+qualification:
+
+```bash
+trading-qualify
+```
+
+The command exercises restart fail-closed behavior, broker disconnect, stale
+feed, order rejection, and flatten timeout handling against temporary ledgers
+and in-process infrastructure boundaries. It emits one JSON report and exits `0`
+when every drill passes or `2` when any drill fails. It does not load production
+configuration, credentials, artifacts, market-data clients, or broker clients.
+
+Follow the complete
+[paper-trading qualification runbook](docs/paper_trading_qualification_runbook.md)
+for the frozen ten-session campaign, daily evidence capture, failure rules, and
+separate broker-recovery drills.
+
+Before session 1, the read-only `trading-paper-ready` command combines the
+production preflight with clean-commit, fresh-ledger, pinned v1/v2 artifact,
+conservative-risk, and counted/drill isolation checks. Its JSON freeze record
+contains only a hash of the configured paper account.
+
+After every attempted regular-hours paper session, finalize its durable ledger
+evidence:
+
+```bash
+trading-paper-qualify --database var/trading.sqlite3 --finalize 2026-07-13
+trading-transparent-qualify --database var/trading.sqlite3 --finalize 2026-07-13
+```
+
+Run the same command without `--finalize` to inspect the accumulated gate. The
+reports become `qualified` only after ten trailing passing sessions. Automatic
+session-start markers ensure an attempted but unfinalized or incompletely closed
+session breaks the streak. The evaluator checks paper mode, regular close
+evidence, market activity, unique order IDs, terminal orders, reconciled fills,
+flat closing positions, complete decision/acknowledgement audit links, and zero
+runtime-halt incidents. It emits one JSON report and uses exit code `0` only when
+the ten-session gate is qualified; `2` means more evidence or remediation is
+required.
+
+The transparent report additionally requires a frozen validation-approved v2
+shadow bundle, resolved candidate outcomes, zero candidate errors or restarts,
+and bounded shadow latency. The v1 engine remains the only routing authority.
 
 Production configuration defaults to regular-hours operation, stops entries at
 15:50 ET, flattens at 15:58 ET, and rejects live mode unless the configuration

@@ -68,6 +68,10 @@ def test_decision_engine_sell_path_and_normal_cdf_edge() -> None:
     config = FrameworkConfig()
     config.decision.entry_probability_threshold = 0.55
     config.transition.min_edge_observations = 3
+    config.transition.min_edge_training_sessions = 0
+    config.transition.min_directional_consensus = 0.0
+    config.transition.min_cross_session_hit_rate = 0.0
+    config.transition.min_cross_session_hit_consensus = 0.0
     engine = DecisionEngine(config.decision, config.transition)
     kernel = TransitionKernel(config.transition)
     edge = EdgeKey("a", "b", MicrostructureRegime.EXECUTION_FLOW)
@@ -251,12 +255,52 @@ def test_transitions_load_trained_payload_edges() -> None:
                 "count": 5,
                 "holding_times_ns": [1000, 2000],
                 "drift_samples_bps": [1.0, 2.0],
+                "session_drift_means_bps": [1.5, 1.0],
+                "directional_consensus": 1.0,
+                "cross_session_hit_rates": [0.75, 0.80],
+                "cross_session_hit_rate": 0.775,
+                "cross_session_hit_consensus": 1.0,
             }
         }
     })
     edge = EdgeKey("a", "b", MicrostructureRegime.EXECUTION_FLOW)
     stats = kernel.get_edge(edge)
     assert stats.count == 5 or stats.count == 0
+    assert stats.training_session_count == 2
+    assert stats.directional_consensus == 1.0
+    assert stats.cross_session_hit_rates == [0.75, 0.80]
+    assert stats.cross_session_hit_rate == 0.775
+    assert stats.cross_session_hit_consensus == 1.0
+
+
+def test_transitions_load_compact_summary_statistics() -> None:
+    kernel = TransitionKernel()
+    kernel.load_trained_payload({
+        "sample_count": 3,
+        "edges": {
+            "e1": {
+                "from_state": "a",
+                "to_state": "b",
+                "regime": "execution_flow",
+                "count": 3,
+                "mean_holding_time_ns": 2_000.0,
+                "drift_mean_bps": 2.0,
+                "drift_std_bps": 1.0,
+                "session_drift_means_bps": [1.5, 2.5],
+                "directional_consensus": 1.0,
+                "cross_session_hit_rates": [1.0, 1.0],
+                "cross_session_hit_rate": 1.0,
+                "cross_session_hit_consensus": 1.0,
+            }
+        },
+    })
+
+    stats = kernel.get_edge(EdgeKey("a", "b", MicrostructureRegime.EXECUTION_FLOW))
+    assert stats.holding_times_ns == []
+    assert stats.drift_samples_bps == []
+    assert stats.mean_holding_time_ns == 2_000.0
+    assert stats.drift_mean_bps == 2.0
+    assert stats.drift_std_bps == 1.0
 
 
 def test_edge_statistics_signal_to_noise_zero_std() -> None:

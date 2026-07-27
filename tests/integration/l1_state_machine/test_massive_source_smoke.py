@@ -5,8 +5,9 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from l1_microstructure.ingest import HistoricalBatchRequest, MassiveRESTDataSource
+from l1_microstructure.ingest import HistoricalBatchRequest, MassiveRESTConfig, MassiveRESTDataSource
 from l1_microstructure.ingest.massive import _resolve_massive_api_key
+from l1_microstructure.production.secrets import get_secret
 
 
 _EASTERN = ZoneInfo("America/New_York")
@@ -21,7 +22,7 @@ pytestmark = [pytest.mark.integration, pytest.mark.external, pytest.mark.require
 
 
 def test_massive_api_key_is_available_for_source_backed_smoke() -> None:
-    api_key = _resolve_massive_api_key(None)
+    api_key = _resolve_massive_api_key(None) or get_secret("MASSIVE_API_KEY")
     if not api_key:
         pytest.skip("MASSIVE_API_KEY is not configured")
 
@@ -29,11 +30,11 @@ def test_massive_api_key_is_available_for_source_backed_smoke() -> None:
 
 
 def test_massive_rest_source_can_load_bounded_historical_window() -> None:
-    api_key = _resolve_massive_api_key(None)
+    api_key = _resolve_massive_api_key(None) or get_secret("MASSIVE_API_KEY")
     if not api_key:
         pytest.skip("MASSIVE_API_KEY is not configured")
 
-    source = MassiveRESTDataSource()
+    source = MassiveRESTDataSource(MassiveRESTConfig(api_key=api_key))
     request = HistoricalBatchRequest(
         symbols=("AAPL",),
         trade_date=date(2024, 3, 11),

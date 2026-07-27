@@ -15,11 +15,28 @@ from .interfaces import AlertCategory, AlertSeverity, OperationalAlert, RuntimeS
 
 
 class InMemoryMonitoringSink:
-    def __init__(self):
+    def __init__(self, *, max_snapshots: int | None = None):
+        if max_snapshots is not None and max_snapshots < 1:
+            raise ValueError("max_snapshots must be positive")
+        self.max_snapshots = max_snapshots
         self.snapshots: list[RuntimeSnapshot] = []
         self.alerts: list[OperationalAlert] = []
+        self.published_snapshot_count = 0
+        self.sampling_stride = 1
 
     def publish(self, snapshot: RuntimeSnapshot) -> None:
+        self.published_snapshot_count += 1
+        if self.max_snapshots is not None:
+            if self.published_snapshot_count % self.sampling_stride:
+                return
+            if len(self.snapshots) >= self.max_snapshots:
+                # Keep observations aligned to the doubled stride. With
+                # one-based publication indexes these are the second, fourth,
+                # and subsequent even slots in the current sample.
+                self.snapshots = self.snapshots[1::2]
+                self.sampling_stride *= 2
+                if self.published_snapshot_count % self.sampling_stride:
+                    return
         self.snapshots.append(snapshot)
 
     def publish_alert(self, alert: OperationalAlert) -> None:

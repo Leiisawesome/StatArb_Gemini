@@ -17,6 +17,7 @@ from l1_microstructure.live import (
     BrokerRouterRecoveryState,
     IBKRBrokerOrderRouter,
 )
+from l1_microstructure.live.recovery import BrokerRecoveryCodec
 from l1_microstructure.live.broker_models import (
     BrokerOrder,
     BrokerOrderSide,
@@ -25,6 +26,7 @@ from l1_microstructure.live.broker_models import (
     IBKRConnectionConfig,
 )
 from l1_microstructure.regime import MicrostructureRegime
+from l1_microstructure.retry import RetryPolicy
 from l1_microstructure.transitions import EdgeKey
 
 
@@ -249,6 +251,195 @@ def test_broker_backed_router_restores_open_orders_into_fresh_router() -> None:
     assert recovered_router.open_order_ids() == []
 
 
+def test_broker_connection_retries_before_single_order_submission() -> None:
+    class TransientConnectBroker(FakeAsyncBrokerFacade):
+        def __init__(self) -> None:
+            super().__init__()
+            self.connect_attempts = 0
+            self.submission_attempts = 0
+
+        async def connect(self) -> bool:
+            self.connect_attempts += 1
+            if self.connect_attempts < 3:
+                raise TimeoutError("gateway starting")
+            self.connected = True
+            return True
+
+        async def submit_order(self, *args, **kwargs):
+            self.submission_attempts += 1
+            return await super().submit_order(*args, **kwargs)
+
+    waits: list[float] = []
+    broker = TransientConnectBroker()
+    router = IBKRBrokerOrderRouter(
+        IBKRConnectionConfig(),
+        broker=broker,
+        connection_retry_policy=RetryPolicy(
+            max_attempts=3,
+            initial_delay_seconds=0.5,
+            maximum_delay_seconds=1.0,
+        ),
+        retry_wait=waits.append,
+    )
+
+    acknowledgement = router.submit(_request(quantity=12))
+
+    assert acknowledgement.status == "accepted"
+    assert broker.connect_attempts == 3
+    assert broker.submission_attempts == 1
+    assert waits == [0.5, 1.0]
+    assert router.retry_diagnostics()["connect"]["attempts"] == 3
+
+
+def test_ambiguous_order_submission_is_never_retried() -> None:
+    class AmbiguousSubmissionBroker(FakeAsyncBrokerFacade):
+        def __init__(self) -> None:
+            super().__init__()
+            self.submission_attempts = 0
+
+        async def submit_order(self, *args, **kwargs):
+            self.submission_attempts += 1
+            raise TimeoutError("submission outcome is unknown")
+
+    waits: list[float] = []
+    broker = AmbiguousSubmissionBroker()
+    router = IBKRBrokerOrderRouter(
+        IBKRConnectionConfig(),
+        broker=broker,
+        connection_retry_policy=RetryPolicy(max_attempts=3),
+        read_retry_policy=RetryPolicy(max_attempts=3),
+        retry_wait=waits.append,
+    )
+
+    acknowledgement = router.submit(_request(quantity=12))
+
+    assert acknowledgement.status == "rejected"
+    assert "outcome is unknown" in acknowledgement.reason
+    assert broker.submission_attempts == 1
+    assert waits == []
+
+
+def test_ambiguous_order_cancellation_is_never_retried() -> None:
+    class AmbiguousCancellationBroker(FakeAsyncBrokerFacade):
+        def __init__(self) -> None:
+            super().__init__()
+            self.cancel_attempts = 0
+
+        async def cancel_order(self, order_id: str) -> bool:
+            self.cancel_attempts += 1
+            raise TimeoutError("cancellation outcome is unknown")
+
+    waits: list[float] = []
+    broker = AmbiguousCancellationBroker()
+    router = IBKRBrokerOrderRouter(
+        IBKRConnectionConfig(),
+        broker=broker,
+        read_retry_policy=RetryPolicy(max_attempts=3),
+        retry_wait=waits.append,
+    )
+
+    with pytest.raises(TimeoutError, match="outcome is unknown"):
+        router.cancel("order-1")
+
+    assert broker.cancel_attempts == 1
+    assert waits == []
+
+
+def test_broker_health_read_retries_transient_failures() -> None:
+    class TransientHealthBroker(FakeAsyncBrokerFacade):
+        def __init__(self) -> None:
+            super().__init__()
+            self.health_attempts = 0
+
+        async def check_health(self):
+            self.health_attempts += 1
+            if self.health_attempts < 3:
+                raise ConnectionError("health channel unavailable")
+            return await super().check_health()
+
+    waits: list[float] = []
+    broker = TransientHealthBroker()
+    router = IBKRBrokerOrderRouter(
+        IBKRConnectionConfig(),
+        broker=broker,
+        read_retry_policy=RetryPolicy(
+            max_attempts=3,
+            initial_delay_seconds=0.25,
+            maximum_delay_seconds=0.5,
+        ),
+        retry_wait=waits.append,
+    )
+
+    health = router.health_check()
+
+    assert health["connected"] is True
+    assert broker.health_attempts == 3
+    assert waits == [0.25, 0.5]
+    assert health["retry"]["health_check"]["attempts"] == 3
+
+
+def test_broker_connection_does_not_retry_permission_failure() -> None:
+    class PermissionDeniedBroker(FakeAsyncBrokerFacade):
+        def __init__(self) -> None:
+            super().__init__()
+            self.connect_attempts = 0
+
+        async def connect(self) -> bool:
+            self.connect_attempts += 1
+            raise PermissionError("API access denied")
+
+    waits: list[float] = []
+    broker = PermissionDeniedBroker()
+    router = IBKRBrokerOrderRouter(
+        IBKRConnectionConfig(),
+        broker=broker,
+        connection_retry_policy=RetryPolicy(max_attempts=3),
+        retry_wait=waits.append,
+    )
+
+    health = router.health_check()
+
+    assert health["connected"] is False
+    assert broker.connect_attempts == 1
+    assert waits == []
+    assert health["retry"]["connect"]["failures"][0]["retryable"] is False
+
+
+def test_broker_reconciliation_query_retries_transient_failure() -> None:
+    class TransientReconciliationBroker(FakeAsyncBrokerFacade):
+        def __init__(self) -> None:
+            super().__init__()
+            self.reconciliation_attempts = 0
+
+        async def reconciliation_snapshot(self):
+            self.reconciliation_attempts += 1
+            if self.reconciliation_attempts < 2:
+                raise TimeoutError("account summary delayed")
+            return {
+                "connected": True,
+                "status": "healthy",
+                "positions": {},
+                "open_order_ids": [],
+                "net_liquidation": 100_000.0,
+            }
+
+    waits: list[float] = []
+    broker = TransientReconciliationBroker()
+    router = IBKRBrokerOrderRouter(
+        IBKRConnectionConfig(),
+        broker=broker,
+        read_retry_policy=RetryPolicy(max_attempts=2, initial_delay_seconds=0.25),
+        retry_wait=waits.append,
+    )
+
+    snapshot = router.reconciliation_snapshot()
+
+    assert snapshot["connected"] is True
+    assert broker.reconciliation_attempts == 2
+    assert waits == [0.25]
+    assert snapshot["retry"]["reconciliation"]["attempts"] == 2
+
+
 def test_broker_recovery_rejects_unsupported_version_before_mutation() -> None:
     broker = FakeAsyncBrokerFacade()
     router = IBKRBrokerOrderRouter(IBKRConnectionConfig(), broker=broker)
@@ -259,6 +450,49 @@ def test_broker_recovery_rejects_unsupported_version_before_mutation() -> None:
         router.restore_recovery_state(invalid_state)
 
     assert router.open_order_ids() == [acknowledgement.external_order_id]
+
+
+def test_broker_recovery_codec_round_trips_complete_request() -> None:
+    state = BrokerRouterRecoveryState(
+        open_orders=[BrokerOpenOrderRecovery(external_order_id="paper-42", request=_request(quantity=12), filled_quantity=5)]
+    )
+
+    recovered = BrokerRecoveryCodec.from_dict(BrokerRecoveryCodec.to_dict(state))
+
+    assert recovered == state
+
+
+def test_broker_recovery_codec_round_trips_infinite_posterior_uncertainty() -> None:
+    request = _request(quantity=1)
+    request = replace(
+        request,
+        intent=replace(request.intent, posterior=replace(request.intent.posterior, std_bps=float("inf"))),
+    )
+    state = BrokerRouterRecoveryState(
+        open_orders=[BrokerOpenOrderRecovery(external_order_id="paper-flatten", request=request)]
+    )
+
+    payload = BrokerRecoveryCodec.to_dict(state)
+    recovered = BrokerRecoveryCodec.from_dict(payload)
+
+    assert payload["open_orders"][0]["request"]["intent"]["posterior"]["std_bps"] == "Infinity"
+    assert recovered == state
+
+
+def test_broker_recovery_codec_rejects_malformed_payload() -> None:
+    with pytest.raises(ValueError, match="malformed"):
+        BrokerRecoveryCodec.from_dict({"version": 1, "open_orders": [{"external_order_id": "paper-42"}]})
+
+
+def test_broker_recovery_codec_rejects_nan() -> None:
+    request = _request(quantity=1)
+    request = replace(
+        request,
+        intent=replace(request.intent, posterior=replace(request.intent.posterior, std_bps=float("nan"))),
+    )
+
+    with pytest.raises(ValueError, match="NaN"):
+        BrokerRecoveryCodec.request_to_dict(request)
 
 
 def test_broker_recovery_rejects_corrupted_order_before_mutation() -> None:

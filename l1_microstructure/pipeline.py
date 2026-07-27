@@ -85,6 +85,7 @@ class L1MicrostructureStateMachine:
         self.last_midpoints: dict[str, float] = {}
         self.return_history: dict[str, Deque[float]] = {}
         self.realized_volatility_by_symbol: dict[str, float] = {}
+        self.late_event_count: int = 0
 
     def snapshot_state(self) -> StateMachineRecoverySnapshot:
         return StateMachineRecoveryCodec.snapshot(self)
@@ -97,6 +98,9 @@ class L1MicrostructureStateMachine:
             self.symbol = event.symbol
         elif event.symbol != self.symbol:
             raise ValueError(f"state machine for {self.symbol} cannot process event for {event.symbol}")
+        if self.previous_state is not None and event.timestamp_ns < self.previous_state.timestamp_ns:
+            self.late_event_count += 1
+            return None
         state = self.feature_engine.update(event)
         if state is None:
             return None

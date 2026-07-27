@@ -11,6 +11,7 @@ from l1_microstructure.config import FrameworkConfig
 from l1_microstructure.datasets import PipelineTransitionDatasetBuilder
 from l1_microstructure.ingest import LiveSubscriptionRequest
 from l1_microstructure.live import IBKRBrokerOrderRouter, RoutedLiveTradingRunner, RunnerConfig
+from l1_microstructure.monitoring import RuntimeMonitor
 from l1_microstructure.training import EmpiricalTransitionTrainer
 from tests.unit.l1_state_machine.support import FixtureMarketDataSource
 
@@ -34,11 +35,29 @@ def _framework_config() -> FrameworkConfig:
     config = FrameworkConfig()
     config.transition.mahalanobis_threshold = 0.0
     config.transition.min_edge_observations = 1
+    config.transition.min_edge_training_sessions = 0
+    config.transition.min_directional_consensus = 0.0
+    config.transition.min_cross_session_hit_rate = 0.0
+    config.transition.min_cross_session_hit_consensus = 0.0
     config.decision.min_alpha_score = 0.0
     config.decision.entry_probability_threshold = 0.5
     config.decision.transaction_cost_bps = 0.0
     config.decision.risk_premium_bps = 0.0
+    config.risk.max_position_fraction = 0.0002
+    config.risk.confidence_size_floor = 1.0
     return config
+
+
+class _StopAfterFirstOrderSource(FixtureMarketDataSource):
+    def __init__(self, payloads, router: IBKRBrokerOrderRouter):
+        super().__init__(payloads)
+        self.router = router
+
+    def subscribe_live(self, request):
+        for event in super().subscribe_live(request):
+            if self.router.open_order_ids():
+                break
+            yield event
 
 
 def _runtime_artifacts(config: FrameworkConfig) -> RuntimeArtifactBundle:
@@ -54,7 +73,7 @@ def _runtime_artifacts(config: FrameworkConfig) -> RuntimeArtifactBundle:
 
 
 def _isolated_broker_env_file(tmp_path: Path) -> str:
-    values = {key: str(value) for key, value in dotenv_values("broker.env").items() if value is not None}
+    values = {key: str(value) for key, value in dotenv_values("broker.paper.env").items() if value is not None}
     values["IBKR_CLIENT_ID"] = "91313"
     env_file = tmp_path / "ibkr_routed_live_smoke.env"
     env_file.write_text("\n".join(f"{key}={value}" for key, value in values.items()) + "\n", encoding="utf-8")
@@ -80,7 +99,7 @@ def test_ibkr_router_can_drive_bounded_routed_live_cancel_cycle(tmp_path: Path) 
             pytest.skip(f"IBKR routed-live smoke requires a healthy broker connection: {health}")
 
         runner = RoutedLiveTradingRunner(
-            source=FixtureMarketDataSource(_payloads()),
+            source=_StopAfterFirstOrderSource(_payloads(), router),
             router=router,
             framework_config=config,
             runtime_artifacts=_runtime_artifacts(config),
@@ -91,7 +110,13 @@ def test_ibkr_router_can_drive_bounded_routed_live_cancel_cycle(tmp_path: Path) 
         )
 
         assert result.route_acknowledgements
+        assert len(result.route_acknowledgements) == 1
         assert any(ack.status == "accepted" for ack in result.route_acknowledgements)
+        assert all(
+            request.quantity == 1
+            for update in result.updates
+            for request in update.submitted_requests
+        )
 
         open_order_ids = result.open_route_order_ids()
         assert open_order_ids, "expected at least one open routed IBKR order to cancel"
@@ -99,9 +124,10 @@ def test_ibkr_router_can_drive_bounded_routed_live_cancel_cycle(tmp_path: Path) 
             assert result.cancel_route_order(order_id) is True
 
         if result.machine is not None:
+            monitor = RuntimeMonitor(result.monitoring_sink)
             for _ in range(8):
                 time.sleep(0.5)
-                result._ingest_router_reports(result.machine, ("AAPL",))
+                result._ingest_router_reports(result.machine, ("AAPL",), monitor)
                 if not result.open_route_order_ids():
                     break
 

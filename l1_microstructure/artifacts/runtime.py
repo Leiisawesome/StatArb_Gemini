@@ -310,12 +310,30 @@ class ArtifactBundleSelector:
                 artifact_ids={str(key): str(value) for key, value in payload.get("artifact_ids", {}).items()},
                 metadata=dict(payload.get("metadata", {})),
             )
-            if passing_only and not bool(manifest.metadata.get("validation_passed", False)):
+            if passing_only and not self._validation_approved(manifest):
                 continue
             if quality_gate is not None and not self._passes_quality_gate(manifest, quality_gate):
                 continue
             manifests.append(manifest)
         return manifests
+
+    def _validation_approved(self, manifest: RunManifest) -> bool:
+        if not bool(manifest.metadata.get("validation_passed", False)):
+            return False
+        validation_report_id = manifest.artifact_ids.get("validation_report")
+        if not validation_report_id:
+            return False
+        try:
+            metadata = self.store.load_metadata(validation_report_id)
+            report = self.store.load(validation_report_id)
+        except (OSError, KeyError, TypeError, ValueError):
+            return False
+        return (
+            metadata.artifact_type == "validation_report"
+            and metadata.metadata.get("symbol") == manifest.symbol
+            and metadata.metadata.get("run_id") == manifest.run_id
+            and report.get("passed") is True
+        )
 
     @staticmethod
     def _passes_quality_gate(manifest: RunManifest, quality_gate: RunQualityGate) -> bool:

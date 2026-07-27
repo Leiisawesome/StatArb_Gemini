@@ -25,6 +25,11 @@ class EdgeStatistics:
     count: int = 0
     holding_times_ns: list[int] = field(default_factory=list)
     drift_samples_bps: list[float] = field(default_factory=list)
+    session_drift_means_bps: list[float] = field(default_factory=list)
+    directional_consensus: float = 0.0
+    cross_session_hit_rates: list[float] = field(default_factory=list)
+    cross_session_hit_rate: float = 1.0
+    cross_session_hit_consensus: float = 1.0
     last_observation_index: int = 0
     # Welford incremental stats — O(1) property access regardless of session length
     _ht_count: int = field(default=0, init=False, repr=False)
@@ -78,10 +83,27 @@ class EdgeStatistics:
 
     @property
     def signal_to_noise(self) -> float:
-        if self._d_count < 2:
+        samples = self.posterior_samples_bps
+        if len(samples) < 2:
             return 0.0
-        std = self.drift_std_bps
-        return abs(self._d_mean) / std if std > 0 else 0.0
+        mean = float(np.mean(samples))
+        std = float(np.std(samples, ddof=1))
+        if self.session_drift_means_bps:
+            return abs(mean) / max(std, 1e-6)
+        return abs(mean) / std if std > 0 else 0.0
+
+    @property
+    def training_session_count(self) -> int:
+        return len(self.session_drift_means_bps)
+
+    @property
+    def posterior_samples_bps(self) -> list[float]:
+        return self.session_drift_means_bps or self.drift_samples_bps
+
+    @property
+    def decision_drift_mean_bps(self) -> float:
+        samples = self.posterior_samples_bps
+        return float(np.mean(samples)) if samples else 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -172,10 +194,10 @@ class TransitionKernel:
 
     def shrunk_drift_mean(self, edge: EdgeKey) -> float:
         stats = self.get_edge(edge)
-        if not stats.drift_samples_bps:
+        if not stats.posterior_samples_bps:
             return 0.0
         age = max(self.observation_index - stats.last_observation_index, 0)
-        return float(stats.drift_mean_bps * exp(-self.config.adversarial_decay_gamma * age))
+        return float(stats.decision_drift_mean_bps * exp(-self.config.adversarial_decay_gamma * age))
 
     def diagnostic(self, edge: EdgeKey) -> TransitionDiagnostic:
         stats = self.get_edge(edge)
@@ -218,7 +240,24 @@ class TransitionKernel:
                 count=int(edge_record.get("count", 0)),
                 holding_times_ns=[int(value) for value in edge_record.get("holding_times_ns", [])],
                 drift_samples_bps=[float(value) for value in edge_record.get("drift_samples_bps", [])],
+                session_drift_means_bps=[
+                    float(value) for value in edge_record.get("session_drift_means_bps", [])
+                ],
+                directional_consensus=float(edge_record.get("directional_consensus", 0.0)),
+                cross_session_hit_rates=[
+                    float(value) for value in edge_record.get("cross_session_hit_rates", [])
+                ],
+                cross_session_hit_rate=float(edge_record.get("cross_session_hit_rate", 0.0)),
+                cross_session_hit_consensus=float(edge_record.get("cross_session_hit_consensus", 0.0)),
                 last_observation_index=int(edge_record.get("count", 0)),
             )
+            if not stats.holding_times_ns and stats.count > 0:
+                stats._ht_count = stats.count
+                stats._ht_mean = float(edge_record.get("mean_holding_time_ns", 0.0))
+            if not stats.drift_samples_bps and stats.count > 0:
+                stats._d_count = stats.count
+                stats._d_mean = float(edge_record.get("drift_mean_bps", 0.0))
+                drift_std_bps = float(edge_record.get("drift_std_bps", 0.0))
+                stats._d_M2 = drift_std_bps * drift_std_bps * max(stats.count - 1, 0)
             self.edge_stats[edge] = stats
             self.outgoing_counts[(edge.from_state, edge.regime)][edge.to_state] = stats.count

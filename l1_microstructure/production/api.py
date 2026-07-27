@@ -40,6 +40,15 @@ def create_app(runtime: ProductionRuntime, api_token: str) -> FastAPI:
 
     @app.get("/health")
     def health(_: None = Depends(authorize)) -> dict:
+        return runtime.health_report().to_dict()
+
+    @app.get("/ready")
+    def ready(_: None = Depends(authorize)) -> JSONResponse:
+        report = runtime.readiness_report()
+        return JSONResponse(status_code=200 if report.ready else 503, content=report.to_dict())
+
+    @app.get("/status")
+    def status(_: None = Depends(authorize)) -> dict:
         return runtime.status()
 
     @app.get("/events")

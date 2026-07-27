@@ -4,15 +4,41 @@
   "promoted_run_ids": {
     "AAPL": "replace-with-promoted-run-id"
   },
+  "transparent_shadow_run_ids": {
+    "AAPL": "replace-with-validation-approved-v2-run-id"
+  },
   "database_path": "var/trading.sqlite3",
   "mode": "paper",
-  "broker_env_file": "broker.env",
+  "broker_env_file": "broker.paper.env",
   "api_host": "127.0.0.1",
   "api_port": 8765,
   "event_stale_after_seconds": 5.0,
   "warmup_seconds": 1800.0,
   "reconnect_backoff_seconds": 15.0,
   "flatten_timeout_seconds": 60.0,
+  "retry": {
+    "market_data": {
+      "max_attempts": 5,
+      "initial_delay_seconds": 1.0,
+      "backoff_multiplier": 2.0,
+      "maximum_delay_seconds": 15.0,
+      "jitter_fraction": 0.1
+    },
+    "broker_connection": {
+      "max_attempts": 3,
+      "initial_delay_seconds": 0.5,
+      "backoff_multiplier": 2.0,
+      "maximum_delay_seconds": 5.0,
+      "jitter_fraction": 0.1
+    },
+    "broker_read": {
+      "max_attempts": 3,
+      "initial_delay_seconds": 0.25,
+      "backoff_multiplier": 2.0,
+      "maximum_delay_seconds": 2.0,
+      "jitter_fraction": 0.1
+    }
+  },
   "risk": {
     "daily_loss_fraction": 0.01,
     "max_gross_exposure": 0.25,
@@ -21,10 +47,10 @@
     "allow_shorting": false
   },
   "model_quality": {
-    "minimum_fill_rate": null,
-    "maximum_cancel_rate": null,
-    "maximum_drift_tracking_error_bps": null,
-    "maximum_unseen_edge_rate": null
+    "minimum_fill_rate": 0.01,
+    "maximum_cancel_rate": 0.5,
+    "maximum_drift_tracking_error_bps": 2.0,
+    "maximum_unseen_edge_rate": 0.05
   },
   "session": {
     "timezone": "America/New_York",

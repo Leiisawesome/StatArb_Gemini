@@ -6,8 +6,11 @@ from datetime import date
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
+import pytest
+
 from l1_microstructure.config import FrameworkConfig
 from l1_microstructure.datasets import PipelineTransitionDatasetBuilder
+from l1_microstructure.events import QuoteEvent
 from l1_microstructure.ingest import ExtendedHoursSessionFilter, ExclusionWindow, HistoricalBatchRequest, LiveSubscriptionRequest, MassiveFilterConfig, MassivePayloadNormalizer, MassiveRESTConfig, MassiveRESTDataSource, MassiveWebSocketConfig, MassiveWebSocketDataSource
 from l1_microstructure.labeling import ForwardDriftLabeler, HorizonLabelRequest
 from l1_microstructure.replay import DeterministicReplayEngine
@@ -32,6 +35,19 @@ def test_massive_payload_normalizer_handles_quote_and_trade_payloads() -> None:
     assert quote is not None
     assert trade is not None
     assert quote.timestamp_ns < trade.timestamp_ns
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"ev": "Q", "sym": "AAPL", "t": 1710163800000, "bp": 100.02, "ap": 100.0, "bs": 100, "as": 100},
+        {"ev": "Q", "sym": "AAPL", "t": 1710163800000, "bp": float("nan"), "ap": 100.0, "bs": 100, "as": 100},
+        {"ev": "T", "sym": "AAPL", "t": 1710163800000, "p": 0.0, "s": 100},
+        {"ev": "T", "sym": "AAPL", "t": 1710163800000, "p": 100.0, "s": 0},
+    ],
+)
+def test_massive_payload_normalizer_drops_invalid_market_values(payload) -> None:
+    assert MassivePayloadNormalizer().normalize(payload) is None
 
 
 def test_massive_payload_normalizer_converts_websocket_millisecond_timestamps_to_nanoseconds() -> None:
@@ -188,6 +204,43 @@ def test_forward_drift_labeler_reuses_preindexed_timestamps() -> None:
     labeler.label(request)
 
     assert reads == reads_after_index
+
+
+def test_forward_drift_labeler_does_not_scan_dense_pre_horizon_events(monkeypatch) -> None:
+    events = [
+        QuoteEvent(
+            symbol="AAPL",
+            timestamp_ns=index,
+            bid_price=100.0 + index / 100_000.0,
+            ask_price=100.01 + index / 100_000.0,
+            bid_size=100,
+            ask_size=100,
+        )
+        for index in range(10_001)
+    ]
+    labeler = ForwardDriftLabeler(preindexed_events={"AAPL": events})
+    calls = 0
+    original = labeler._price_for_event
+
+    def counted(event):
+        nonlocal calls
+        calls += 1
+        return original(event)
+
+    monkeypatch.setattr(labeler, "_price_for_event", counted)
+
+    label = labeler.label(
+        HorizonLabelRequest(
+            symbol="AAPL",
+            horizon_ns=9_000,
+            start_timestamp_ns=0,
+            reference_price=100.005,
+        )
+    )
+
+    assert label.end_timestamp_ns == 9_000
+    assert not label.censored
+    assert calls == 1
 
 
 def test_dataset_builder_creates_state_and_transition_panels() -> None:
@@ -409,6 +462,37 @@ def test_massive_websocket_data_source_streams_and_filters_messages() -> None:
     assert events[0].timestamp_ns == _et_ns(2024, 3, 11, 9, 30, 0)
     assert events[1].timestamp_ns == _et_ns(2024, 3, 11, 9, 30, 7)
     assert fake_client.closed is True
+
+
+def test_massive_websocket_data_source_reorders_cross_channel_events() -> None:
+    class FakeWebSocketClient:
+        def run(self, handle_msg, **kwargs) -> None:
+            handle_msg(
+                json.dumps(
+                    [
+                        {"ev": "Q", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 0), "bp": 100.0, "ap": 100.02, "bs": 100, "as": 100},
+                        {"ev": "T", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 0) + 200_000_000, "p": 100.01, "s": 100},
+                        {"ev": "Q", "sym": "AAPL", "t": _et_ns(2024, 3, 11, 9, 30, 0) + 100_000_000, "bp": 100.01, "ap": 100.03, "bs": 120, "as": 80},
+                    ]
+                )
+            )
+
+        async def close(self) -> None:
+            return None
+
+    source = MassiveWebSocketDataSource(
+        MassiveWebSocketConfig(endpoint="wss://example.invalid", api_key="secret"),
+        client_factory=lambda config, request: FakeWebSocketClient(),
+    )
+
+    events = list(source.subscribe_live(LiveSubscriptionRequest(symbols=("AAPL",))))
+
+    assert [event.timestamp_ns for event in events] == sorted(event.timestamp_ns for event in events)
+
+
+def test_massive_websocket_config_rejects_negative_reorder_window() -> None:
+    with pytest.raises(ValueError, match="reorder window"):
+        MassiveWebSocketConfig(reorder_window_seconds=-0.001)
 
 
 def test_massive_websocket_data_source_filters_active_auction_status_messages() -> None:

@@ -63,19 +63,6 @@ class ForwardDriftLabeler:
         if start_idx >= len(events):
             return self._build_label(request, request.start_timestamp_ns, request.reference_price, censored=True)
 
-        latest_price = request.reference_price
-        latest_timestamp = request.start_timestamp_ns
-
-        # Accumulate the running price up to (but not including) resolve_ns
-        for i in range(start_idx, min(resolve_idx, len(events))):
-            event = events[i]
-            if event.symbol != request.symbol:
-                continue
-            event_price = self._price_for_event(event)
-            if event_price is not None:
-                latest_price = event_price
-                latest_timestamp = event.timestamp_ns
-
         # Scan from resolve_idx for the first same-symbol priced event:
         # that event triggers censored=False (mirrors _label_slow's early-return).
         for i in range(resolve_idx, len(events)):
@@ -86,7 +73,28 @@ class ForwardDriftLabeler:
             if event_price is not None:
                 return self._build_label(request, event.timestamp_ns, event_price, censored=False)
 
-        return self._build_label(request, latest_timestamp, latest_price, censored=True)
+        # Only a right-censored request needs a pre-horizon price. Walk
+        # backward to the most recent priced event instead of scanning every
+        # dense quote between the transition and its horizon.
+        for i in range(min(resolve_idx, len(events)) - 1, start_idx - 1, -1):
+            event = events[i]
+            if event.symbol != request.symbol:
+                continue
+            event_price = self._price_for_event(event)
+            if event_price is not None:
+                return self._build_label(
+                    request,
+                    event.timestamp_ns,
+                    event_price,
+                    censored=True,
+                )
+
+        return self._build_label(
+            request,
+            request.start_timestamp_ns,
+            request.reference_price,
+            censored=True,
+        )
 
     def _label_slow(self, request: HorizonLabelRequest, events: Iterable[MarketEvent]) -> DriftLabel:
         """Original O(n) labeling for backward compatibility."""

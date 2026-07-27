@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import asdict
 from datetime import datetime, time, timedelta, timezone
+from hashlib import sha256
+import json
+from random import random
 from threading import RLock
-from time import sleep
-from typing import Any
+from time import perf_counter_ns, sleep, time_ns
+from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
 from l1_microstructure.artifacts import ArtifactBundleSelector, LocalArtifactStore, RunQualityGate
@@ -17,19 +21,31 @@ from l1_microstructure.execution import ExecutionReport, ExecutionRequest
 from l1_microstructure.ingest.interfaces import LiveSubscriptionRequest, MarketDataSource
 from l1_microstructure.live.execution_session import RoutedExecutionService
 from l1_microstructure.live.interfaces import ProductionOrderRouter, RouteAcknowledgement
+from l1_microstructure.live.recovery import (
+    BrokerOpenOrderRecovery,
+    BrokerRecoveryCodec,
+    BrokerRouterRecoveryState,
+)
 from l1_microstructure.monitoring import AlertCategory, AlertSeverity, OperationalAlertManager
-from l1_microstructure.pipeline import L1MicrostructureStateMachine
+from l1_microstructure.pipeline import FrameworkUpdate, L1MicrostructureStateMachine
 from l1_microstructure.risk import OpenPosition
+from l1_microstructure.retry import RetryExecutor, RetryResult
 from l1_microstructure.transitions import EdgeKey
+from l1_microstructure.transparent.artifacts import TransparentArtifactSelector
+from l1_microstructure.transparent.engine import TransparentStatisticalEngine
 
 from .config import OperatingMode, ProductionConfig
-from .alerts import LocalAlertSink
+from .alerts import LedgerAlertStore, LocalAlertSink
 from .ledger import OperationalLedger
 from .lifecycle import LifecycleState, RuntimeLifecycle
+from .readiness import OperationalCheck, RuntimeHealthReport, RuntimeReadinessReport
 
 
 class ProductionRuntime:
     """Owns live engines and keeps broker-facing operation fail closed."""
+
+    BROKER_RECOVERY_STATE_KEY = "broker_router_recovery_state"
+    FRAMEWORK_EVIDENCE_INTERVAL_NS = 1_000_000_000
 
     def __init__(
         self,
@@ -40,6 +56,9 @@ class ProductionRuntime:
         framework_config: FrameworkConfig | None = None,
         ledger: OperationalLedger | None = None,
         alert_sink: LocalAlertSink | None = None,
+        wait: Callable[[float], None] = sleep,
+        retry_clock: Callable[[], int] = time_ns,
+        retry_random_source: Callable[[], float] = random,
     ):
         self.config = config
         self.source = source
@@ -49,7 +68,10 @@ class ProductionRuntime:
         self.framework_config = framework_config or FrameworkConfig()
         self.ledger = ledger or OperationalLedger(config.database_path)
         self.alert_sink = alert_sink or LocalAlertSink()
-        self.alerts = OperationalAlertManager(self.alert_sink)
+        self.alerts = OperationalAlertManager(self.alert_sink, store=LedgerAlertStore(self.ledger))
+        self._wait = wait
+        self._retry_clock = retry_clock
+        self._retry_random_source = retry_random_source
         persisted_state = self.ledger.get_state("lifecycle_state", LifecycleState.STOPPED.value)
         initial = LifecycleState.HALTED if persisted_state == LifecycleState.HALTED.value else LifecycleState.STOPPED
         self.lifecycle = RuntimeLifecycle(initial)
@@ -58,13 +80,27 @@ class ProductionRuntime:
             symbol: str(persisted_models.get(symbol, config.promoted_run_ids[symbol])) for symbol in config.symbols
         }
         self.machines: dict[str, L1MicrostructureStateMachine] = {}
+        self.transparent_shadow_engines: dict[str, TransparentStatisticalEngine] = {}
+        self._shadow_baseline_latencies: deque[int] = deque(maxlen=4096)
+        self._shadow_candidate_latencies: deque[int] = deque(maxlen=4096)
+        self._shadow_candidate_updates = 0
+        self._shadow_resolved_outcomes = 0
+        self._shadow_candidate_errors = 0
+        self._shadow_action_disagreements = 0
+        self._shadow_comparisons = 0
+        self._shadow_late_event_start_counts: dict[str, int] = {}
+        self._campaign_fingerprint: str | None = None
         self.last_event_timestamp_ns: dict[str, int] = {}
         self.first_event_timestamp_ns: dict[str, int] = {}
+        self._pending_framework_update_counts: dict[str, int] = {}
+        self._pending_framework_update_payloads: dict[str, dict[str, Any]] = {}
+        self._last_framework_evidence_timestamp_ns: dict[str, int] = {}
         self._lock = RLock()
         self._running = False
         self._shutdown = False
         self._flatten_started_at_ns: int | None = None
         self._flatten_submitted_symbols: set[str] = set()
+        self._recorded_retry_outcomes: set[tuple[str, int, int, bool]] = set()
 
     def start(self) -> None:
         with self._lock:
@@ -75,20 +111,39 @@ class ProductionRuntime:
                 self._transition(LifecycleState.WARMING, "loading promoted artifacts")
                 self._load_machines()
                 self._transition(LifecycleState.RECONCILING, "reconciling broker and ledger")
+            if not self.machines:
+                self._load_machines()
+            try:
+                self._restore_router_recovery_state()
+            except Exception as exc:
+                self._halt(
+                    f"broker recovery failed: {exc}",
+                    category=AlertCategory.RECONCILIATION,
+                    code="reconciliation_failed",
+                )
+                return
             failure, snapshot = self._reconciliation_failure()
             if failure is not None:
                 broker_disconnected = failure.startswith("broker is not connected")
+                retry_exhausted = self._retry_exhausted(snapshot)
                 self._halt(
                     failure,
                     category=(
                         AlertCategory.BROKER_CONNECTIVITY if broker_disconnected else AlertCategory.RECONCILIATION
                     ),
-                    code="broker_disconnected" if broker_disconnected else "reconciliation_failed",
+                    code=(
+                        "broker_retry_exhausted"
+                        if retry_exhausted
+                        else "broker_disconnected"
+                        if broker_disconnected
+                        else "reconciliation_failed"
+                    ),
+                    metadata={"retry": snapshot.get("retry", {})},
                 )
                 return
-            if not self.machines:
-                self._load_machines()
+            self._record_session_start(net_liquidation=snapshot.get("net_liquidation"))
             self._rehydrate_positions(snapshot)
+            self._persist_positions()
             if self.config.warmup_seconds > 0:
                 self._transition(LifecycleState.WARMING, "reconciliation passed; rebuilding market context")
             else:
@@ -102,33 +157,66 @@ class ProductionRuntime:
         while not self._shutdown:
             if self.lifecycle.state in {LifecycleState.STOPPED, LifecycleState.HALTED, LifecycleState.ERROR}:
                 if self.ledger.get_state("kill_switch", False):
-                    sleep(self.config.reconnect_backoff_seconds)
+                    self._wait(self.config.reconnect_backoff_seconds)
                     continue
                 if not self._wall_clock_start_allowed():
-                    sleep(self.config.reconnect_backoff_seconds)
+                    self._wait(self.config.reconnect_backoff_seconds)
                     continue
                 try:
                     self.start()
                 except BaseException as exc:
                     self._halt(f"runtime startup failed: {exc}", code="runtime_startup_failed")
             if self.lifecycle.state not in {LifecycleState.WARMING, LifecycleState.RUNNING, LifecycleState.FLATTENING}:
-                sleep(self.config.reconnect_backoff_seconds)
+                self._wait(self.config.reconnect_backoff_seconds)
                 continue
-            try:
-                for event in self.source.subscribe_live(request):
-                    if self._shutdown or not self._running:
-                        break
-                    self.process_event(event)
-            except BaseException as exc:
-                self._halt(
-                    f"market-data loop failed: {exc}",
-                    category=AlertCategory.MARKET_DATA,
-                    code="market_data_loop_failed",
-                )
-            finally:
-                self._poll_reports()
+            self._run_market_data_cycle(request)
             if not self._shutdown:
-                sleep(self.config.reconnect_backoff_seconds)
+                self._wait(self.config.reconnect_backoff_seconds)
+
+    def _run_market_data_cycle(self, request: LiveSubscriptionRequest) -> RetryResult[None]:
+        result = RetryExecutor(
+            self.config.retry.market_data,
+            wait=self._wait,
+            classifier=self._market_data_retryable,
+            clock=self._retry_clock,
+            random_source=self._retry_random_source,
+        ).execute(lambda: self._consume_market_data(request))
+        self.ledger.append_event("retry", "market_data_subscription", result.to_dict())
+        if result.failures and result.succeeded and self._running:
+            self.alerts.emit(
+                AlertSeverity.WARNING,
+                AlertCategory.MARKET_DATA,
+                "market_data_retry_recovered",
+                f"market-data subscription recovered after {result.attempts} attempts",
+                metadata=result.to_dict(),
+            )
+        elif not result.succeeded:
+            failure = result.final_failure
+            detail = "unknown failure" if failure is None else f"{failure.error_type}: {failure.error}"
+            self._halt(
+                f"market-data retry exhausted after {result.attempts} attempts: {detail}",
+                category=AlertCategory.MARKET_DATA,
+                code="market_data_retry_exhausted",
+                metadata=result.to_dict(),
+            )
+        return result
+
+    def _consume_market_data(self, request: LiveSubscriptionRequest) -> None:
+        try:
+            for event in self.source.subscribe_live(request):
+                if self._shutdown or not self._running:
+                    return
+                self.process_event(event)
+        finally:
+            self._poll_reports()
+        if not self._shutdown and self._running:
+            raise ConnectionError("market-data subscription ended unexpectedly")
+
+    @staticmethod
+    def _market_data_retryable(error: Exception) -> bool:
+        if isinstance(error, PermissionError):
+            return False
+        return isinstance(error, (TimeoutError, ConnectionError, OSError))
 
     def process_event(self, event: MarketEvent) -> None:
         if event.symbol not in self.machines:
@@ -143,15 +231,10 @@ class ProductionRuntime:
             return
         if self.lifecycle.state is LifecycleState.FLATTENING:
             machine = self.machines[event.symbol]
-            if event.symbol in machine.open_positions and event.symbol not in self._flatten_submitted_symbols:
+            if event.symbol in machine.open_positions:
                 machine.on_event(event)
-                self._route_flatten_symbol(event.symbol, machine)
             self._poll_reports()
-            if not any(machine.open_positions for machine in self.machines.values()) and not self.ledger.open_orders():
-                self._transition(LifecycleState.STOPPED, "flatten complete")
-                self._running = False
-            elif self._flatten_timed_out(event.timestamp_ns):
-                self._halt("flatten timed out with unresolved positions or orders", code="flatten_timeout")
+            self._advance_flatten(event.timestamp_ns)
             return
         session_phase = self._session_phase(event.timestamp_ns)
         self.last_event_timestamp_ns[event.symbol] = event.timestamp_ns
@@ -161,7 +244,13 @@ class ProductionRuntime:
         if daily_loss_reason is not None:
             self._halt(daily_loss_reason, category=AlertCategory.RISK, code="daily_loss_limit_breached")
             return
-        update = self.machines[event.symbol].on_event(event)
+        if event.symbol in self.transparent_shadow_engines:
+            baseline_started = perf_counter_ns()
+            update = self.machines[event.symbol].on_event(event)
+            self._shadow_baseline_latencies.append(max(perf_counter_ns() - baseline_started, 0))
+            self._process_transparent_shadow(event, update)
+        else:
+            update = self.machines[event.symbol].on_event(event)
         risk_engine = getattr(self.machines[event.symbol], "risk_engine", None)
         if bool(getattr(risk_engine, "halted", False)):
             self._halt(
@@ -177,7 +266,7 @@ class ProductionRuntime:
             LifecycleState.RUNNING,
             LifecycleState.PAUSED,
         }:
-            self.flatten()
+            self.flatten(timestamp_ns=event.timestamp_ns)
             return
         if session_phase == "closed" and any(machine.open_positions for machine in self.machines.values()):
             self._halt(
@@ -188,17 +277,7 @@ class ProductionRuntime:
             return
         if update is None:
             return
-        self.ledger.append_event(
-            "market",
-            "framework_update",
-            {
-                "symbol": event.symbol,
-                "timestamp_ns": event.timestamp_ns,
-                "state": update.state.label,
-                "regime": update.regime.dominant_regime.value,
-                "intent": update.intent.action.value if update.intent is not None else None,
-            },
-        )
+        self._record_framework_activity(event, update)
         for request in update.submitted_requests:
             if self._may_route(request):
                 self._route(request)
@@ -239,7 +318,7 @@ class ProductionRuntime:
         self.ledger.append_event("model", "promoted", {"symbol": symbol, "run_id": run_id})
         self.machines = {}
 
-    def flatten(self) -> None:
+    def flatten(self, *, timestamp_ns: int | None = None) -> None:
         if self.lifecycle.state not in {LifecycleState.WARMING, LifecycleState.RUNNING, LifecycleState.PAUSED}:
             raise ValueError("flatten requires a warming, running, or paused runtime")
         self._transition(LifecycleState.FLATTENING, "flatten requested")
@@ -247,14 +326,48 @@ class ProductionRuntime:
         self._flatten_submitted_symbols = set()
         for order_id in self._router_open_order_ids():
             self.execution_service.cancel(order_id)
+        self._poll_reports()
+        self._advance_flatten(timestamp_ns)
+
+    def _advance_flatten(self, timestamp_ns: int | None) -> None:
+        if self.lifecycle.state is not LifecycleState.FLATTENING:
+            return
+        open_orders = self.ledger.open_orders()
+        if open_orders:
+            self.ledger.append_event(
+                "lifecycle",
+                "flatten_pending",
+                {"open_order_count": len(open_orders), "position_count": self._open_position_count()},
+            )
+            if timestamp_ns is not None and self._flatten_timed_out(timestamp_ns):
+                self._halt("flatten timed out with unresolved positions or orders", code="flatten_timeout")
+            return
+
+        # Every previously submitted flatten is terminal at this point. A cancelled
+        # flatten may leave a position, so permit one fresh request for that symbol.
+        self._flatten_submitted_symbols.clear()
         for symbol, machine in self.machines.items():
             self._route_flatten_symbol(symbol, machine)
-        self._poll_reports()
-        if any(machine.open_positions for machine in self.machines.values()):
-            self.ledger.append_event("lifecycle", "flatten_pending", {})
-        else:
-            self._transition(LifecycleState.STOPPED, "flatten complete")
-            self._running = False
+
+        if self.ledger.open_orders() or self._open_position_count() > 0:
+            self.ledger.append_event(
+                "lifecycle",
+                "flatten_pending",
+                {
+                    "open_order_count": len(self.ledger.open_orders()),
+                    "position_count": self._open_position_count(),
+                },
+            )
+            if timestamp_ns is not None and self._flatten_timed_out(timestamp_ns):
+                self._halt("flatten timed out with unresolved positions or orders", code="flatten_timeout")
+            return
+
+        self._transition(LifecycleState.STOPPED, "flatten complete")
+        self._running = False
+        self._record_session_close(timestamp_ns)
+
+    def _open_position_count(self) -> int:
+        return sum(len(machine.open_positions) for machine in self.machines.values())
 
     def _route_flatten_symbol(self, symbol: str, machine: L1MicrostructureStateMachine) -> None:
         position = machine.open_positions.get(symbol)
@@ -276,6 +389,7 @@ class ProductionRuntime:
     def stop(self) -> None:
         self._shutdown = True
         self._running = False
+        self._flush_framework_activity()
         if self.lifecycle.state is LifecycleState.RUNNING:
             self.pause("runtime stopping")
         self.execution_service.stop()
@@ -307,10 +421,178 @@ class ProductionRuntime:
             },
             "broker": self._router_health(),
             "alerts": self.recent_alerts(20),
+            "alert_delivery": self.alerts.delivery_diagnostics(20),
+            "alert_persistence": self.alerts.persistence_diagnostics(20),
         }
+
+    def health_report(self, *, timestamp_ns: int | None = None) -> RuntimeHealthReport:
+        observed_at_ns = time_ns() if timestamp_ns is None else int(timestamp_ns)
+        try:
+            self.ledger.get_state("lifecycle_state")
+        except Exception as exc:
+            ledger_check = OperationalCheck(
+                "ledger.readable",
+                False,
+                "operational ledger is unavailable",
+                details={"error_type": type(exc).__name__},
+            )
+        else:
+            ledger_check = OperationalCheck("ledger.readable", True, "operational ledger is readable")
+        persistence = self.alerts.persistence_diagnostics(20)
+        delivery = self.alerts.delivery_diagnostics(20)
+        checks = (
+            OperationalCheck("daemon.responding", True, "daemon control process is responding"),
+            ledger_check,
+            self._alert_diagnostic_check("alerts.persistence", persistence),
+            self._alert_diagnostic_check("alerts.delivery", delivery),
+        )
+        return RuntimeHealthReport.from_checks(observed_at_ns, checks)
+
+    def readiness_report(self, *, timestamp_ns: int | None = None) -> RuntimeReadinessReport:
+        observed_at_ns = time_ns() if timestamp_ns is None else int(timestamp_ns)
+        lifecycle = self.lifecycle.state
+        checks: list[OperationalCheck] = [
+            OperationalCheck(
+                "runtime.lifecycle_running",
+                lifecycle is LifecycleState.RUNNING,
+                "runtime permits new entries"
+                if lifecycle is LifecycleState.RUNNING
+                else "runtime does not permit new entries",
+                details={"lifecycle": lifecycle.value},
+            )
+        ]
+        try:
+            kill_switch = bool(self.ledger.get_state("kill_switch", False))
+        except Exception as exc:
+            checks.append(
+                OperationalCheck(
+                    "safety.kill_switch_clear",
+                    False,
+                    "kill-switch state is unavailable",
+                    details={"error_type": type(exc).__name__},
+                )
+            )
+        else:
+            checks.append(
+                OperationalCheck(
+                    "safety.kill_switch_clear",
+                    not kill_switch,
+                    "persistent kill switch is clear" if not kill_switch else "persistent kill switch is active",
+                )
+            )
+        loaded_symbols = sorted(set(self.machines).intersection(self.config.symbols))
+        models_loaded = set(loaded_symbols) == set(self.config.symbols)
+        checks.append(
+            OperationalCheck(
+                "models.loaded",
+                models_loaded,
+                "promoted models are loaded" if models_loaded else "one or more promoted models are not loaded",
+                details={"loaded_symbols": loaded_symbols, "required_symbols": list(self.config.symbols)},
+            )
+        )
+        checks.extend(self._market_context_checks(observed_at_ns))
+        snapshot = self._reconciliation_snapshot()
+        broker_connected = bool(snapshot.get("connected"))
+        checks.append(
+            OperationalCheck(
+                "broker.connected",
+                broker_connected,
+                "broker is connected" if broker_connected else "broker is not connected",
+                details={"status": snapshot.get("status", "unknown")},
+            )
+        )
+        reconciliation_failure = self._readiness_reconciliation_failure(snapshot)
+        checks.append(
+            OperationalCheck(
+                "broker.reconciled",
+                reconciliation_failure is None,
+                "broker and ledger state reconcile" if reconciliation_failure is None else reconciliation_failure,
+            )
+        )
+        checks.extend(
+            (
+                self._alert_diagnostic_check(
+                    "alerts.persistence", self.alerts.persistence_diagnostics(20), required=False
+                ),
+                self._alert_diagnostic_check("alerts.delivery", self.alerts.delivery_diagnostics(20), required=False),
+            )
+        )
+        return RuntimeReadinessReport.from_checks(observed_at_ns, lifecycle.value, tuple(checks))
 
     def recent_alerts(self, limit: int = 100) -> list[dict[str, Any]]:
         return self.alerts.recent_dicts(limit)
+
+    def _market_context_checks(self, observed_at_ns: int) -> tuple[OperationalCheck, OperationalCheck]:
+        missing_symbols = [symbol for symbol in self.config.symbols if symbol not in self.last_event_timestamp_ns]
+        stale_symbols = [
+            symbol
+            for symbol in self.config.symbols
+            if symbol in self.last_event_timestamp_ns
+            and (observed_at_ns - self.last_event_timestamp_ns[symbol]) / 1_000_000_000
+            > self.config.event_stale_after_seconds
+        ]
+        market_data_fresh = not missing_symbols and not stale_symbols
+        required_ns = int(self.config.warmup_seconds * 1_000_000_000)
+        incomplete_warmup = [
+            symbol
+            for symbol in self.config.symbols
+            if symbol not in self.first_event_timestamp_ns
+            or symbol not in self.last_event_timestamp_ns
+            or self.last_event_timestamp_ns[symbol] - self.first_event_timestamp_ns[symbol] < required_ns
+        ]
+        return (
+            OperationalCheck(
+                "market_data.fresh",
+                market_data_fresh,
+                "market data is fresh for every symbol" if market_data_fresh else "market data is missing or stale",
+                details={"missing_symbols": missing_symbols, "stale_symbols": stale_symbols},
+            ),
+            OperationalCheck(
+                "market_data.warmup_complete",
+                not incomplete_warmup,
+                "market context warmup is complete" if not incomplete_warmup else "market context warmup is incomplete",
+                details={"incomplete_symbols": incomplete_warmup},
+            ),
+        )
+
+    def _readiness_reconciliation_failure(self, snapshot: dict[str, Any]) -> str | None:
+        if not snapshot.get("connected"):
+            return "broker state is unavailable for reconciliation"
+        try:
+            ledger_external_ids = {
+                str(order["external_order_id"]) for order in self.ledger.open_orders() if order.get("external_order_id")
+            }
+            broker_order_ids = {str(value) for value in snapshot.get("open_order_ids", [])}
+            if ledger_external_ids != broker_order_ids:
+                return "open orders do not reconcile"
+            expected_positions = self.ledger.get_state("strategy_positions", {})
+            broker_positions = snapshot.get("positions", {})
+            for symbol in self.config.symbols:
+                expected_quantity = float(expected_positions.get(symbol, 0.0))
+                broker_quantity = float(dict(broker_positions.get(symbol, {})).get("quantity", 0.0))
+                if expected_quantity != broker_quantity:
+                    return f"position does not reconcile for {symbol}"
+        except Exception as exc:
+            return f"reconciliation state is unavailable ({type(exc).__name__})"
+        if self.config.mode is OperatingMode.LIVE and snapshot.get("net_liquidation") is None:
+            return "live broker net liquidation is unavailable"
+        return None
+
+    @staticmethod
+    def _alert_diagnostic_check(
+        code: str,
+        diagnostics: dict[str, Any],
+        *,
+        required: bool = True,
+    ) -> OperationalCheck:
+        failure_count = int(diagnostics.get("failure_count", 0))
+        return OperationalCheck(
+            code,
+            failure_count == 0,
+            "no failures recorded" if failure_count == 0 else f"{failure_count} failure(s) recorded",
+            required=required,
+            details={"failure_count": failure_count},
+        )
 
     def _load_machines(self) -> None:
         selector = ArtifactBundleSelector(LocalArtifactStore(self.config.artifact_root))
@@ -326,11 +608,115 @@ class ProductionRuntime:
             )
             for symbol in self.config.symbols
         }
+        self.transparent_shadow_engines = {}
+        artifact_hashes: dict[str, dict[str, str]] = {}
+        store = LocalArtifactStore(self.config.artifact_root)
+        baseline_artifact_hashes = {
+            symbol: {
+                kind: str(store.load_metadata(artifact_id).payload_hash)
+                for kind, artifact_id in machine.runtime_artifacts.artifact_ids.items()
+            }
+            for symbol, machine in self.machines.items()
+        }
+        if self.config.transparent_shadow_run_ids:
+            transparent_selector = TransparentArtifactSelector(store)
+            for symbol, run_id in self.config.transparent_shadow_run_ids.items():
+                artifacts = transparent_selector.resolve(symbol=symbol, run_id=run_id, passing_only=True)
+                self.transparent_shadow_engines[symbol] = TransparentStatisticalEngine(
+                    artifacts,
+                    self.framework_config,
+                )
+                artifact_hashes[symbol] = {
+                    kind: str(store.load_metadata(artifact_id).payload_hash)
+                    for kind, artifact_id in artifacts.artifact_ids.items()
+                }
+        fingerprint_payload = {
+            "engine_version": "v2",
+            "routing_engine_version": "v1",
+            "transparent_shadow_run_ids": self.config.transparent_shadow_run_ids,
+            "artifact_hashes": artifact_hashes,
+            "baseline_artifact_hashes": baseline_artifact_hashes,
+            "framework_config": asdict(self.framework_config),
+            "production_config": self.config.public_dict(),
+        }
+        self._campaign_fingerprint = (
+            sha256(json.dumps(fingerprint_payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+            if self.transparent_shadow_engines
+            else None
+        )
+
+    def _process_transparent_shadow(self, event: MarketEvent, baseline_update) -> None:
+        engine = self.transparent_shadow_engines.get(event.symbol)
+        if engine is None:
+            return
+        started = perf_counter_ns()
+        try:
+            candidate_update = engine.on_event(event)
+        except Exception:
+            self._shadow_candidate_errors += 1
+            candidate_update = None
+        self._shadow_candidate_latencies.append(max(perf_counter_ns() - started, 0))
+        if candidate_update is not None:
+            self._shadow_candidate_updates += 1
+            self._shadow_resolved_outcomes += len(getattr(candidate_update, "resolved_outcomes", ()))
+        if baseline_update is None and candidate_update is None:
+            return
+        baseline_action = (
+            TradeAction.HOLD
+            if baseline_update is None or baseline_update.intent is None
+            else baseline_update.intent.action
+        )
+        candidate_action = TradeAction.HOLD if candidate_update is None else candidate_update.action
+        self._shadow_comparisons += 1
+        self._shadow_action_disagreements += int(baseline_action is not candidate_action)
+
+    @staticmethod
+    def _p95(values: deque[int]) -> float:
+        if not values:
+            return 0.0
+        ordered = sorted(values)
+        return float(ordered[min(int(0.95 * (len(ordered) - 1)), len(ordered) - 1)])
+
+    def _record_transparent_shadow_summary(self, *, timestamp) -> None:
+        if not self.transparent_shadow_engines:
+            return
+        self.ledger.append_event(
+            "model",
+            "transparent_shadow_summary",
+            {
+                "engine_version": "v2",
+                "routing_engine_version": "v1",
+                "validation_passed": True,
+                "campaign_fingerprint": self._campaign_fingerprint,
+                "promoted_run_ids": dict(self.config.transparent_shadow_run_ids),
+                "candidate_update_count": self._shadow_candidate_updates,
+                "resolved_outcome_count": self._shadow_resolved_outcomes,
+                "pending_outcome_count": sum(
+                    int(getattr(getattr(engine, "outcomes", None), "pending_count", 0))
+                    for engine in self.transparent_shadow_engines.values()
+                ),
+                "candidate_error_count": self._shadow_candidate_errors,
+                "candidate_late_event_count": sum(
+                    max(
+                        int(getattr(engine, "late_event_count", 0))
+                        - self._shadow_late_event_start_counts.get(symbol, 0),
+                        0,
+                    )
+                    for symbol, engine in self.transparent_shadow_engines.items()
+                ),
+                "comparison_count": self._shadow_comparisons,
+                "action_disagreement_rate": self._shadow_action_disagreements / max(self._shadow_comparisons, 1),
+                "baseline_p95_latency_ns": self._p95(self._shadow_baseline_latencies),
+                "candidate_p95_latency_ns": self._p95(self._shadow_candidate_latencies),
+            },
+            timestamp=timestamp,
+        )
 
     def _reconciliation_failure(self) -> tuple[str | None, dict[str, Any]]:
         if self.ledger.get_state("kill_switch", False):
             return "persistent kill switch is active", {}
         health = self._reconciliation_snapshot()
+        self._record_router_retry_outcomes(health)
         if not health.get("connected"):
             return f"broker is not connected: {health.get('error') or health.get('status')}", health
         ledger_external_ids = {
@@ -350,6 +736,13 @@ class ProductionRuntime:
             )
         expected_positions = self.ledger.get_state("strategy_positions", {})
         broker_positions = health.get("positions", {})
+        unexpected_positions = {
+            symbol: float(dict(payload).get("quantity", 0.0))
+            for symbol, payload in dict(broker_positions).items()
+            if symbol not in self.config.symbols and float(dict(payload).get("quantity", 0.0)) != 0.0
+        }
+        if unexpected_positions:
+            return f"broker account contains unexpected positions: {unexpected_positions}", health
         for symbol in self.config.symbols:
             expected_quantity = float(expected_positions.get(symbol, 0.0))
             broker_quantity = float(dict(broker_positions.get(symbol, {})).get("quantity", 0.0))
@@ -358,10 +751,8 @@ class ProductionRuntime:
                     f"position reconciliation mismatch for {symbol}: ledger={expected_quantity} broker={broker_quantity}",
                     health,
                 )
-        if self.config.mode is OperatingMode.LIVE and health.get("net_liquidation") is None:
-            return "live reconciliation requires broker net liquidation value", health
-        if health.get("net_liquidation") is not None and self.ledger.get_state("session_start_net_liquidation") is None:
-            self.ledger.set_state("session_start_net_liquidation", float(health["net_liquidation"]))
+        if health.get("net_liquidation") is None:
+            return "reconciliation requires broker net liquidation value", health
         return None, health
 
     def _rehydrate_positions(self, snapshot: dict[str, Any]) -> None:
@@ -395,35 +786,92 @@ class ProductionRuntime:
         self._transition(LifecycleState.RUNNING, "runtime enabled")
 
     def _reconciliation_snapshot(self) -> dict[str, Any]:
-        snapshot = self.execution_service.reconciliation_snapshot()
+        try:
+            snapshot = self.execution_service.reconciliation_snapshot()
+        except Exception as exc:
+            return {
+                "connected": False,
+                "status": "reconciliation_query_failed",
+                "error": str(exc),
+                "retry": self._router_retry_diagnostics(),
+            }
         return snapshot or {"connected": False, "status": "invalid reconciliation snapshot"}
 
     def _may_route(self, request: ExecutionRequest) -> bool:
         machine = self.machines[request.symbol]
         position = machine.open_positions.get(request.symbol)
-        is_exit = position is not None and position.side is not request.action
-        if not is_exit and not self.lifecycle.permits_entries:
-            return False
-        session_phase = self._session_phase(request.decision_timestamp_ns)
-        if not is_exit and session_phase != "entries":
-            self.ledger.append_event("risk", "order_blocked", {"reason": session_phase, "symbol": request.symbol})
-            return False
-        if not is_exit and self._would_breach_exposure(request):
+        if self._has_working_order(request.symbol):
             self.ledger.append_event(
-                "risk", "order_blocked", {"reason": "production exposure limit", "symbol": request.symbol}
+                "risk",
+                "order_blocked",
+                {
+                    "reason": "working order already exists for symbol",
+                    "symbol": request.symbol,
+                    "client_order_id": request.client_order_id,
+                },
             )
             return False
-        if not is_exit and request.action is TradeAction.SELL and not self.config.risk.allow_shorting:
-            self.ledger.append_event("risk", "order_blocked", {"reason": "shorting disabled", "symbol": request.symbol})
+
+        signed_position = 0.0
+        if position is not None:
+            signed_position = position.quantity * (1.0 if position.side is TradeAction.BUY else -1.0)
+        signed_request = request.quantity * (1.0 if request.action is TradeAction.BUY else -1.0)
+        resulting_position = signed_position + signed_request
+        is_pure_exit = (
+            signed_position != 0.0
+            and signed_position * signed_request < 0.0
+            and signed_position * resulting_position >= 0.0
+            and abs(resulting_position) < abs(signed_position)
+        )
+        if not is_pure_exit and not self.lifecycle.permits_entries:
+            self.ledger.append_event(
+                "risk",
+                "order_blocked",
+                {
+                    "reason": f"lifecycle_{self.lifecycle.state.value}",
+                    "symbol": request.symbol,
+                    "client_order_id": request.client_order_id,
+                },
+            )
+            return False
+        session_phase = self._session_phase(request.decision_timestamp_ns)
+        if not is_pure_exit and session_phase != "entries":
+            self.ledger.append_event(
+                "risk",
+                "order_blocked",
+                {"reason": session_phase, "symbol": request.symbol, "client_order_id": request.client_order_id},
+            )
+            return False
+        if not is_pure_exit and self._would_breach_exposure(request):
+            self.ledger.append_event(
+                "risk",
+                "order_blocked",
+                {
+                    "reason": "production exposure limit",
+                    "symbol": request.symbol,
+                    "client_order_id": request.client_order_id,
+                },
+            )
+            return False
+        if resulting_position < 0.0 and not self.config.risk.allow_shorting:
+            self.ledger.append_event(
+                "risk",
+                "order_blocked",
+                {"reason": "shorting disabled", "symbol": request.symbol, "client_order_id": request.client_order_id},
+            )
             return False
         return True
 
     def _route(self, request: ExecutionRequest) -> None:
+        recovery_request = BrokerRecoveryCodec.request_to_dict(request)
         payload = {
+            "client_order_id": request.client_order_id,
             "symbol": request.symbol,
             "action": request.action.value,
             "quantity": request.quantity,
             "decision_timestamp_ns": request.decision_timestamp_ns,
+            "recovery_request": recovery_request,
+            "recovered_filled_quantity": 0.0,
         }
 
         def record_intent(current: ExecutionRequest) -> None:
@@ -450,33 +898,157 @@ class ProductionRuntime:
             before_submit=record_intent,
             after_submit=record_acknowledgement,
         )
+        self._persist_router_recovery_state()
 
     def _poll_reports(self) -> None:
         if self._shutdown or self.lifecycle.state is LifecycleState.STOPPED:
             return
         health = self._router_health()
+        self._record_router_retry_outcomes(health)
         if not health.get("connected"):
+            retry_exhausted = self._retry_exhausted(health)
             self._halt(
                 f"broker disconnected: {health.get('error') or health.get('status')}",
                 category=AlertCategory.BROKER_CONNECTIVITY,
-                code="broker_disconnected",
+                code="broker_retry_exhausted" if retry_exhausted else "broker_disconnected",
+                metadata={"retry": health.get("retry", {})},
             )
             return
-        self.execution_service.poll(
+        reports = self.execution_service.poll(
             self.config.symbols,
             consumer_for_symbol=self.machines.get,
             after_report=self._record_execution_report,
         )
-        self._persist_positions()
+        if reports:
+            self._persist_positions()
+            self._persist_router_recovery_state()
+
+    def _persist_router_recovery_state(self) -> None:
+        state = self.execution_service.snapshot_recovery_state()
+        if state is None:
+            self.ledger.set_state(self.BROKER_RECOVERY_STATE_KEY, None)
+            return
+        if not isinstance(state, BrokerRouterRecoveryState):
+            raise TypeError("production router returned an unsupported recovery state")
+        self.ledger.set_state(self.BROKER_RECOVERY_STATE_KEY, BrokerRecoveryCodec.to_dict(state))
+
+    def _restore_router_recovery_state(self) -> None:
+        payload = self.ledger.get_state(self.BROKER_RECOVERY_STATE_KEY)
+        ledger_orders = self.ledger.open_orders()
+        if any(not order.get("external_order_id") for order in ledger_orders):
+            raise RuntimeError("ledger contains an open order without a broker acknowledgement")
+        ledger_external_ids = {
+            str(order["external_order_id"]) for order in ledger_orders if order.get("external_order_id")
+        }
+        if payload is None and not ledger_orders:
+            return
+        state = None if payload is None else BrokerRecoveryCodec.from_dict(payload)
+        state_external_ids = set() if state is None else {order.external_order_id for order in state.open_orders}
+        if state_external_ids != ledger_external_ids:
+            state = self._recovery_state_from_ledger(ledger_orders)
+        self.execution_service.validate_recovery_state(state, self.config.symbols)
+        restored_position_details = self._restore_position_details_from_ledger()
+        self.execution_service.restore_recovery_state(state)
+        reports = self.execution_service.poll(
+            self.config.symbols,
+            consumer_for_symbol=self.machines.get,
+            after_report=self._record_execution_report,
+        )
+        if reports:
+            expected_positions = self.ledger.get_state("strategy_positions", {})
+            if any(float(quantity) != 0.0 for quantity in expected_positions.values()) and not restored_position_details:
+                raise RuntimeError("recovered fills require durable strategy position details")
+            self._persist_positions()
+        self._persist_router_recovery_state()
+        reconciliations = self.execution_service.recovery_reconciliations()
+        self.ledger.append_event(
+            "reconciliation",
+            "broker_recovery_restored",
+            {
+                "open_order_count": len(self._router_open_order_ids()),
+                "recovered_report_count": len(reports),
+                "orders": [asdict(item) for item in reconciliations],
+            },
+        )
+
+    @staticmethod
+    def _recovery_state_from_ledger(ledger_orders: list[dict[str, Any]]) -> BrokerRouterRecoveryState:
+        recovered_orders = []
+        for order in ledger_orders:
+            external_order_id = order.get("external_order_id")
+            payload = dict(order.get("payload", {}))
+            request_payload = payload.get("recovery_request")
+            if not external_order_id or not isinstance(request_payload, dict):
+                raise RuntimeError("ledger open order is missing durable broker recovery data")
+            recovered_orders.append(
+                BrokerOpenOrderRecovery(
+                    external_order_id=str(external_order_id),
+                    request=BrokerRecoveryCodec.request_from_dict(request_payload),
+                    filled_quantity=float(payload.get("recovered_filled_quantity", 0.0)),
+                )
+            )
+        state = BrokerRouterRecoveryState(open_orders=recovered_orders)
+        BrokerRecoveryCodec.validate(state)
+        return state
+
+    def _restore_position_details_from_ledger(self) -> bool:
+        details = self.ledger.get_state("strategy_position_details", {})
+        if not details:
+            return False
+        expected_positions = {
+            str(symbol): float(quantity)
+            for symbol, quantity in dict(self.ledger.get_state("strategy_positions", {})).items()
+            if float(quantity) != 0.0
+        }
+        detailed_positions = {
+            str(symbol): (1.0 if TradeAction(str(payload["side"])) is TradeAction.BUY else -1.0)
+            * float(payload["quantity"])
+            for symbol, payload in dict(details).items()
+        }
+        if detailed_positions != expected_positions:
+            raise RuntimeError("durable strategy position details do not match ledger quantities")
+        for symbol, payload in dict(details).items():
+            if symbol not in self.machines:
+                continue
+            current = dict(payload)
+            self.machines[symbol].open_positions[symbol] = OpenPosition(
+                symbol=symbol,
+                side=TradeAction(str(current["side"])),
+                quantity=int(current["quantity"]),
+                entry_price=float(current["entry_price"]),
+                entry_timestamp_ns=int(current["entry_timestamp_ns"]),
+            )
+        return True
+
+    def _has_working_order(self, symbol: str) -> bool:
+        return any(str(order.get("payload", {}).get("symbol", "")).upper() == symbol for order in self.ledger.open_orders())
 
     def _record_execution_report(self, report: ExecutionReport) -> None:
         if report.client_order_id:
             ledger_status = "partial_filled" if report.reason == "broker reported partial fill" else report.status
+            current_order = next(
+                (
+                    order
+                    for order in self.ledger.open_orders()
+                    if order["client_order_id"] == report.client_order_id
+                ),
+                None,
+            )
+            payload = dict((current_order or {}).get("payload", {}))
+            recovered_filled_quantity = float(payload.get("recovered_filled_quantity", 0.0))
+            if report.status == "filled":
+                recovered_filled_quantity += float(report.quantity)
+            payload.update(
+                {
+                    "latest_report": asdict(report),
+                    "recovered_filled_quantity": recovered_filled_quantity,
+                }
+            )
             self.ledger.update_order(
                 report.client_order_id,
                 ledger_status,
                 external_order_id=report.external_order_id,
-                payload=asdict(report),
+                payload=payload,
             )
         self.ledger.append_event("order", "execution_report", asdict(report))
         if report.status == "rejected":
@@ -489,13 +1061,135 @@ class ProductionRuntime:
 
     def _persist_positions(self) -> None:
         positions: dict[str, float] = {}
+        details: dict[str, dict[str, Any]] = {}
         for symbol, machine in self.machines.items():
             position = machine.open_positions.get(symbol)
             if position is None:
                 continue
             direction = 1.0 if position.side is TradeAction.BUY else -1.0
             positions[symbol] = direction * float(position.quantity)
+            details[symbol] = {
+                "symbol": position.symbol,
+                "side": position.side.value,
+                "quantity": position.quantity,
+                "entry_price": position.entry_price,
+                "entry_timestamp_ns": position.entry_timestamp_ns,
+            }
         self.ledger.set_state("strategy_positions", positions)
+        self.ledger.set_state("strategy_position_details", details)
+
+    def _record_session_close(self, timestamp_ns: int | None = None) -> None:
+        observed_at_ns = (
+            int(datetime.now(timezone.utc).timestamp() * 1_000_000_000) if timestamp_ns is None else int(timestamp_ns)
+        )
+        session_phase = self._session_phase(observed_at_ns)
+        if session_phase not in {"flatten", "closed"}:
+            return
+        local = datetime.fromtimestamp(observed_at_ns / 1_000_000_000, timezone.utc).astimezone(
+            ZoneInfo(self.config.session.timezone)
+        )
+        session_date = local.date().isoformat()
+        if self.ledger.get_state("last_closed_session_date") == session_date:
+            return
+        self._flush_framework_activity()
+        positions = {
+            symbol: (1.0 if position.side is TradeAction.BUY else -1.0) * float(position.quantity)
+            for symbol, machine in self.machines.items()
+            if (position := machine.open_positions.get(symbol)) is not None
+        }
+        event_timestamp = local.astimezone(timezone.utc).isoformat()
+        self._record_transparent_shadow_summary(timestamp=event_timestamp)
+        self.ledger.append_event(
+            "session",
+            "closed",
+            {
+                "session_date": session_date,
+                "timestamp_ns": observed_at_ns,
+                "session_phase": session_phase,
+                "mode": self.config.mode.value,
+                **self._campaign_session_metadata(),
+                "symbols": list(self.config.symbols),
+                "positions": positions,
+                "open_orders": self.ledger.open_orders(),
+            },
+            timestamp=event_timestamp,
+        )
+        self.ledger.set_state("last_closed_session_date", session_date)
+
+    def _record_session_start(
+        self,
+        timestamp_ns: int | None = None,
+        *,
+        net_liquidation: float | None = None,
+    ) -> None:
+        observed_at_ns = (
+            int(datetime.now(timezone.utc).timestamp() * 1_000_000_000) if timestamp_ns is None else int(timestamp_ns)
+        )
+        local = datetime.fromtimestamp(observed_at_ns / 1_000_000_000, timezone.utc).astimezone(
+            ZoneInfo(self.config.session.timezone)
+        )
+        market_open = datetime.combine(local.date(), time.fromisoformat(self.config.session.market_open), local.tzinfo)
+        warmup_start = market_open - timedelta(seconds=self.config.warmup_seconds)
+        market_close = datetime.combine(
+            local.date(), time.fromisoformat(self.config.session.market_close), local.tzinfo
+        )
+        if local.weekday() >= 5 or not warmup_start <= local < market_close:
+            return
+        session_date = local.date().isoformat()
+        if self.ledger.get_state("last_started_session_date") == session_date:
+            if self.transparent_shadow_engines:
+                self.ledger.append_event(
+                    "model",
+                    "transparent_shadow_restart",
+                    {
+                        "session_date": session_date,
+                        "campaign_fingerprint": self._campaign_fingerprint,
+                    },
+                    timestamp=local.astimezone(timezone.utc).isoformat(),
+                )
+            return
+        self._pending_framework_update_counts.clear()
+        self._pending_framework_update_payloads.clear()
+        self._last_framework_evidence_timestamp_ns.clear()
+        self._shadow_baseline_latencies.clear()
+        self._shadow_candidate_latencies.clear()
+        self._shadow_candidate_updates = 0
+        self._shadow_resolved_outcomes = 0
+        self._shadow_candidate_errors = 0
+        self._shadow_action_disagreements = 0
+        self._shadow_comparisons = 0
+        self._shadow_late_event_start_counts = {
+            symbol: int(getattr(engine, "late_event_count", 0))
+            for symbol, engine in self.transparent_shadow_engines.items()
+        }
+        self.ledger.set_state(
+            "session_start_net_liquidation",
+            None if net_liquidation is None else float(net_liquidation),
+        )
+        self.ledger.set_state("session_start_net_liquidation_date", session_date)
+        self.ledger.append_event(
+            "session",
+            "started",
+            {
+                "session_date": session_date,
+                "timestamp_ns": observed_at_ns,
+                "mode": self.config.mode.value,
+                **self._campaign_session_metadata(),
+                "symbols": list(self.config.symbols),
+            },
+            timestamp=local.astimezone(timezone.utc).isoformat(),
+        )
+        self.ledger.set_state("last_started_session_date", session_date)
+
+    def _campaign_session_metadata(self) -> dict[str, object]:
+        if not self.transparent_shadow_engines:
+            return {}
+        return {
+            "engine_version": "v2",
+            "routing_engine_version": "v1",
+            "campaign_fingerprint": self._campaign_fingerprint,
+            "promoted_run_ids": dict(self.config.transparent_shadow_run_ids),
+        }
 
     def _daily_loss_breach(self) -> str | None:
         health = self._router_health()
@@ -511,19 +1205,42 @@ class ProductionRuntime:
     def _would_breach_exposure(self, request: ExecutionRequest) -> bool:
         health = self._router_health()
         net_liquidation = float(health.get("net_liquidation") or self.framework_config.risk.starting_equity)
-        proposed_notional = request.quantity * request.expected_state.book.midpoint
-        symbol_notional = proposed_notional
-        gross_notional = proposed_notional
+        signed_quantities: dict[str, float] = {}
+        marks: dict[str, float] = {}
         for symbol, machine in self.machines.items():
             position = machine.open_positions.get(symbol)
             if position is None:
                 continue
             state = machine.previous_state
             mark = state.book.midpoint if state is not None else position.entry_price
-            notional = position.quantity * mark
-            gross_notional += notional
-            if symbol == request.symbol:
-                symbol_notional += notional
+            signed_quantities[symbol] = position.quantity * (1.0 if position.side is TradeAction.BUY else -1.0)
+            marks[symbol] = mark if mark > 0.0 else net_liquidation
+        for order in self.ledger.open_orders():
+            payload = dict(order.get("payload", {}))
+            symbol = str(payload.get("symbol", "")).upper()
+            if not symbol or symbol not in self.machines:
+                continue
+            quantity = float(payload.get("quantity", 0.0))
+            action = str(payload.get("action", ""))
+            direction = 1.0 if action == TradeAction.BUY.value else -1.0
+            signed_quantities[symbol] = signed_quantities.get(symbol, 0.0) + direction * quantity
+            state = self.machines[symbol].previous_state
+            if state is not None:
+                marks[symbol] = state.book.midpoint
+            else:
+                request_payload = payload.get("recovery_request")
+                if isinstance(request_payload, dict):
+                    try:
+                        marks[symbol] = BrokerRecoveryCodec.request_from_dict(request_payload).expected_state.book.midpoint
+                    except (KeyError, TypeError, ValueError):
+                        # Missing recovery data is handled by reconciliation. Until
+                        # then, an unknown mark must not reduce reserved exposure.
+                        marks[symbol] = net_liquidation
+        direction = 1.0 if request.action is TradeAction.BUY else -1.0
+        signed_quantities[request.symbol] = signed_quantities.get(request.symbol, 0.0) + direction * request.quantity
+        marks[request.symbol] = request.expected_state.book.midpoint
+        gross_notional = sum(abs(quantity) * marks.get(symbol, 0.0) for symbol, quantity in signed_quantities.items())
+        symbol_notional = abs(signed_quantities.get(request.symbol, 0.0)) * marks[request.symbol]
         return (
             gross_notional / max(net_liquidation, 1.0) > self.config.risk.max_gross_exposure
             or symbol_notional / max(net_liquidation, 1.0) > self.config.risk.max_symbol_exposure
@@ -561,7 +1278,7 @@ class ProductionRuntime:
     def _event_is_stale(self, event: MarketEvent) -> bool:
         now_ns = int(datetime.now(timezone.utc).timestamp() * 1_000_000_000)
         lag_seconds = (now_ns - event.timestamp_ns) / 1_000_000_000
-        return lag_seconds > self.config.event_stale_after_seconds
+        return abs(lag_seconds) > self.config.event_stale_after_seconds
 
     def _wall_clock_start_allowed(self) -> bool:
         local = datetime.now(timezone.utc).astimezone(ZoneInfo(self.config.session.timezone))
@@ -575,7 +1292,50 @@ class ProductionRuntime:
         return warmup_start <= local < stop_entries
 
     def _router_health(self) -> dict[str, Any]:
-        return self.execution_service.health() or {"connected": False, "status": "invalid health response"}
+        try:
+            return self.execution_service.health() or {"connected": False, "status": "invalid health response"}
+        except Exception as exc:
+            return {
+                "connected": False,
+                "status": "health_query_failed",
+                "error": str(exc),
+                "retry": self._router_retry_diagnostics(),
+            }
+
+    def _router_retry_diagnostics(self) -> dict[str, Any]:
+        diagnostics = getattr(self.router, "retry_diagnostics", None)
+        return dict(diagnostics()) if callable(diagnostics) else {}
+
+    def _record_router_retry_outcomes(self, payload: dict[str, Any]) -> None:
+        for operation, raw_outcome in dict(payload.get("retry", {})).items():
+            outcome = dict(raw_outcome)
+            failures = list(outcome.get("failures", []))
+            if not failures:
+                continue
+            final_timestamp_ns = int(dict(failures[-1]).get("timestamp_ns", 0))
+            signature = (
+                str(operation),
+                final_timestamp_ns,
+                int(outcome.get("attempts", 0)),
+                bool(outcome.get("succeeded", False)),
+            )
+            if signature in self._recorded_retry_outcomes:
+                continue
+            self._recorded_retry_outcomes.add(signature)
+            self.ledger.append_event("retry", f"broker_{operation}", outcome)
+            if outcome.get("succeeded"):
+                self.alerts.emit(
+                    AlertSeverity.WARNING,
+                    AlertCategory.BROKER_CONNECTIVITY,
+                    f"broker_{operation}_retry_recovered",
+                    f"broker {operation} recovered after {outcome.get('attempts')} attempts",
+                    metadata={"operation": operation, **outcome},
+                )
+
+    @staticmethod
+    def _retry_exhausted(payload: dict[str, Any]) -> bool:
+        retry = payload.get("retry", {})
+        return any(not bool(result.get("succeeded", False)) for result in dict(retry).values())
 
     def _router_open_order_ids(self) -> list[str]:
         return self.execution_service.open_order_ids()
@@ -591,7 +1351,19 @@ class ProductionRuntime:
 
     @staticmethod
     def _validate_router_capabilities(router: ProductionOrderRouter) -> None:
-        required = ("submit", "poll", "stop", "cancel", "open_order_ids", "health_check", "reconciliation_snapshot")
+        required = (
+            "submit",
+            "poll",
+            "stop",
+            "cancel",
+            "open_order_ids",
+            "health_check",
+            "reconciliation_snapshot",
+            "snapshot_recovery_state",
+            "validate_recovery_state",
+            "restore_recovery_state",
+            "recovery_reconciliations",
+        )
         missing = [name for name in required if not callable(getattr(router, name, None))]
         if missing:
             raise TypeError(f"production router is missing required capabilities: {missing}")
@@ -603,7 +1375,20 @@ class ProductionRuntime:
         category: AlertCategory = AlertCategory.RUNTIME,
         code: str = "runtime_halted",
         symbol: str | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
+        self._flush_framework_activity()
+        self.ledger.set_state("kill_switch", True)
+        cancellation_results: dict[str, bool] = {}
+        try:
+            open_order_ids = self._router_open_order_ids()
+        except Exception:
+            open_order_ids = []
+        for order_id in open_order_ids:
+            try:
+                cancellation_results[order_id] = self.execution_service.cancel(order_id)
+            except Exception:
+                cancellation_results[order_id] = False
         if self.lifecycle.state is not LifecycleState.HALTED:
             self._transition(LifecycleState.HALTED, reason)
         self._running = False
@@ -613,13 +1398,52 @@ class ProductionRuntime:
             code,
             reason,
             symbol=symbol,
-            metadata={"lifecycle": self.lifecycle.state.value},
+            metadata={"lifecycle": self.lifecycle.state.value, **dict(metadata or {})},
         )
         self.ledger.append_event(
             "incident",
             "runtime_halted",
-            {"reason": reason, "alert": alert.to_dict() if alert is not None else None},
+            {
+                "reason": reason,
+                "alert": alert.to_dict() if alert is not None else None,
+                "working_order_cancellations": cancellation_results,
+            },
         )
+
+    def _record_framework_activity(self, event: MarketEvent, update: FrameworkUpdate) -> None:
+        """Persist bounded activity evidence without a FULL SQLite commit per market event."""
+        symbol = event.symbol
+        payload = {
+            "symbol": symbol,
+            "timestamp_ns": event.timestamp_ns,
+            "state": update.state.label,
+            "regime": update.regime.dominant_regime.value,
+            "intent": update.intent.action.value if update.intent is not None else None,
+            "submitted_client_order_ids": [request.client_order_id for request in update.submitted_requests],
+        }
+        pending_count = self._pending_framework_update_counts.get(symbol, 0) + 1
+        self._pending_framework_update_counts[symbol] = pending_count
+        self._pending_framework_update_payloads[symbol] = payload
+        previous_timestamp_ns = self._last_framework_evidence_timestamp_ns.get(symbol)
+        interval_elapsed = (
+            previous_timestamp_ns is None
+            or event.timestamp_ns - previous_timestamp_ns >= self.FRAMEWORK_EVIDENCE_INTERVAL_NS
+        )
+        if interval_elapsed or update.submitted_requests:
+            self._persist_framework_activity(symbol)
+
+    def _flush_framework_activity(self) -> None:
+        for symbol in tuple(self._pending_framework_update_counts):
+            self._persist_framework_activity(symbol)
+
+    def _persist_framework_activity(self, symbol: str) -> None:
+        update_count = self._pending_framework_update_counts.pop(symbol, 0)
+        payload = self._pending_framework_update_payloads.pop(symbol, None)
+        if update_count <= 0 or payload is None:
+            return
+        payload["update_count"] = update_count
+        self.ledger.append_event("market", "framework_update", payload)
+        self._last_framework_evidence_timestamp_ns[symbol] = int(payload["timestamp_ns"])
 
     def _transition(self, target: LifecycleState, reason: str) -> None:
         transition = self.lifecycle.transition(target, reason)

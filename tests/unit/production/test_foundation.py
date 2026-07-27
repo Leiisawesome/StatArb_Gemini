@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timezone
 import json
 import pickle
@@ -7,13 +8,34 @@ from types import SimpleNamespace
 
 import pytest
 
+from l1_microstructure.decision import PosteriorEstimate, TradeAction, TradeIntent
 from l1_microstructure.events import QuoteEvent
-from l1_microstructure.live import RouteAcknowledgement, RoutedExecutionService
+from l1_microstructure.execution import ExecutionSimulator
+from l1_microstructure.features import FeatureEngine
+from l1_microstructure.ingest.interfaces import LiveSubscriptionRequest
+from l1_microstructure.live import (
+    BrokerOpenOrderRecovery,
+    BrokerRouterRecoveryState,
+    RouteAcknowledgement,
+    RoutedExecutionService,
+)
+from l1_microstructure.live.recovery import BrokerRecoveryCodec, BrokerRecoveryReconciliation
+from l1_microstructure.monitoring import AlertCategory, AlertSeverity
 from l1_microstructure.artifacts import LocalArtifactStore
-from l1_microstructure.production.config import ModelQualityPolicy, OperatingMode, ProductionConfig
+from l1_microstructure.production.config import (
+    InfrastructureRetryPolicies,
+    ModelQualityPolicy,
+    OperatingMode,
+    ProductionConfig,
+    RiskLimits,
+)
 from l1_microstructure.production.ledger import OperationalLedger
 from l1_microstructure.production.lifecycle import LifecycleState, RuntimeLifecycle
 from l1_microstructure.production.runtime import ProductionRuntime
+from l1_microstructure.retry import RetryPolicy
+from l1_microstructure.regime import MicrostructureRegime
+from l1_microstructure.risk import OpenPosition
+from l1_microstructure.transitions import EdgeKey
 
 
 def _config(tmp_path, **overrides) -> ProductionConfig:
@@ -42,6 +64,39 @@ def test_production_config_rejects_missing_promoted_model(tmp_path) -> None:
         _config(tmp_path, promoted_run_ids={"AAPL": "aapl-v1"})
 
 
+def test_production_config_loads_partial_operation_specific_retry_policy(tmp_path) -> None:
+    path = tmp_path / "production.json"
+    path.write_text(
+        json.dumps(
+            {
+                "symbols": ["AAPL"],
+                "artifact_root": str(tmp_path / "artifacts"),
+                "promoted_run_ids": {"AAPL": "aapl-v1"},
+                "database_path": str(tmp_path / "runtime.sqlite3"),
+                "retry": {"market_data": {"max_attempts": 7}},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    config = ProductionConfig.from_json(path)
+
+    assert config.retry.market_data.max_attempts == 7
+    assert config.retry.market_data.initial_delay_seconds == 1.0
+    assert config.retry.broker_connection.initial_delay_seconds == 0.5
+    assert config.public_dict()["retry"]["market_data"]["max_attempts"] == 7
+
+
+def _retry_policies(*, max_attempts: int = 3) -> InfrastructureRetryPolicies:
+    return InfrastructureRetryPolicies(
+        market_data=RetryPolicy(
+            max_attempts=max_attempts,
+            initial_delay_seconds=1.0,
+            maximum_delay_seconds=2.0,
+        )
+    )
+
+
 def test_operational_ledger_persists_intents_events_and_state(tmp_path) -> None:
     ledger = OperationalLedger(tmp_path / "runtime.sqlite3")
     client_order_id = ledger.record_order_intent({"symbol": "AAPL"}, "client-1")
@@ -54,6 +109,10 @@ def test_operational_ledger_persists_intents_events_and_state(tmp_path) -> None:
     assert reopened.open_orders()[0]["external_order_id"] == "42"
     assert reopened.get_state("kill_switch") is True
     assert reopened.recent_events()[0]["event_type"] == "accepted"
+    assert reopened.recent_events(category="order", event_type="accepted")[0]["payload"] == {
+        "client_order_id": "client-1"
+    }
+    assert reopened.event_count(category="order", event_type="accepted") == 1
     reopened.close()
 
 
@@ -107,6 +166,19 @@ class _Router:
     def reconciliation_snapshot(self):
         return {**self.health_check(), "positions": self.positions, "open_order_ids": []}
 
+    def snapshot_recovery_state(self):
+        return None
+
+    def validate_recovery_state(self, state, symbols=None):
+        if state is not None:
+            raise TypeError("test router does not support recovery state")
+
+    def restore_recovery_state(self, state):
+        self.validate_recovery_state(state)
+
+    def recovery_reconciliations(self):
+        return []
+
     def open_order_ids(self):
         return []
 
@@ -122,6 +194,80 @@ class _Router:
 
     def stop(self):
         return None
+
+
+def _execution_request(symbol: str = "AAPL"):
+    state = FeatureEngine().update(QuoteEvent(symbol, 1_000_000_000, 100.0, 100.02, 300, 300))
+    assert state is not None
+    intent = TradeIntent(
+        action=TradeAction.BUY,
+        edge=EdgeKey(state.label, state.label, MicrostructureRegime.EXECUTION_FLOW),
+        posterior=PosteriorEstimate(3.0, 1.0, 0.75, 0.25, 1.0, 12),
+        expected_holding_time_ns=1_000_000_000,
+        reason="production recovery test",
+    )
+    return ExecutionSimulator().build_request(intent, state, 1)
+
+
+class _RecoverableRouter(_Router):
+    def __init__(self, broker_orders, broker_positions=None):
+        super().__init__()
+        self.broker_orders = broker_orders
+        self.broker_positions = broker_positions if broker_positions is not None else {}
+        self.tracked = {}
+        self.submission_count = 0
+        self.reconciliations = []
+
+    def submit(self, request):
+        self.submission_count += 1
+        external_order_id = f"paper-{self.submission_count}"
+        self.broker_orders[external_order_id] = request
+        self.tracked[external_order_id] = request
+        return RouteAcknowledgement(external_order_id=external_order_id, status="accepted")
+
+    def reconciliation_snapshot(self):
+        return {
+            **self.health_check(),
+            "positions": dict(self.broker_positions),
+            "open_order_ids": list(self.broker_orders),
+        }
+
+    def open_order_ids(self):
+        return list(self.tracked)
+
+    def snapshot_recovery_state(self):
+        return BrokerRouterRecoveryState(
+            open_orders=[
+                BrokerOpenOrderRecovery(external_order_id=order_id, request=request)
+                for order_id, request in self.tracked.items()
+            ]
+        )
+
+    def validate_recovery_state(self, state, symbols=None):
+        BrokerRecoveryCodec.validate(state, symbols)
+
+    def restore_recovery_state(self, state):
+        self.validate_recovery_state(state)
+        self.tracked = {}
+        self.reconciliations = []
+        for recovered in state.open_orders:
+            if recovered.external_order_id not in self.broker_orders:
+                continue
+            self.tracked[recovered.external_order_id] = recovered.request
+            self.reconciliations.append(
+                BrokerRecoveryReconciliation(
+                    recovered.external_order_id,
+                    recovered.request.symbol,
+                    "open",
+                    "broker order rehydrated",
+                )
+            )
+
+    def recovery_reconciliations(self):
+        return list(self.reconciliations)
+
+    def stop(self):
+        self.tracked = {}
 
 
 class _Machine:
@@ -140,12 +286,100 @@ class _Runtime(ProductionRuntime):
         self.machines = {symbol: _Machine() for symbol in self.config.symbols}
 
 
+def test_production_runtime_batches_framework_evidence_without_losing_order_links(tmp_path) -> None:
+    runtime = _Runtime(_config(tmp_path), source=_Source(), router=_Router())
+    state = SimpleNamespace(label="state")
+    regime = SimpleNamespace(dominant_regime=SimpleNamespace(value="calm_liquidity"))
+    update = SimpleNamespace(
+        state=state,
+        regime=regime,
+        intent=None,
+        submitted_requests=[],
+    )
+    base_timestamp_ns = 1_000_000_000
+
+    for index in range(10_000):
+        event = QuoteEvent("AAPL", base_timestamp_ns + index * 1_000_000, 100.0, 100.01, 100, 100)
+        runtime._record_framework_activity(event, update)
+
+    order_update = SimpleNamespace(
+        state=state,
+        regime=regime,
+        intent=SimpleNamespace(action=SimpleNamespace(value="buy")),
+        submitted_requests=[SimpleNamespace(client_order_id="client-1")],
+    )
+    runtime._record_framework_activity(
+        QuoteEvent("AAPL", base_timestamp_ns + 9_999_500_000, 100.0, 100.01, 100, 100),
+        order_update,
+    )
+
+    evidence = runtime.ledger.recent_events(100, category="market", event_type="framework_update")
+
+    assert len(evidence) <= 12
+    assert sum(event["payload"]["update_count"] for event in evidence) == 10_001
+    assert {
+        client_order_id
+        for event in evidence
+        for client_order_id in event["payload"]["submitted_client_order_ids"]
+    } == {"client-1"}
+    runtime._flush_framework_activity()
+    assert runtime.ledger.event_count(category="market", event_type="framework_update") == len(evidence)
+    runtime.stop()
+
+
+def test_production_runtime_persists_broker_state_only_after_reports(tmp_path) -> None:
+    runtime = _Runtime(_config(tmp_path), source=_Source(), router=_Router())
+    runtime.start()
+    persistence_calls: list[str] = []
+    runtime._persist_positions = lambda: persistence_calls.append("positions")
+    runtime._persist_router_recovery_state = lambda: persistence_calls.append("recovery")
+    healthy = lambda: {"connected": True, "status": "healthy"}
+    runtime.execution_service = SimpleNamespace(
+        health=healthy,
+        poll=lambda *args, **kwargs: [],
+        stop=lambda: None,
+    )
+
+    runtime._poll_reports()
+
+    assert persistence_calls == []
+
+    runtime.execution_service = SimpleNamespace(
+        health=healthy,
+        poll=lambda *args, **kwargs: [object()],
+        stop=lambda: None,
+    )
+    runtime._poll_reports()
+
+    assert persistence_calls == ["positions", "recovery"]
+    runtime.stop()
+
+
+class _TransientMarketDataSource(_Source):
+    def __init__(self, failures: list[Exception]) -> None:
+        self.failures = list(failures)
+        self.calls = 0
+        self.runtime = None
+
+    def subscribe_live(self, request):
+        self.calls += 1
+        if self.failures:
+            raise self.failures.pop(0)
+        self.runtime._shutdown = True
+        return []
+
+
 class _Alerts:
     def __init__(self):
         self.messages = []
 
     def critical(self, title, message):
         self.messages.append((title, message))
+
+
+class _FailingAlerts:
+    def critical(self, _title, _message):
+        raise RuntimeError("notification service unavailable")
 
 
 def test_production_runtime_isolates_symbol_engines(tmp_path) -> None:
@@ -158,6 +392,134 @@ def test_production_runtime_isolates_symbol_engines(tmp_path) -> None:
     assert len(runtime.machines["AAPL"].events) == 1
     assert runtime.machines["MSFT"].events == []
     assert runtime.lifecycle.state is LifecycleState.RUNNING
+    runtime.stop()
+
+
+def test_production_runtime_reports_healthy_liveness_and_readiness(tmp_path) -> None:
+    runtime = _Runtime(_config(tmp_path), source=_Source(), router=_Router())
+    runtime.start()
+    timestamp_ns = int(datetime.now(timezone.utc).timestamp() * 1_000_000_000)
+    for symbol in runtime.config.symbols:
+        runtime.process_event(QuoteEvent(symbol, timestamp_ns, 100.0, 100.01, 100, 100))
+
+    health = runtime.health_report(timestamp_ns=timestamp_ns)
+    readiness = runtime.readiness_report(timestamp_ns=timestamp_ns)
+
+    assert health.status.value == "healthy"
+    assert health.alive is True
+    assert readiness.status.value == "healthy"
+    assert readiness.ready is True
+    assert all(check.passed for check in readiness.checks)
+    runtime.stop()
+
+
+def test_production_readiness_reports_partial_multi_symbol_warmup(tmp_path) -> None:
+    runtime = _Runtime(_config(tmp_path, warmup_seconds=1.0), source=_Source(), router=_Router())
+    runtime.start()
+    timestamp_ns = int(datetime.now(timezone.utc).timestamp() * 1_000_000_000)
+    runtime.process_event(QuoteEvent("AAPL", timestamp_ns, 100.0, 100.01, 100, 100))
+    runtime.process_event(QuoteEvent("AAPL", timestamp_ns + 2_000_000_000, 100.0, 100.01, 100, 100))
+
+    report = runtime.readiness_report(timestamp_ns=timestamp_ns + 2_000_000_000)
+    checks = {check.code: check for check in report.checks}
+
+    assert report.ready is False
+    assert report.status.value == "not_ready"
+    assert checks["runtime.lifecycle_running"].passed is False
+    assert checks["market_data.fresh"].details["missing_symbols"] == ["MSFT"]
+    assert checks["market_data.warmup_complete"].details["incomplete_symbols"] == ["MSFT"]
+    runtime.stop()
+
+
+def test_production_readiness_detects_stale_data_and_kill_switch(tmp_path) -> None:
+    runtime = _Runtime(_config(tmp_path, event_stale_after_seconds=1.0), source=_Source(), router=_Router())
+    runtime.start()
+    timestamp_ns = int(datetime.now(timezone.utc).timestamp() * 1_000_000_000)
+    for symbol in runtime.config.symbols:
+        runtime.process_event(QuoteEvent(symbol, timestamp_ns, 100.0, 100.01, 100, 100))
+    runtime.ledger.set_state("kill_switch", True)
+
+    report = runtime.readiness_report(timestamp_ns=timestamp_ns + 2_000_000_000)
+    checks = {check.code: check for check in report.checks}
+
+    assert report.ready is False
+    assert checks["safety.kill_switch_clear"].passed is False
+    assert checks["market_data.fresh"].details["stale_symbols"] == ["AAPL", "MSFT"]
+    runtime.stop()
+
+
+def test_market_data_subscription_retries_and_records_recovery(tmp_path) -> None:
+    waits: list[float] = []
+    source = _TransientMarketDataSource([TimeoutError("one"), ConnectionError("two")])
+    runtime = _Runtime(
+        _config(tmp_path, retry=_retry_policies()),
+        source=source,
+        router=_Router(),
+        wait=waits.append,
+        retry_random_source=lambda: 0.5,
+    )
+    source.runtime = runtime
+    runtime.start()
+
+    result = runtime._run_market_data_cycle(LiveSubscriptionRequest(symbols=runtime.config.symbols))
+
+    assert result.succeeded is True
+    assert result.attempts == 3
+    assert source.calls == 3
+    assert waits == [1.0, 2.0]
+    assert runtime.recent_alerts()[0]["code"] == "market_data_retry_recovered"
+    retry_events = [
+        event for event in runtime.ledger.recent_events() if event["event_type"] == "market_data_subscription"
+    ]
+    assert retry_events[0]["payload"]["attempts"] == 3
+    runtime.stop()
+
+
+def test_market_data_retry_exhaustion_halts_with_attempt_metadata(tmp_path) -> None:
+    waits: list[float] = []
+    source = _TransientMarketDataSource([TimeoutError("one"), TimeoutError("two"), TimeoutError("three")])
+    runtime = _Runtime(
+        _config(tmp_path, retry=_retry_policies()),
+        source=source,
+        router=_Router(),
+        wait=waits.append,
+        retry_random_source=lambda: 0.5,
+    )
+    source.runtime = runtime
+    runtime.start()
+
+    result = runtime._run_market_data_cycle(LiveSubscriptionRequest(symbols=runtime.config.symbols))
+
+    assert result.succeeded is False
+    assert result.attempts == 3
+    assert waits == [1.0, 2.0]
+    assert runtime.lifecycle.state is LifecycleState.HALTED
+    alert = runtime.recent_alerts()[0]
+    assert alert["code"] == "market_data_retry_exhausted"
+    assert alert["metadata"]["attempts"] == 3
+    runtime.stop()
+
+
+def test_market_data_permission_failure_is_not_retried(tmp_path) -> None:
+    waits: list[float] = []
+    source = _TransientMarketDataSource([PermissionError("invalid API entitlement")])
+    runtime = _Runtime(
+        _config(tmp_path, retry=_retry_policies()),
+        source=source,
+        router=_Router(),
+        wait=waits.append,
+    )
+    source.runtime = runtime
+    runtime.start()
+
+    result = runtime._run_market_data_cycle(LiveSubscriptionRequest(symbols=runtime.config.symbols))
+
+    assert result.succeeded is False
+    assert result.attempts == 1
+    assert source.calls == 1
+    assert waits == []
+    assert result.final_failure is not None
+    assert result.final_failure.retryable is False
     runtime.stop()
 
 
@@ -175,6 +537,50 @@ def test_production_runtime_halts_on_position_reconciliation_mismatch(tmp_path) 
     runtime.stop()
 
 
+def test_production_runtime_surfaces_nonfatal_alert_delivery_failure(tmp_path) -> None:
+    router = _Router({"AAPL": {"quantity": 10, "average_cost": 100.0}})
+    runtime = _Runtime(_config(tmp_path), source=_Source(), router=router, alert_sink=_FailingAlerts())
+
+    runtime.start()
+
+    status = runtime.status()
+    assert status["lifecycle"] == "halted"
+    assert status["alerts"][0]["code"] == "reconciliation_failed"
+    assert status["alert_delivery"]["failure_count"] == 1
+    failure = status["alert_delivery"]["recent_failures"][0]
+    assert failure["alert_key"] == "reconciliation:reconciliation_failed:*"
+    assert failure["error_type"] == "RuntimeError"
+    health = runtime.health_report()
+    assert health.alive is True
+    assert health.status.value == "degraded"
+    assert {check.code: check for check in health.checks}["alerts.delivery"].passed is False
+    runtime.stop()
+
+
+def test_production_readiness_remains_eligible_but_degraded_after_notification_failure(tmp_path) -> None:
+    runtime = _Runtime(_config(tmp_path), source=_Source(), router=_Router(), alert_sink=_FailingAlerts())
+    runtime.start()
+    timestamp_ns = int(datetime.now(timezone.utc).timestamp() * 1_000_000_000)
+    for symbol in runtime.config.symbols:
+        runtime.process_event(QuoteEvent(symbol, timestamp_ns, 100.0, 100.01, 100, 100))
+    runtime.alerts.emit(
+        AlertSeverity.CRITICAL,
+        AlertCategory.RUNTIME,
+        "notification_test",
+        "notification test",
+        timestamp_ns=timestamp_ns,
+    )
+
+    report = runtime.readiness_report(timestamp_ns=timestamp_ns)
+    delivery = {check.code: check for check in report.checks}["alerts.delivery"]
+
+    assert report.ready is True
+    assert report.status.value == "degraded"
+    assert delivery.required is False
+    assert delivery.passed is False
+    runtime.stop()
+
+
 def test_production_runtime_categorizes_broker_disconnect(tmp_path) -> None:
     class DisconnectedRouter(_Router):
         def health_check(self):
@@ -188,6 +594,70 @@ def test_production_runtime_categorizes_broker_disconnect(tmp_path) -> None:
     alert = runtime.recent_alerts()[0]
     assert alert["category"] == "broker_connectivity"
     assert alert["code"] == "broker_disconnected"
+    readiness = runtime.readiness_report()
+    checks = {check.code: check for check in readiness.checks}
+    assert readiness.ready is False
+    assert checks["broker.connected"].passed is False
+    assert checks["broker.reconciled"].passed is False
+    runtime.stop()
+
+
+def test_production_readiness_detects_post_start_reconciliation_mismatch(tmp_path) -> None:
+    router = _Router()
+    runtime = _Runtime(_config(tmp_path), source=_Source(), router=router)
+    runtime.start()
+    timestamp_ns = int(datetime.now(timezone.utc).timestamp() * 1_000_000_000)
+    for symbol in runtime.config.symbols:
+        runtime.process_event(QuoteEvent(symbol, timestamp_ns, 100.0, 100.01, 100, 100))
+    router.positions = {"AAPL": {"quantity": 10, "average_cost": 100.0}}
+
+    report = runtime.readiness_report(timestamp_ns=timestamp_ns)
+    reconciliation = {check.code: check for check in report.checks}["broker.reconciled"]
+
+    assert report.ready is False
+    assert reconciliation.passed is False
+    assert reconciliation.message == "position does not reconcile for AAPL"
+    runtime.stop()
+
+
+def test_production_runtime_surfaces_broker_retry_exhaustion_metadata(tmp_path) -> None:
+    class RetryExhaustedRouter(_Router):
+        def reconciliation_snapshot(self):
+            return {
+                "connected": False,
+                "status": "reconciliation_retry_exhausted",
+                "error": "operation failed after 3 attempts",
+                "retry": {
+                    "reconciliation": {
+                        "succeeded": False,
+                        "attempts": 3,
+                        "failures": [
+                            {
+                                "attempt": 3,
+                                "timestamp_ns": 123,
+                                "error_type": "TimeoutError",
+                                "error": "account summary delayed",
+                                "retryable": True,
+                                "will_retry": False,
+                                "delay_seconds": 0.0,
+                            }
+                        ],
+                    }
+                },
+            }
+
+    runtime = _Runtime(_config(tmp_path), source=_Source(), router=RetryExhaustedRouter())
+
+    runtime.start()
+
+    alert = runtime.recent_alerts()[0]
+    assert alert["code"] == "broker_retry_exhausted"
+    assert alert["metadata"]["retry"]["reconciliation"]["attempts"] == 3
+    retry_event = next(event for event in runtime.ledger.recent_events() if event["category"] == "retry")
+    assert retry_event["event_type"] == "broker_reconciliation"
+    assert retry_event["payload"]["attempts"] == 3
+    incident = next(event for event in runtime.ledger.recent_events() if event["event_type"] == "runtime_halted")
+    assert incident["payload"]["alert"]["metadata"]["retry"]["reconciliation"]["attempts"] == 3
     runtime.stop()
 
 
@@ -232,13 +702,7 @@ def test_production_runtime_emits_typed_order_rejection_alert(tmp_path) -> None:
 
     runtime = _Runtime(_config(tmp_path), source=_Source(), router=RejectingRouter())
     runtime.start()
-    request = SimpleNamespace(
-        symbol="AAPL",
-        action=SimpleNamespace(value="buy"),
-        quantity=1,
-        decision_timestamp_ns=1,
-        client_order_id="client-1",
-    )
+    request = replace(_execution_request(), client_order_id="client-1")
 
     runtime._route(request)
 
@@ -260,6 +724,159 @@ def test_production_runtime_requires_each_symbol_to_finish_warmup(tmp_path) -> N
         runtime.process_event(QuoteEvent(symbol, timestamp_ns + 2_000_000_000, 100.0, 100.01, 100, 100))
 
     assert runtime.lifecycle.state is LifecycleState.RUNNING
+    runtime.stop()
+
+
+def test_production_runtime_blocks_premarket_entry_after_context_ingest(tmp_path) -> None:
+    runtime = _Runtime(
+        _config(
+            tmp_path,
+            symbols=("AAPL",),
+            promoted_run_ids={"AAPL": "aapl-v1"},
+        ),
+        source=_Source(),
+        router=_Router(),
+    )
+    runtime.start()
+    premarket_timestamp_ns = int(
+        datetime(2026, 7, 13, 13, 15, tzinfo=timezone.utc).timestamp() * 1_000_000_000
+    )
+    request = replace(
+        _execution_request(),
+        decision_timestamp_ns=premarket_timestamp_ns,
+        executable_timestamp_ns=premarket_timestamp_ns + 100_000_000,
+    )
+
+    assert runtime._may_route(request) is False
+    blocked = runtime.ledger.recent_events(1, category="risk", event_type="order_blocked")[0]
+    assert blocked["payload"] == {
+        "reason": "closed",
+        "symbol": "AAPL",
+        "client_order_id": request.client_order_id,
+    }
+    assert runtime.router.requests == []
+    runtime.stop()
+
+
+def test_production_runtime_records_authoritative_paper_session_close(tmp_path) -> None:
+    runtime = _Runtime(_config(tmp_path), source=_Source(), router=_Router())
+    runtime.start()
+    flatten_timestamp_ns = int(datetime(2026, 7, 13, 19, 58, tzinfo=timezone.utc).timestamp() * 1_000_000_000)
+
+    runtime.flatten(timestamp_ns=flatten_timestamp_ns)
+
+    close_event = runtime.ledger.recent_events(1, category="session", event_type="closed")[0]
+    assert close_event["payload"]["session_date"] == "2026-07-13"
+    assert close_event["payload"]["mode"] == "paper"
+    assert close_event["payload"]["positions"] == {}
+    assert close_event["payload"]["open_orders"] == []
+    runtime.stop()
+
+
+def test_production_runtime_durably_restores_open_order_without_resubmission(tmp_path) -> None:
+    config = _config(
+        tmp_path,
+        symbols=("AAPL",),
+        promoted_run_ids={"AAPL": "aapl-v1"},
+    )
+    broker_orders = {}
+    first_router = _RecoverableRouter(broker_orders)
+    first = _Runtime(config, source=_Source(), router=first_router)
+    first.start()
+    first._route(_execution_request())
+
+    assert first_router.submission_count == 1
+    assert len(first.ledger.open_orders()) == 1
+    assert "recovery_request" in first.ledger.open_orders()[0]["payload"]
+    first.ledger.set_state(first.BROKER_RECOVERY_STATE_KEY, None)
+    first.stop()
+    first.ledger.close()
+
+    recovered_router = _RecoverableRouter(broker_orders)
+    recovered = _Runtime(config, source=_Source(), router=recovered_router)
+    recovered.start()
+
+    assert recovered.lifecycle.state is LifecycleState.RUNNING
+    assert recovered_router.submission_count == 0
+    assert recovered_router.open_order_ids() == ["paper-1"]
+    assert recovered.ledger.open_orders()[0]["external_order_id"] == "paper-1"
+    event = recovered.ledger.recent_events(1, category="reconciliation", event_type="broker_recovery_restored")[0]
+    assert event["payload"]["open_order_count"] == 1
+    assert event["payload"]["orders"][0]["status"] == "open"
+    recovered.stop()
+
+
+def test_production_runtime_preserves_position_before_open_exit_order_reconciliation(tmp_path) -> None:
+    config = _config(
+        tmp_path,
+        symbols=("AAPL",),
+        promoted_run_ids={"AAPL": "aapl-v1"},
+    )
+    broker_orders = {}
+    broker_positions = {}
+    first_router = _RecoverableRouter(broker_orders, broker_positions)
+    first = _Runtime(config, source=_Source(), router=first_router)
+    first.start()
+    position = OpenPosition("AAPL", TradeAction.BUY, 1, 100.0, 1_000_000_000)
+    first.machines["AAPL"].open_positions["AAPL"] = position
+    first._persist_positions()
+    broker_positions["AAPL"] = {"quantity": 1.0, "average_cost": 100.0}
+    buy_request = _execution_request()
+    sell_request = replace(
+        buy_request,
+        action=TradeAction.SELL,
+        intent=replace(buy_request.intent, action=TradeAction.SELL),
+    )
+    first._route(sell_request)
+    first.stop()
+    first.ledger.close()
+
+    recovered_router = _RecoverableRouter(broker_orders, broker_positions)
+    recovered = _Runtime(config, source=_Source(), router=recovered_router)
+    recovered.start()
+
+    assert recovered.lifecycle.state is LifecycleState.RUNNING
+    assert recovered.ledger.get_state("strategy_positions") == {"AAPL": 1.0}
+    assert recovered.machines["AAPL"].open_positions["AAPL"].quantity == 1
+    assert recovered_router.submission_count == 0
+    recovered.stop()
+
+
+def test_production_runtime_halts_on_unacknowledged_durable_intent(tmp_path) -> None:
+    config = _config(
+        tmp_path,
+        symbols=("AAPL",),
+        promoted_run_ids={"AAPL": "aapl-v1"},
+    )
+    ledger = OperationalLedger(config.database_path)
+    ledger.record_order_intent({"symbol": "AAPL"}, "ambiguous-intent")
+    ledger.close()
+    router = _RecoverableRouter({})
+    runtime = _Runtime(config, source=_Source(), router=router)
+
+    runtime.start()
+
+    assert runtime.lifecycle.state is LifecycleState.HALTED
+    assert runtime.recent_alerts()[0]["code"] == "reconciliation_failed"
+    assert router.submission_count == 0
+    runtime.stop()
+
+
+def test_production_runtime_records_one_regular_hours_session_start(tmp_path) -> None:
+    runtime = _Runtime(_config(tmp_path), source=_Source(), router=_Router())
+    session_timestamp_ns = int(datetime(2026, 7, 13, 14, 0, tzinfo=timezone.utc).timestamp() * 1_000_000_000)
+
+    runtime._record_session_start(session_timestamp_ns)
+    runtime._record_session_start(session_timestamp_ns + 1_000_000_000)
+
+    start_events = runtime.ledger.recent_events(5, category="session", event_type="started")
+    assert len(start_events) == 1
+    assert start_events[0]["payload"] == {
+        "session_date": "2026-07-13",
+        "timestamp_ns": session_timestamp_ns,
+        "mode": "paper",
+        "symbols": ["AAPL", "MSFT"],
+    }
     runtime.stop()
 
 
@@ -304,3 +921,147 @@ def test_production_promotion_requires_passing_quality_gate(tmp_path, monkeypatc
     assert calls[0][0:2] == ("AAPL", "approved-run")
     assert calls[0][2].minimum_fill_rate == 0.5
     assert runtime.promoted_run_ids["AAPL"] == "approved-run"
+
+
+def test_production_runtime_reserves_working_orders_in_effective_exposure(tmp_path) -> None:
+    config = _config(
+        tmp_path,
+        risk=RiskLimits(max_gross_exposure=0.0015, max_symbol_exposure=0.0015),
+    )
+    router = _RecoverableRouter({})
+    runtime = _Runtime(config, source=_Source(), router=router)
+    runtime.start()
+    rth_timestamp_ns = int(datetime(2026, 7, 13, 15, 0, tzinfo=timezone.utc).timestamp() * 1_000_000_000)
+    first = replace(
+        _execution_request("AAPL"),
+        decision_timestamp_ns=rth_timestamp_ns,
+        executable_timestamp_ns=rth_timestamp_ns,
+    )
+    second = replace(
+        _execution_request("MSFT"),
+        decision_timestamp_ns=rth_timestamp_ns,
+        executable_timestamp_ns=rth_timestamp_ns,
+    )
+
+    runtime._route(first)
+
+    duplicate = replace(first, client_order_id="duplicate-aapl")
+    assert runtime._may_route(duplicate) is False
+    assert runtime._may_route(second) is False
+    reasons = {
+        event["payload"]["reason"]
+        for event in runtime.ledger.recent_events(5, category="risk", event_type="order_blocked")
+    }
+    assert "working order already exists for symbol" in reasons
+    assert "production exposure limit" in reasons
+    runtime.stop()
+
+
+def test_production_runtime_does_not_treat_reversal_as_pure_exit(tmp_path) -> None:
+    runtime = _Runtime(
+        _config(tmp_path, symbols=("AAPL",), promoted_run_ids={"AAPL": "aapl-v1"}),
+        source=_Source(),
+        router=_Router(),
+    )
+    runtime.start()
+    runtime.machines["AAPL"].open_positions["AAPL"] = OpenPosition(
+        "AAPL", TradeAction.BUY, 1, 100.0, 1_000_000_000
+    )
+    rth_timestamp_ns = int(datetime(2026, 7, 13, 15, 0, tzinfo=timezone.utc).timestamp() * 1_000_000_000)
+    buy = _execution_request()
+    reversal = replace(
+        buy,
+        action=TradeAction.SELL,
+        quantity=2,
+        intent=replace(buy.intent, action=TradeAction.SELL),
+        decision_timestamp_ns=rth_timestamp_ns,
+        executable_timestamp_ns=rth_timestamp_ns,
+    )
+
+    assert runtime._may_route(reversal) is False
+    blocked = runtime.ledger.recent_events(1, category="risk", event_type="order_blocked")[0]
+    assert blocked["payload"]["reason"] == "shorting disabled"
+    runtime.stop()
+
+
+def test_flatten_waits_for_terminal_cancellation_before_stopping(tmp_path) -> None:
+    router = _RecoverableRouter({})
+    runtime = _Runtime(
+        _config(tmp_path, symbols=("AAPL",), promoted_run_ids={"AAPL": "aapl-v1"}),
+        source=_Source(),
+        router=router,
+    )
+    runtime.start()
+    runtime._route(_execution_request())
+
+    runtime.flatten()
+
+    assert runtime.lifecycle.state is LifecycleState.FLATTENING
+    assert runtime.ledger.open_orders()
+    assert not runtime.ledger.recent_events(1, category="session", event_type="closed")
+    runtime.stop()
+
+
+def test_daily_loss_baseline_resets_only_at_new_session_boundary(tmp_path) -> None:
+    runtime = _Runtime(_config(tmp_path), source=_Source(), router=_Router())
+    first = int(datetime(2026, 7, 13, 14, 0, tzinfo=timezone.utc).timestamp() * 1_000_000_000)
+    second = int(datetime(2026, 7, 14, 14, 0, tzinfo=timezone.utc).timestamp() * 1_000_000_000)
+
+    runtime._record_session_start(first, net_liquidation=100_000.0)
+    runtime._record_session_start(first + 1_000_000_000, net_liquidation=99_000.0)
+    assert runtime.ledger.get_state("session_start_net_liquidation") == 100_000.0
+
+    runtime._record_session_start(second, net_liquidation=101_000.0)
+    assert runtime.ledger.get_state("session_start_net_liquidation") == 101_000.0
+    assert runtime.ledger.get_state("session_start_net_liquidation_date") == "2026-07-14"
+    runtime.stop()
+
+
+def test_non_operator_halt_latches_kill_switch_and_cancels_orders(tmp_path) -> None:
+    router = _RecoverableRouter({})
+    runtime = _Runtime(
+        _config(tmp_path, symbols=("AAPL",), promoted_run_ids={"AAPL": "aapl-v1"}),
+        source=_Source(),
+        router=router,
+    )
+    runtime.start()
+    runtime._route(_execution_request())
+
+    runtime._halt("risk incident", code="risk_incident")
+
+    assert runtime.lifecycle.state is LifecycleState.HALTED
+    assert runtime.ledger.get_state("kill_switch") is True
+    incident = runtime.ledger.recent_events(1, category="incident", event_type="runtime_halted")[0]
+    assert incident["payload"]["working_order_cancellations"] == {"paper-1": True}
+    runtime.stop()
+
+
+def test_reconciliation_rejects_unexpected_account_positions(tmp_path) -> None:
+    runtime = _Runtime(
+        _config(tmp_path, symbols=("AAPL",), promoted_run_ids={"AAPL": "aapl-v1"}),
+        source=_Source(),
+        router=_Router(positions={"SPY": {"quantity": 1.0, "average_cost": 500.0}}),
+    )
+
+    runtime.start()
+
+    assert runtime.lifecycle.state is LifecycleState.HALTED
+    assert "unexpected positions" in runtime.recent_alerts()[0]["message"]
+    runtime.stop()
+
+
+def test_production_runtime_rejects_future_dated_market_data(tmp_path) -> None:
+    runtime = _Runtime(
+        _config(tmp_path, event_stale_after_seconds=1.0),
+        source=_Source(),
+        router=_Router(),
+    )
+    runtime.start()
+    future_timestamp_ns = int(datetime.now(timezone.utc).timestamp() * 1_000_000_000) + 2_000_000_000
+
+    runtime.process_event(QuoteEvent("AAPL", future_timestamp_ns, 100.0, 100.01, 100, 100))
+
+    assert runtime.lifecycle.state is LifecycleState.HALTED
+    assert runtime.recent_alerts()[0]["code"] == "stale_market_data"
+    assert runtime.ledger.get_state("kill_switch") is True
+    runtime.stop()
