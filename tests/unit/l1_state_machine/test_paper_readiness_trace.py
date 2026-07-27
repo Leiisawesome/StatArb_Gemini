@@ -20,6 +20,7 @@ from l1_microstructure.live.source import SourceBackedPaperRunner
 from l1_microstructure.live.interfaces import RunnerConfig
 from l1_microstructure.pipeline import FrameworkUpdate, L1MicrostructureStateMachine
 from l1_microstructure.risk import RiskEngine
+from l1_microstructure.validation import RollingValidationHarness
 from l1_microstructure.workflow import ArtifactDrivenResearchWorkflow
 from tests.unit.l1_state_machine.support import FixtureMarketDataSource as InMemoryMassiveDataSource
 
@@ -29,8 +30,25 @@ def _et_ns(year: int, month: int, day: int, hour: int, minute: int, second: int 
     return int(timestamp.timestamp() * 1_000_000_000)
 
 
+def _permissive_workflow(tmp_path, config: FrameworkConfig) -> ArtifactDrivenResearchWorkflow:
+    """Match post-merge unit suite: tiny fixtures cannot satisfy production validation thresholds."""
+    return ArtifactDrivenResearchWorkflow(
+        tmp_path,
+        framework_config=config,
+        validation_harness=RollingValidationHarness(
+            minimum_fill_rate=0.0,
+            maximum_cancel_rate=1.0,
+            maximum_drift_tracking_error_bps=float("inf"),
+            minimum_directional_test_rows=0,
+            bootstrap_sample_count=0,
+            minimum_bootstrap_hit_rate_lower_bound=0.0,
+            minimum_bootstrap_decay_ratio_lower_bound=0.0,
+        ),
+    )
+
+
 def _make_source() -> InMemoryMassiveDataSource:
-    # Same fixture shape as test_bundle_selection_and_source_runner (enough for validation pass).
+    # Same fixture shape as test_bundle_selection_and_source_runner.
     return InMemoryMassiveDataSource(
         [
             {
@@ -90,7 +108,7 @@ def _workflow_bundle(tmp_path):
     events = list(source.subscribe_live(LiveSubscriptionRequest(symbols=("AAPL",))))
     config = FrameworkConfig()
     config.transition.mahalanobis_threshold = 0.0
-    workflow = ArtifactDrivenResearchWorkflow(tmp_path, framework_config=config)
+    workflow = _permissive_workflow(tmp_path, config)
     result = workflow.run(symbol="AAPL", events=events)
     return source, config, workflow, result
 
