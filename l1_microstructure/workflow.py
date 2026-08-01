@@ -7,7 +7,6 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
-from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -16,6 +15,7 @@ from .config import FrameworkConfig
 from .datasets import DatasetSlice, PipelineTransitionDatasetBuilder
 from .events import MarketEvent
 from .live import RunnerConfig, SimulatorPaperTradingRunner
+from .market_session import market_session_date
 from .monitoring import InMemoryMonitoringSink
 from .validation import RegimeSplitSpec, RollingValidationHarness, ValidationReport
 from .calibration import (
@@ -372,8 +372,7 @@ class ArtifactDrivenResearchWorkflow:
 
     @staticmethod
     def _session_date(timestamp_ns: int) -> str:
-        timestamp = datetime.fromtimestamp(timestamp_ns / 1_000_000_000.0, tz=timezone.utc)
-        return timestamp.astimezone(ZoneInfo("America/New_York")).date().isoformat()
+        return market_session_date(timestamp_ns)
 
     @classmethod
     def _session_dates(cls, events: list[MarketEvent]) -> tuple[str, ...]:

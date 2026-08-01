@@ -228,6 +228,12 @@ def test_execution_calibration_artifact_changes_fill_surface() -> None:
     assert artifact.alignment_weight >= 1.0
     assert artifact.regime_fill_multipliers["execution_flow"] > artifact.regime_fill_multipliers["liquidity_shock"]
     assert artifact.regime_slippage_multipliers["liquidity_shock"] >= artifact.regime_slippage_multipliers["execution_flow"]
+    assert (
+        2.0
+        * artifact.adverse_selection_weight
+        * max(artifact.regime_slippage_multipliers.values())
+        <= 0.50
+    )
 
 
 def test_feature_engine_uses_regime_conditioned_state_surface_when_hint_is_available() -> None:

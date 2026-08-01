@@ -124,10 +124,18 @@ class SemiMarkovRegimeTrainer:
         *,
         train_start_ns: int,
         train_end_ns: int,
+        session_ids: Iterable[str] | None = None,
     ) -> SemiMarkovRegimeModel:
         observations = tuple(states)
+        resolved_session_ids = (
+            tuple(session_ids)
+            if session_ids is not None
+            else tuple("" for _ in observations)
+        )
         if len(observations) < len(REGIME_ORDER) * 2:
             raise ValueError("semi-Markov fitting requires at least two samples per regime")
+        if len(resolved_session_ids) != len(observations):
+            raise ValueError("semi-Markov session identities must align with observations")
         if any(state.symbol != vector_model.symbol for state in observations):
             raise ValueError("semi-Markov states do not match the state-vector model symbol")
         if any(not train_start_ns <= state.timestamp_ns <= train_end_ns for state in observations):
@@ -154,13 +162,22 @@ class SemiMarkovRegimeTrainer:
             self.dirichlet_alpha,
             dtype=float,
         )
-        for previous, current in zip(regime_assignments[:-1], regime_assignments[1:]):
-            transition_counts[previous, current] += 1.0
+        for index, (previous, current) in enumerate(
+            zip(regime_assignments[:-1], regime_assignments[1:])
+        ):
+            if resolved_session_ids[index] == resolved_session_ids[index + 1]:
+                transition_counts[previous, current] += 1.0
         transition_matrix = transition_counts / transition_counts.sum(axis=1, keepdims=True)
         initial_counts = np.full(len(REGIME_ORDER), self.dirichlet_alpha, dtype=float)
-        initial_counts[regime_assignments[0]] += 1.0
+        for index, assignment in enumerate(regime_assignments):
+            if index == 0 or resolved_session_ids[index] != resolved_session_ids[index - 1]:
+                initial_counts[assignment] += 1.0
         initial_probabilities = initial_counts / initial_counts.sum()
-        durations, duration_shapes = self._fit_duration_models(observations, regime_assignments)
+        durations, duration_shapes = self._fit_duration_models(
+            observations,
+            regime_assignments,
+            resolved_session_ids,
+        )
         return SemiMarkovRegimeModel(
             symbol=vector_model.symbol,
             feature_names=STATE_VECTOR_FEATURES,
@@ -178,6 +195,7 @@ class SemiMarkovRegimeTrainer:
                 "trainer": "semantically_anchored_semi_markov_trainer",
                 "fit_method": "deterministic_kmeans_diagonal_emissions",
                 "duration_fit_method": "weibull_moment_shape",
+                "session_count": len(set(resolved_session_ids)),
                 "semantic_mapping": {
                     str(cluster): REGIME_ORDER[regime] for cluster, regime in sorted(cluster_to_regime.items())
                 },
@@ -235,16 +253,31 @@ class SemiMarkovRegimeTrainer:
         self,
         states: tuple[ObservedState, ...],
         assignments: np.ndarray,
+        session_ids: tuple[str, ...] | None = None,
     ) -> tuple[list[int], list[float]]:
+        resolved_session_ids = (
+            session_ids
+            if session_ids is not None
+            else tuple("" for _ in states)
+        )
+        if len(resolved_session_ids) != len(states):
+            raise ValueError("duration session identities must align with states")
         deltas = [
             max(current.timestamp_ns - previous.timestamp_ns, 1)
-            for previous, current in zip(states[:-1], states[1:])
+            for index, (previous, current) in enumerate(
+                zip(states[:-1], states[1:])
+            )
+            if resolved_session_ids[index] == resolved_session_ids[index + 1]
         ]
         default_delta = int(np.median(deltas)) if deltas else 1
         runs: dict[int, list[int]] = {index: [] for index in range(len(REGIME_ORDER))}
         run_start = 0
         for index in range(1, len(assignments) + 1):
-            if index < len(assignments) and assignments[index] == assignments[run_start]:
+            if (
+                index < len(assignments)
+                and resolved_session_ids[index] == resolved_session_ids[run_start]
+                and assignments[index] == assignments[run_start]
+            ):
                 continue
             last_timestamp = states[index - 1].timestamp_ns
             duration = max(last_timestamp - states[run_start].timestamp_ns + default_delta, 1)

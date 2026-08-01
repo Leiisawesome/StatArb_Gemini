@@ -21,8 +21,10 @@ from l1_microstructure.calibration import (
 )
 from l1_microstructure.config import FrameworkConfig
 from l1_microstructure.datasets import PipelineTransitionDatasetBuilder
+from l1_microstructure.datasets.interfaces import DatasetSlice
 from l1_microstructure.events import MarketEvent, event_sort_key
 from l1_microstructure.features import FeatureEngine, ObservedState
+from l1_microstructure.market_session import market_session_date
 from l1_microstructure.training import EmpiricalTransitionTrainer
 from l1_microstructure.validation import RegimeSplitSpec
 
@@ -191,9 +193,10 @@ class TransparentArtifactDrivenWorkflow:
     ) -> _FittedWindow:
         if not events:
             raise ValueError("transparent training window contains no events")
-        state_panel, transition_panel = PipelineTransitionDatasetBuilder(
-            events, config=self.config
-        ).build_panels_single_pass(symbol)
+        state_panel, transition_panel = self._build_session_panels(
+            symbol=symbol,
+            events=events,
+        )
         if state_panel.frame.empty or transition_panel.frame.empty:
             raise ValueError("transparent training window produced an empty panel")
         transition_frame = self._resolved_training_rows(
@@ -269,11 +272,82 @@ class TransparentArtifactDrivenWorkflow:
         events: Iterable[MarketEvent],
         state_calibration,
     ) -> tuple[ObservedState, ...]:
-        engine = FeatureEngine(self.config.feature, state_calibration)
-        states = [state for event in events if (state := engine.update(event)) is not None]
+        sessions = self._events_by_session(events)
+        states: list[ObservedState] = []
+        for session_events in sessions.values():
+            engine = FeatureEngine(self.config.feature, state_calibration)
+            states.extend(
+                state
+                for event in session_events
+                if (state := engine.update(event)) is not None
+            )
         if not states:
             raise ValueError("transparent feature fitting produced no states")
         return tuple(states)
+
+    def _build_session_panels(
+        self,
+        *,
+        symbol: str,
+        events: Iterable[MarketEvent],
+    ) -> tuple[DatasetSlice, DatasetSlice]:
+        state_frames: list[pd.DataFrame] = []
+        transition_frames: list[pd.DataFrame] = []
+        session_dates: list[str] = []
+        transition_metadata: dict[str, object] = {}
+        for session_date, session_events in self._events_by_session(events).items():
+            state_panel, transition_panel = PipelineTransitionDatasetBuilder(
+                session_events,
+                config=self.config,
+            ).build_panels_single_pass(symbol)
+            if not state_panel.frame.empty:
+                state_frame = state_panel.frame.copy()
+                state_frame["session_date"] = session_date
+                state_frames.append(state_frame)
+            if not transition_panel.frame.empty:
+                transition_frame = transition_panel.frame.copy()
+                transition_frame["session_date"] = session_date
+                transition_frames.append(transition_frame)
+                transition_metadata = dict(transition_panel.metadata)
+            if not state_panel.frame.empty or not transition_panel.frame.empty:
+                session_dates.append(session_date)
+        if not state_frames or not transition_frames:
+            raise ValueError("transparent training window produced an empty panel")
+        state_frame = pd.concat(state_frames, ignore_index=True)
+        transition_frame = pd.concat(transition_frames, ignore_index=True)
+        return (
+            DatasetSlice(
+                name=f"{symbol}_state_panel",
+                frame=state_frame,
+                metadata={
+                    "row_count": len(state_frame),
+                    "session_count": len(session_dates),
+                    "session_dates": tuple(session_dates),
+                },
+            ),
+            DatasetSlice(
+                name=f"{symbol}_transition_panel",
+                frame=transition_frame,
+                metadata={
+                    **transition_metadata,
+                    "row_count": len(transition_frame),
+                    "session_count": len(session_dates),
+                    "session_dates": tuple(session_dates),
+                },
+            ),
+        )
+
+    @staticmethod
+    def _events_by_session(
+        events: Iterable[MarketEvent],
+    ) -> dict[str, list[MarketEvent]]:
+        sessions: dict[str, list[MarketEvent]] = {}
+        for event in events:
+            sessions.setdefault(
+                market_session_date(event.timestamp_ns),
+                [],
+            ).append(event)
+        return sessions
 
     @staticmethod
     def _resolved_training_rows(
@@ -312,10 +386,34 @@ class TransparentArtifactDrivenWorkflow:
     ) -> list[MarketEvent]:
         return events[bisect_left(timestamps, start_ns) : bisect_right(timestamps, end_ns)]
 
-    @staticmethod
-    def _default_splits(timestamps: tuple[int, ...]) -> list[RegimeSplitSpec]:
+    def _default_splits(self, timestamps: tuple[int, ...]) -> list[RegimeSplitSpec]:
         if len(timestamps) < 10:
             raise ValueError("default transparent validation requires at least ten events")
+        sessions: dict[str, list[int]] = {}
+        for timestamp_ns in timestamps:
+            sessions.setdefault(market_session_date(timestamp_ns), []).append(timestamp_ns)
+        if len(sessions) > 1:
+            minimum_split_count = self.validator.minimum_split_count
+            if len(sessions) < minimum_split_count + 2:
+                raise ValueError(
+                    "cross-session transparent validation requires at least "
+                    f"{minimum_split_count + 2} sessions"
+                )
+            ordered_sessions = tuple(sessions.values())
+            first_test_index = len(ordered_sessions) - minimum_split_count
+            return [
+                RegimeSplitSpec(
+                    train_start=self._iso_timestamp(ordered_sessions[0][0]),
+                    train_end=self._iso_timestamp(ordered_sessions[test_index - 1][-1]),
+                    test_start=self._iso_timestamp(ordered_sessions[test_index][0]),
+                    test_end=self._iso_timestamp(ordered_sessions[test_index][-1]),
+                    label=(
+                        "expanding-"
+                        f"{market_session_date(ordered_sessions[test_index][0])}"
+                    ),
+                )
+                for test_index in range(first_test_index, len(ordered_sessions))
+            ]
         fractions = ((0.4, 0.6), (0.6, 0.8), (0.8, 1.0))
         splits: list[RegimeSplitSpec] = []
         for index, (train_fraction, test_fraction) in enumerate(fractions, start=1):
@@ -331,6 +429,10 @@ class TransparentArtifactDrivenWorkflow:
                 )
             )
         return splits
+
+    @staticmethod
+    def _iso_timestamp(timestamp_ns: int) -> str:
+        return pd.Timestamp(timestamp_ns, unit="ns", tz="UTC").isoformat()
 
     @staticmethod
     def _run_id(symbol: str) -> str:

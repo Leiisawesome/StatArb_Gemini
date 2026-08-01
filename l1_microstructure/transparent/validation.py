@@ -13,6 +13,7 @@ from l1_microstructure.calibration.interfaces import RegimeCalibrationArtifact
 from l1_microstructure.config import FrameworkConfig
 from l1_microstructure.decision import DecisionEngine, TradeAction
 from l1_microstructure.features import ObservedState
+from l1_microstructure.market_session import market_session_date
 from l1_microstructure.regime import RegimeInferencer
 from l1_microstructure.training.interfaces import TransitionTrainingSample
 from l1_microstructure.transitions import TransitionKernel
@@ -321,20 +322,35 @@ def build_common_opportunity_samples(
         raise ValueError("common-opportunity models and states must share one symbol")
     candidate_vector = RobustStateVectorRuntime(candidate_vector_model)
     candidate_regime = SemiMarkovRegimeRuntime(candidate_regime_model, candidate_vector_model)
-    baseline_regime = RegimeInferencer(
-        framework_config.regime,
-        framework_config.feature,
-        baseline_regime_calibration,
-    )
-    baseline_transition = TransitionKernel(framework_config.transition)
-    baseline_transition.load_trained_payload(baseline_transition_payload)
     timestamps = tuple(state.timestamp_ns for state in observations)
+    session_ids = tuple(market_session_date(timestamp_ns) for timestamp_ns in timestamps)
     samples: list[TransitionTrainingSample] = []
-    previous = observations[0]
-    candidate_vector.update(previous)
-    candidate_regime.update(previous)
-    baseline_regime.update(previous)
-    for index, state in enumerate(observations[1:], start=1):
+    previous: ObservedState | None = None
+    baseline_regime: RegimeInferencer | None = None
+    baseline_transition: TransitionKernel | None = None
+    for index, state in enumerate(observations):
+        session_started = (
+            index == 0
+            or session_ids[index] != session_ids[index - 1]
+        )
+        if session_started:
+            candidate_vector.reset()
+            candidate_regime.reset()
+            baseline_regime = RegimeInferencer(
+                framework_config.regime,
+                framework_config.feature,
+                baseline_regime_calibration,
+            )
+            baseline_transition = TransitionKernel(framework_config.transition)
+            baseline_transition.load_trained_payload(baseline_transition_payload)
+            candidate_vector.update(state)
+            candidate_regime.update(state)
+            baseline_regime.update(state)
+            previous = state
+            continue
+        assert previous is not None
+        assert baseline_regime is not None
+        assert baseline_transition is not None
         candidate_regime_posterior = candidate_regime.update(state)
         baseline_regime_posterior = baseline_regime.update(state)
         candidate_transition = candidate_vector.update(state)
@@ -347,7 +363,10 @@ def build_common_opportunity_samples(
             )
             for horizon_ns in framework_config.transition.drift_horizon_ns_values:
                 end_index = bisect_left(timestamps, state.timestamp_ns + horizon_ns, lo=index + 1)
-                if end_index >= len(observations):
+                if (
+                    end_index >= len(observations)
+                    or session_ids[end_index] != session_ids[index]
+                ):
                     continue
                 end_state = observations[end_index]
                 samples.append(
@@ -366,6 +385,7 @@ def build_common_opportunity_samples(
                         metadata={
                             "timestamp_ns": state.timestamp_ns,
                             "end_timestamp_ns": end_state.timestamp_ns,
+                            "session_date": session_ids[index],
                             "threshold_bps": threshold_bps,
                             "candidate_detected": candidate_detected,
                             "candidate_transition_probability": candidate_transition.probability,

@@ -8,6 +8,7 @@ from typing import Iterable, Iterator
 from l1_microstructure.calibration.interfaces import ExecutionCalibrationArtifact, StateCalibrationArtifact
 from l1_microstructure.config import FrameworkConfig
 from l1_microstructure.features import ObservedState
+from l1_microstructure.market_session import market_session_date
 from l1_microstructure.training.interfaces import TransitionTrainingSample
 
 from .edges import HierarchicalTransitionTrainer
@@ -50,28 +51,36 @@ class TransparentModelTrainer:
             raise ValueError("transparent model state crosses the declared training boundary")
         if {state.symbol for state in observations} != {state_calibration.symbol, execution_calibration.symbol}:
             raise ValueError("transparent training artifacts and states must share one symbol")
+        session_ids = tuple(
+            market_session_date(state.timestamp_ns)
+            for state in observations
+        )
         targets = _persistence_targets(
             observations,
             framework_config.transition.drift_horizon_ns,
             framework_config.decision.transaction_cost_bps,
+            session_ids=session_ids,
         )
         vector_model = self.vector_trainer.fit(
             observations,
             targets,
             train_start_ns=train_start_ns,
             train_end_ns=train_end_ns,
+            session_ids=session_ids,
         )
         regime_model = self.regime_trainer.fit(
             observations,
             vector_model,
             train_start_ns=train_start_ns,
             train_end_ns=train_end_ns,
+            session_ids=session_ids,
         )
         transition_samples = candidate_transition_samples(
             observations,
             vector_model,
             regime_model,
             framework_config,
+            session_ids=session_ids,
         )
         transition_model = self.transition_trainer.fit(
             transition_samples,
@@ -108,6 +117,8 @@ class TransparentModelTrainer:
                 "trainer": "transparent_model_trainer",
                 "train_start_ns": int(train_start_ns),
                 "train_end_ns": int(train_end_ns),
+                "training_session_count": len(set(session_ids)),
+                "training_session_dates": tuple(dict.fromkeys(session_ids)),
                 "candidate_transition_sample_count": transition_model.sample_count,
             },
         )
@@ -117,13 +128,28 @@ def _persistence_targets(
     states: tuple[ObservedState, ...],
     horizon_ns: int,
     cost_threshold_bps: float,
+    *,
+    session_ids: tuple[str, ...] | None = None,
 ) -> tuple[bool | None, ...]:
     timestamps = tuple(state.timestamp_ns for state in states)
+    resolved_session_ids = (
+        session_ids
+        if session_ids is not None
+        else tuple(market_session_date(state.timestamp_ns) for state in states)
+    )
+    if len(resolved_session_ids) != len(states):
+        raise ValueError("persistence session identities must align with states")
     targets: list[bool | None] = []
     for index in range(1, len(states)):
         current = states[index]
+        if resolved_session_ids[index] != resolved_session_ids[index - 1]:
+            targets.append(None)
+            continue
         future_index = bisect_left(timestamps, current.timestamp_ns + horizon_ns, lo=index + 1)
-        if future_index >= len(states):
+        if (
+            future_index >= len(states)
+            or resolved_session_ids[future_index] != resolved_session_ids[index]
+        ):
             targets.append(None)
             continue
         future = states[future_index]
@@ -139,19 +165,38 @@ def candidate_transition_samples(
     vector_model,
     regime_model,
     config: FrameworkConfig,
+    *,
+    session_ids: tuple[str, ...] | None = None,
 ) -> Iterator[TransitionTrainingSample]:
     timestamps = tuple(state.timestamp_ns for state in states)
+    resolved_session_ids = (
+        session_ids
+        if session_ids is not None
+        else tuple(market_session_date(state.timestamp_ns) for state in states)
+    )
+    if len(resolved_session_ids) != len(states):
+        raise ValueError("transition session identities must align with states")
     vector_runtime = RobustStateVectorRuntime(vector_model)
     regime_runtime = SemiMarkovRegimeRuntime(regime_model, vector_model)
     for index, state in enumerate(states):
+        session_started = (
+            index == 0
+            or resolved_session_ids[index] != resolved_session_ids[index - 1]
+        )
+        if session_started:
+            vector_runtime.reset()
+            regime_runtime.reset()
         regime = regime_runtime.update(state)
         transition = vector_runtime.update(state)
-        if index == 0:
+        if session_started:
             continue
         previous = states[index - 1]
         for horizon_ns in config.transition.drift_horizon_ns_values:
             end_index = bisect_left(timestamps, state.timestamp_ns + horizon_ns, lo=index + 1)
-            if end_index >= len(states):
+            if (
+                end_index >= len(states)
+                or resolved_session_ids[end_index] != resolved_session_ids[index]
+            ):
                 continue
             end_state = states[end_index]
             drift_bps = (end_state.book.microprice - state.book.microprice) / state.book.microprice * 10_000.0
@@ -166,6 +211,7 @@ def candidate_transition_samples(
                 metadata={
                     "timestamp_ns": state.timestamp_ns,
                     "end_timestamp_ns": end_state.timestamp_ns,
+                    "session_date": resolved_session_ids[index],
                     "threshold_bps": config.decision.transaction_cost_bps
                     + config.decision.risk_premium_bps
                     * max(state.realized_volatility * 10_000.0, 0.1),

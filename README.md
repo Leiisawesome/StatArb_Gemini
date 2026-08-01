@@ -147,6 +147,26 @@ Feature, regime, transition, and replay state reset at every session boundary. A
 `--trade-date` remains available for smoke testing and uses the legacy intraday
 half split.
 
+Build a transparent v2 candidate from at least six completed sessions so its
+two default promotion splits each test a complete unseen session:
+
+```powershell
+python -m l1_microstructure transparent-workflow `
+  --artifact-root output/l1_microstructure_artifacts `
+  --symbol AAPL `
+  --trade-date 2024-03-05 `
+  --trade-date 2024-03-06 `
+  --trade-date 2024-03-07 `
+  --trade-date 2024-03-08 `
+  --trade-date 2024-03-11 `
+  --trade-date 2024-03-12
+```
+
+V2 feature, vector, regime, transition, and label state reset at session
+boundaries. Multi-session validation uses expanding training windows and one
+complete held-out session per split. A one-date run remains an intraday
+diagnostic and is not cross-session promotion evidence.
+
 Inspect saved runs:
 
 ```powershell

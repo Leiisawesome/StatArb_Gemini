@@ -51,7 +51,7 @@ A v2 run contains state and execution calibration, state-vector, semi-Markov reg
 
 ## Research workflow
 
-Use `TransparentArtifactDrivenWorkflow` with at least two non-overlapping rolling splits. Promotion thresholds must be declared before the run.
+Use `TransparentArtifactDrivenWorkflow` with at least two non-overlapping rolling splits. Promotion thresholds must be declared before the run. Production-candidate evidence must span complete sessions: the CLI accepts repeated `--trade-date` values and, with at least six dates, creates two expanding splits with four and five training sessions followed by one untouched session each. All feature, vector, regime, transition, and label state resets at each session boundary. A single-date run is an intraday diagnostic, not cross-session promotion evidence.
 
 ```python
 from l1_microstructure.transparent import (
@@ -65,6 +65,18 @@ workflow = TransparentArtifactDrivenWorkflow(
 )
 result = workflow.run(symbol="AAPL", events=events, splits=splits)
 print(result.validation_report.to_dict())
+```
+
+```powershell
+uv run l1-microstructure transparent-workflow `
+  --artifact-root var/artifacts `
+  --symbol AAPL `
+  --trade-date 2026-07-15 `
+  --trade-date 2026-07-16 `
+  --trade-date 2026-07-17 `
+  --trade-date 2026-07-20 `
+  --trade-date 2026-07-21 `
+  --trade-date 2026-07-22
 ```
 
 Failed runs remain available for audit but `TransparentArtifactSelector(...).resolve(...)` will not load them with its default `passing_only=True` policy.

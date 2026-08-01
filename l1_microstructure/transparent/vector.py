@@ -155,9 +155,15 @@ class RobustStateVectorTrainer:
         *,
         train_start_ns: int,
         train_end_ns: int,
+        session_ids: Iterable[str] | None = None,
     ) -> StateVectorModel:
         observations = tuple(states)
         raw_targets = tuple(transition_targets)
+        resolved_session_ids = (
+            tuple(session_ids)
+            if session_ids is not None
+            else tuple("" for _ in observations)
+        )
         targets = np.asarray(
             [np.nan if value is None else float(bool(value)) for value in raw_targets],
             dtype=float,
@@ -166,7 +172,19 @@ class RobustStateVectorTrainer:
             raise ValueError("robust vector training requires at least three states")
         if len(targets) != len(observations) - 1:
             raise ValueError("transition targets must align with consecutive state increments")
-        resolved_target_mask = np.isfinite(targets)
+        if len(resolved_session_ids) != len(observations):
+            raise ValueError("state-vector session identities must align with observations")
+        within_session_mask = np.asarray(
+            [
+                previous == current
+                for previous, current in zip(
+                    resolved_session_ids[:-1],
+                    resolved_session_ids[1:],
+                )
+            ],
+            dtype=bool,
+        )
+        resolved_target_mask = np.isfinite(targets) & within_session_mask
         if int(np.sum(resolved_target_mask)) < 3:
             raise ValueError("robust vector training requires at least three resolved transition targets")
         symbols = {state.symbol for state in observations}
@@ -188,9 +206,14 @@ class RobustStateVectorTrainer:
         scale = np.where(scale > self.regularization, scale, 1.0)
         standardized = (raw - center) / scale
         increments = np.diff(standardized, axis=0)
-        empirical = np.atleast_2d(np.cov(increments, rowvar=False, ddof=1))
+        within_session_increments = increments[within_session_mask]
+        empirical = np.atleast_2d(
+            np.cov(within_session_increments, rowvar=False, ddof=1)
+        )
         if empirical.shape != (len(STATE_VECTOR_FEATURES), len(STATE_VECTOR_FEATURES)):
-            empirical = np.diag(np.var(increments, axis=0, ddof=1))
+            empirical = np.diag(
+                np.var(within_session_increments, axis=0, ddof=1)
+            )
         diagonal = np.diag(np.diag(empirical))
         covariance = (1.0 - self.covariance_shrinkage) * empirical + self.covariance_shrinkage * diagonal
         covariance += np.eye(covariance.shape[0]) * self.regularization
@@ -243,6 +266,8 @@ class RobustStateVectorTrainer:
                 "calibration_bins": min(self.calibration_bins, int(np.sum(resolved_target_mask))),
                 "resolved_target_count": int(np.sum(resolved_target_mask)),
                 "censored_target_count": int(np.sum(~resolved_target_mask)),
+                "session_count": len(set(resolved_session_ids)),
+                "cross_session_increment_count": int(np.sum(~within_session_mask)),
                 "positive_target_count": positive_target_count,
                 "positive_target_rate": positive_target_count / int(np.sum(resolved_target_mask)),
                 "transition_threshold_strategy": threshold_strategy,

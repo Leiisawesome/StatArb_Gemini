@@ -110,6 +110,25 @@ def test_vector_calibration_excludes_unresolved_targets_instead_of_marking_them_
     assert model.metadata["censored_target_count"] == 3
 
 
+def test_vector_trainer_excludes_cross_session_increment() -> None:
+    states = [_state(index) for index in range(8)]
+
+    model = RobustStateVectorTrainer(
+        calibration_bins=3,
+        transition_probability_threshold=0.25,
+    ).fit(
+        states,
+        [False] * 7,
+        train_start_ns=states[0].timestamp_ns,
+        train_end_ns=states[-1].timestamp_ns,
+        session_ids=("day-1",) * 4 + ("day-2",) * 4,
+    )
+
+    assert model.metadata["session_count"] == 2
+    assert model.metadata["cross_session_increment_count"] == 1
+    assert model.metadata["resolved_target_count"] == 6
+
+
 def test_vector_trainer_learns_selective_threshold_for_rare_targets() -> None:
     states = [_state(index, shock=index >= 18) for index in range(24)]
     targets = [False] * 17 + [True] * 6

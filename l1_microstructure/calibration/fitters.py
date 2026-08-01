@@ -124,6 +124,8 @@ class EmpiricalRegimeCalibrator:
 
 
 class EmpiricalExecutionCalibrator:
+    _MAXIMUM_ROUND_TRIP_ADVERSE_SELECTION_FRACTION = 0.50
+
     def fit(self, dataset: ExecutionCalibrationDataset) -> ExecutionCalibrationArtifact:
         state_frame = dataset.state_features.copy()
         transition_frame = dataset.transition_features.copy()
@@ -145,7 +147,7 @@ class EmpiricalExecutionCalibrator:
         spread_penalty = self._clip(0.035 + 0.085 * wide_share + 0.050 * stressed_share, 0.01, 0.20)
         slippage_intercept_bps = self._clip(max(0.25, drift_median * 0.20), 0.25, 4.0)
         spread_slippage_weight = self._clip(0.35 + 0.80 * wide_share + 0.40 * stressed_share, 0.15, 2.5)
-        adverse_selection_weight = self._clip(max(drift_upper, drift_median) / max(drift_median + 0.50, 0.50), 0.20, 3.0)
+        raw_adverse_selection_weight = max(drift_upper, drift_median) / max(drift_median + 0.50, 0.50)
 
         regime_drift = transition_frame.groupby("regime")["realized_drift_bps"].apply(lambda series: float(series.abs().median()))
         regime_fill_multipliers: dict[str, float] = {}
@@ -167,10 +169,25 @@ class EmpiricalExecutionCalibrator:
                 2.50,
             )
 
+        maximum_regime_slippage_multiplier = max(regime_slippage_multipliers.values(), default=1.0)
+        adverse_selection_weight_cap = self._MAXIMUM_ROUND_TRIP_ADVERSE_SELECTION_FRACTION / max(
+            2.0 * maximum_regime_slippage_multiplier,
+            1.0,
+        )
+        adverse_selection_weight = self._clip(
+            raw_adverse_selection_weight,
+            0.0,
+            adverse_selection_weight_cap,
+        )
         metadata = {
             "row_count": int(len(state_frame)),
             "transition_row_count": int(len(transition_frame)),
             "method": "empirical_execution_surface_v1",
+            "raw_adverse_selection_weight": float(raw_adverse_selection_weight),
+            "adverse_selection_weight_cap": float(adverse_selection_weight_cap),
+            "maximum_round_trip_adverse_selection_fraction": (
+                self._MAXIMUM_ROUND_TRIP_ADVERSE_SELECTION_FRACTION
+            ),
             **dataset.metadata,
         }
         return ExecutionCalibrationArtifact(

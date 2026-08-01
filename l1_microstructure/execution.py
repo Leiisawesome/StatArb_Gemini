@@ -116,6 +116,21 @@ class ExecutionSimulator:
             timestamp_ns=realized_state.timestamp_ns,
         )
 
+    def estimated_round_trip_cost_bps(self, intent: TradeIntent, state: ObservedState) -> float:
+        """Estimate a conservative entry-plus-exit cost at the decision state."""
+        spread_bps = (state.book.spread / max(state.book.midpoint, 1e-6)) * 10_000.0
+        slippage_bps = min(
+            self.config.max_slippage_bps,
+            self._slippage_bps(
+                spread_bps,
+                intent.posterior.mean_bps,
+                intent.posterior.threshold_bps,
+                intent.edge.regime.value,
+            )
+            * self._intent_aggressiveness_scale(intent),
+        )
+        return float(max(spread_bps + 2.0 * slippage_bps, 0.0))
+
     @staticmethod
     def state_alignment_probability(expected_state: ObservedState, realized_state: ObservedState) -> float:
         distance = float(
@@ -215,7 +230,10 @@ class ExecutionSimulator:
         return float(min(max(survival, self.config.queue_survival_floor), 1.0))
 
     def _aggressiveness_scale(self, request: ExecutionRequest) -> float:
-        confidence = min(max(request.intent.observation_confidence, 0.0), 1.0)
+        return self._intent_aggressiveness_scale(request.intent)
+
+    def _intent_aggressiveness_scale(self, intent: TradeIntent) -> float:
+        confidence = min(max(intent.observation_confidence, 0.0), 1.0)
         floor = min(max(self.config.confidence_aggressiveness_floor, 0.0), 1.0)
         return float(floor + (1.0 - floor) * confidence)
 

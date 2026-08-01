@@ -78,19 +78,31 @@ The examples below use PowerShell from the repository root.
      --passing-only
    ```
 
-   If either list is empty, create candidates from an agreed historical full
-   trading day, then repeat the passing-only queries. Publishing a failed run
-   does not make it eligible for the campaign:
+   If either list is empty, create candidates from agreed completed historical
+   sessions, then repeat the passing-only queries. Use at least six dates for
+   transparent v2 so its two default expanding splits each evaluate a complete
+   unseen session after at least four training sessions. A single-date v2 run
+   is diagnostic only. Publishing a failed run does not make it eligible for
+   the campaign:
 
    ```powershell
    uv run l1-microstructure workflow `
      --artifact-root var/artifacts `
      --symbol AAPL `
-     --trade-date YYYY-MM-DD
+     --trade-date 2026-07-14 `
+     --trade-date 2026-07-15 `
+     --trade-date 2026-07-16 `
+     --trade-date 2026-07-17 `
+     --trade-date 2026-07-20
    uv run l1-microstructure transparent-workflow `
      --artifact-root var/artifacts `
      --symbol AAPL `
-     --trade-date YYYY-MM-DD
+     --trade-date 2026-07-13 `
+     --trade-date 2026-07-14 `
+     --trade-date 2026-07-15 `
+     --trade-date 2026-07-16 `
+     --trade-date 2026-07-17 `
+     --trade-date 2026-07-20
    ```
 
 4. In `config/production.json`, verify:

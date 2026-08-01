@@ -175,6 +175,8 @@ def test_cli_transparent_workflow_reports_validation_and_artifacts(tmp_path, cap
                 "AAPL",
                 "--trade-date",
                 "2024-03-11",
+                "--trade-date",
+                "2024-03-12",
                 "--run-id",
                 "aapl-v2-approved",
             ]
@@ -183,6 +185,7 @@ def test_cli_transparent_workflow_reports_validation_and_artifacts(tmp_path, cap
     assert exit_code == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["run_id"] == "aapl-v2-approved"
+    assert payload["trade_dates"] == ["2024-03-11", "2024-03-12"]
     assert payload["validation"] == {"passed": True}
     assert payload["artifact_ids"]["state_vector_model"] == "vector-id"
 

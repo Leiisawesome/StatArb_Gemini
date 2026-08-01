@@ -6,6 +6,7 @@ import pytest
 
 from l1_microstructure.config import FrameworkConfig
 from l1_microstructure.events import QuoteEvent
+from l1_microstructure.market_session import market_session_date
 from l1_microstructure.transparent import (
     PromotionThresholds,
     RobustStateVectorTrainer,
@@ -118,6 +119,31 @@ def test_v2_workflow_rejects_overlapping_train_and_test(tmp_path) -> None:
         TransparentArtifactDrivenWorkflow(tmp_path).run(
             symbol="AAPL", events=events, splits=[split], run_id="bad"
         )
+
+
+def test_v2_default_splits_expand_across_complete_sessions(tmp_path) -> None:
+    day_ns = 24 * 60 * 60 * 1_000_000_000
+    events = [
+        replace(event, timestamp_ns=event.timestamp_ns + day * day_ns)
+        for day in range(6)
+        for event in _events(12)
+    ]
+    workflow = TransparentArtifactDrivenWorkflow(tmp_path)
+
+    splits = workflow._default_splits(
+        tuple(event.timestamp_ns for event in events)
+    )
+
+    assert len(splits) == 2
+    expected_dates = [
+        market_session_date(events[-24].timestamp_ns),
+        market_session_date(events[-12].timestamp_ns),
+    ]
+    assert [split.label for split in splits] == [
+        f"expanding-{session_date}" for session_date in expected_dates
+    ]
+    assert splits[0].train_end < splits[0].test_start
+    assert splits[1].train_end < splits[1].test_start
 
 
 def test_common_oos_opportunities_include_baseline_only_detections(tmp_path) -> None:

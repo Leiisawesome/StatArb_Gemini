@@ -101,7 +101,12 @@ def build_parser() -> argparse.ArgumentParser:
     transparent_workflow_parser = subparsers.add_parser("transparent-workflow")
     transparent_workflow_parser.add_argument("--artifact-root", required=True)
     transparent_workflow_parser.add_argument("--symbol", required=True)
-    transparent_workflow_parser.add_argument("--trade-date", required=True)
+    transparent_workflow_parser.add_argument(
+        "--trade-date",
+        required=True,
+        action="append",
+        help="completed U.S. session date; repeat for expanding cross-session validation",
+    )
     transparent_workflow_parser.add_argument("--run-id", default=None)
     transparent_workflow_parser.add_argument("--transition-threshold", type=float, default=None)
 
@@ -246,28 +251,31 @@ def _run_workflow_command(args: argparse.Namespace) -> int:
 
 def _run_transparent_workflow_command(args: argparse.Namespace) -> int:
     source = _historical_source()
-    events = list(
-        source.load_historical(
-            HistoricalBatchRequest(symbols=(args.symbol,), trade_date=date.fromisoformat(args.trade_date))
+    requested_dates = args.trade_date if isinstance(args.trade_date, list) else [args.trade_date]
+    trade_dates = tuple(sorted({date.fromisoformat(value) for value in requested_dates}))
+    events = [
+        event
+        for trade_date in trade_dates
+        for event in source.load_historical(
+            HistoricalBatchRequest(symbols=(args.symbol,), trade_date=trade_date)
         )
-    )
+    ]
     workflow = TransparentArtifactDrivenWorkflow(
         args.artifact_root,
         framework_config=_framework_config(args.transition_threshold),
     )
     result = workflow.run(symbol=args.symbol, events=events, run_id=args.run_id)
-    print(
-        json.dumps(
-            {
-                "symbol": result.symbol,
-                "run_id": result.run_id,
-                "split_count": result.split_count,
-                "artifact_ids": dict(result.manifest.artifact_ids),
-                "validation": result.validation_report.to_dict(),
-            },
-            sort_keys=True,
-        )
-    )
+    print(json.dumps(
+        {
+            "symbol": result.symbol,
+            "run_id": result.run_id,
+            "split_count": result.split_count,
+            "trade_dates": [value.isoformat() for value in trade_dates],
+            "artifact_ids": dict(result.manifest.artifact_ids),
+            "validation": result.validation_report.to_dict(),
+        },
+        sort_keys=True,
+    ))
     return 0
 
 
