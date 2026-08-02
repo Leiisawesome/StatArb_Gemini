@@ -126,6 +126,93 @@ class TransitionDiagnostic:
     observation_count: int
 
 
+@dataclass(frozen=True, slots=True)
+class SoftEdgeComponent:
+    """One regime-conditioned edge contributing to a soft mixture."""
+
+    regime: MicrostructureRegime
+    weight: float
+    edge: EdgeKey
+    stats: EdgeStatistics
+    diagnostic: TransitionDiagnostic
+
+
+@dataclass(frozen=True, slots=True)
+class SoftEdgeView:
+    """
+    Decision-time mixture of regime-conditioned edges for a fixed (from, to) pair.
+
+    Training still keys edges by a hard regime label; this view only mixes the
+    historical readout using the current regime posterior mass.
+
+    Hard (MAP-only) decisions are the degenerate case: one component with weight 1.
+    """
+
+    from_state: str
+    to_state: str
+    primary_edge: EdgeKey
+    components: tuple[SoftEdgeComponent, ...]
+    effective_count: float
+    effective_training_sessions: float
+    directional_consensus: float
+    cross_session_hit_rate: float
+    cross_session_hit_consensus: float
+    transition_probability: float
+    entropy: float
+    signal_to_noise: float
+    alpha_score: float
+    shrunk_drift_bps: float
+    regime_weights: dict[MicrostructureRegime, float]
+    # Posterior mass on components that have at least one observation.
+    supported_weight: float = 1.0
+
+    @property
+    def diagnostic(self) -> TransitionDiagnostic:
+        return TransitionDiagnostic(
+            edge=self.primary_edge,
+            transition_probability=self.transition_probability,
+            entropy=self.entropy,
+            signal_to_noise=self.signal_to_noise,
+            alpha_score=self.alpha_score,
+            shrunk_drift_bps=self.shrunk_drift_bps,
+            observation_count=int(round(self.effective_count)),
+        )
+
+    @classmethod
+    def from_hard(
+        cls,
+        edge: EdgeKey,
+        stats: EdgeStatistics,
+        diagnostic: TransitionDiagnostic,
+    ) -> SoftEdgeView:
+        """Degenerate single-component view used by the unified decision path."""
+        component = SoftEdgeComponent(
+            regime=edge.regime,
+            weight=1.0,
+            edge=edge,
+            stats=stats,
+            diagnostic=diagnostic,
+        )
+        return cls(
+            from_state=edge.from_state,
+            to_state=edge.to_state,
+            primary_edge=edge,
+            components=(component,),
+            effective_count=float(stats.count),
+            effective_training_sessions=float(stats.training_session_count),
+            directional_consensus=float(stats.directional_consensus),
+            cross_session_hit_rate=float(stats.cross_session_hit_rate),
+            cross_session_hit_consensus=float(stats.cross_session_hit_consensus),
+            transition_probability=float(diagnostic.transition_probability),
+            entropy=float(diagnostic.entropy),
+            signal_to_noise=float(diagnostic.signal_to_noise),
+            alpha_score=float(diagnostic.alpha_score),
+            shrunk_drift_bps=float(diagnostic.shrunk_drift_bps),
+            regime_weights={edge.regime: 1.0},
+            supported_weight=1.0 if stats.count > 0 else 0.0,
+        )
+
+
 class TransitionKernel:
     # Recompute the precision matrix every this many new increments.
     # The covariance changes slowly; daily re-pinv cost is negligible at this interval.
@@ -225,6 +312,86 @@ class TransitionKernel:
             alpha_score=alpha_score,
             shrunk_drift_bps=self.shrunk_drift_mean(edge),
             observation_count=stats.count,
+        )
+
+    def soft_edge_view(
+        self,
+        from_state: str,
+        to_state: str,
+        regime_probabilities: dict[MicrostructureRegime, float],
+        *,
+        primary_regime: MicrostructureRegime | None = None,
+        min_weight: float = 0.05,
+    ) -> SoftEdgeView:
+        """
+        Mix historical edge readouts across regimes for a fixed cell transition.
+
+        ``primary_regime`` is the MAP / recording regime used for edge identity
+        and logging. Components with posterior mass below ``min_weight`` are
+        dropped, then surviving weights are renormalized.
+        """
+        if primary_regime is None:
+            primary_regime = max(regime_probabilities, key=regime_probabilities.get)
+
+        primary_edge = EdgeKey(from_state, to_state, primary_regime)
+        raw_weights = {
+            regime: float(max(weight, 0.0))
+            for regime, weight in regime_probabilities.items()
+            if float(weight) >= float(min_weight)
+        }
+        if not raw_weights:
+            raw_weights = {primary_regime: 1.0}
+
+        weight_total = sum(raw_weights.values())
+        if weight_total <= 0.0:
+            normalized = {primary_regime: 1.0}
+        else:
+            normalized = {regime: weight / weight_total for regime, weight in raw_weights.items()}
+
+        components: list[SoftEdgeComponent] = []
+        for regime, weight in normalized.items():
+            edge = EdgeKey(from_state, to_state, regime)
+            stats = self.get_edge(edge)
+            diagnostic = self.diagnostic(edge)
+            components.append(
+                SoftEdgeComponent(
+                    regime=regime,
+                    weight=weight,
+                    edge=edge,
+                    stats=stats,
+                    diagnostic=diagnostic,
+                )
+            )
+        components_tuple = tuple(components)
+        supported = tuple(component for component in components_tuple if component.stats.count > 0)
+        supported_weight = float(sum(component.weight for component in supported))
+        # Gate metrics only over components that have data; mixture posterior still
+        # sees full components (empty ones contribute nothing to samples).
+        gate_components = supported if supported else components_tuple
+        gate_total = sum(component.weight for component in gate_components) or 1.0
+
+        def _weighted(getter, pool: tuple[SoftEdgeComponent, ...] = gate_components) -> float:
+            return float(
+                sum((component.weight / gate_total) * getter(component) for component in pool)
+            )
+
+        return SoftEdgeView(
+            from_state=from_state,
+            to_state=to_state,
+            primary_edge=primary_edge,
+            components=components_tuple,
+            effective_count=_weighted(lambda c: float(c.stats.count)),
+            effective_training_sessions=_weighted(lambda c: float(c.stats.training_session_count)),
+            directional_consensus=_weighted(lambda c: float(c.stats.directional_consensus)),
+            cross_session_hit_rate=_weighted(lambda c: float(c.stats.cross_session_hit_rate)),
+            cross_session_hit_consensus=_weighted(lambda c: float(c.stats.cross_session_hit_consensus)),
+            transition_probability=_weighted(lambda c: float(c.diagnostic.transition_probability)),
+            entropy=_weighted(lambda c: float(c.diagnostic.entropy)),
+            signal_to_noise=_weighted(lambda c: float(c.diagnostic.signal_to_noise)),
+            alpha_score=_weighted(lambda c: float(c.diagnostic.alpha_score)),
+            shrunk_drift_bps=_weighted(lambda c: float(c.diagnostic.shrunk_drift_bps)),
+            regime_weights=dict(normalized),
+            supported_weight=supported_weight,
         )
 
     def load_trained_payload(self, payload: dict[str, object]) -> None:

@@ -9,8 +9,11 @@ from typing import Any
 from l1_microstructure.calibration.interfaces import (
     ExecutionCalibrationArtifact,
     RegimeCalibrationArtifact,
+    RegimeDurationModel,
+    RegimeEmissionModel,
     StateCalibrationArtifact,
     StateRegimeSurface,
+    SwitchingDiffusionPrior,
 )
 
 from .interfaces import ArtifactMetadata
@@ -123,7 +126,90 @@ class ArtifactBundleLoader:
             symbol=str(payload["symbol"]),
             regime_priors={str(key): float(value) for key, value in payload["regime_priors"].items()},
             holding_time_seconds={str(key): float(value) for key, value in payload["holding_time_seconds"].items()},
+            emission_model=self._load_emission_model(payload.get("emission_model")),
+            duration_model=self._load_duration_model(payload.get("duration_model")),
+            diffusion_prior=self._load_diffusion_prior(payload.get("diffusion_prior")),
             metadata=dict(payload.get("metadata", {})),
+        )
+
+    @staticmethod
+    def _load_diffusion_prior(payload: object) -> SwitchingDiffusionPrior | None:
+        if not isinstance(payload, dict):
+            return None
+        rates = payload.get("drift_rate_bps_per_sec")
+        vols = payload.get("volatility_bps_per_sqrt_sec")
+        if not isinstance(rates, dict) or not isinstance(vols, dict) or not rates or not vols:
+            return None
+        sample_count_payload = payload.get("sample_count", {})
+        sample_count = (
+            {str(key): int(value) for key, value in sample_count_payload.items()}
+            if isinstance(sample_count_payload, dict)
+            else {}
+        )
+        metadata_payload = payload.get("metadata", {})
+        metadata = dict(metadata_payload) if isinstance(metadata_payload, dict) else {}
+        return SwitchingDiffusionPrior(
+            reference_horizon_ns=int(payload.get("reference_horizon_ns", 3_000_000_000)),
+            drift_rate_bps_per_sec={str(key): float(value) for key, value in rates.items()},
+            volatility_bps_per_sqrt_sec={str(key): float(value) for key, value in vols.items()},
+            sample_count=sample_count,
+            global_drift_rate_bps_per_sec=float(payload.get("global_drift_rate_bps_per_sec", 0.0)),
+            global_volatility_bps_per_sqrt_sec=float(
+                payload.get("global_volatility_bps_per_sqrt_sec", 1.0)
+            ),
+            prior_strength=float(payload.get("prior_strength", 2.0)),
+            metadata=metadata,
+        )
+
+    @staticmethod
+    def _load_duration_model(payload: object) -> RegimeDurationModel | None:
+        if not isinstance(payload, dict):
+            return None
+        shapes_payload = payload.get("shapes")
+        if not isinstance(shapes_payload, dict) or not shapes_payload:
+            return None
+        run_count_payload = payload.get("run_count", {})
+        run_count = (
+            {str(key): int(value) for key, value in run_count_payload.items()}
+            if isinstance(run_count_payload, dict)
+            else {}
+        )
+        return RegimeDurationModel(
+            family=str(payload.get("family", "weibull")),
+            shapes={str(key): float(value) for key, value in shapes_payload.items()},
+            run_count=run_count,
+        )
+
+    @staticmethod
+    def _load_emission_model(payload: object) -> RegimeEmissionModel | None:
+        if not isinstance(payload, dict):
+            return None
+        feature_names = payload.get("feature_names")
+        means = payload.get("means")
+        stds = payload.get("stds")
+        if not isinstance(feature_names, (list, tuple)) or not isinstance(means, dict) or not isinstance(stds, dict):
+            return None
+        if not feature_names or not means or not stds:
+            return None
+        effective_weight_payload = payload.get("effective_weight", {})
+        effective_weight = (
+            {str(key): float(value) for key, value in effective_weight_payload.items()}
+            if isinstance(effective_weight_payload, dict)
+            else {}
+        )
+        return RegimeEmissionModel(
+            feature_names=tuple(str(name) for name in feature_names),
+            means={
+                str(key): tuple(float(value) for value in values)
+                for key, values in means.items()
+                if isinstance(values, (list, tuple))
+            },
+            stds={
+                str(key): tuple(float(value) for value in values)
+                for key, values in stds.items()
+                if isinstance(values, (list, tuple))
+            },
+            effective_weight=effective_weight,
         )
 
     def _load_execution_calibration(self, artifact_id: str) -> ExecutionCalibrationArtifact:

@@ -10,22 +10,27 @@ from .interfaces import (
     ExecutionCalibrator,
     RegimeCalibrationArtifact,
     RegimeCalibrator,
+    RegimeDurationModel,
+    RegimeEmissionModel,
     StateCalibrationArtifact,
     StateCalibrator,
     StateRegimeSurface,
+    SwitchingDiffusionPrior,
 )
 
 _LAZY_FITTERS = {
-    "EmpiricalExecutionCalibrator",
-    "EmpiricalRegimeCalibrator",
-    "QuantileStateCalibrator",
+    "EmpiricalExecutionCalibrator": ".execution_calibrator",
+    "EmpiricalRegimeCalibrator": ".regime_calibrator",
+    "QuantileStateCalibrator": ".state_calibrator",
+    "SwitchingDiffusionPriorCalibrator": ".diffusion_prior",
+    "REGIME_EMISSION_FEATURES": ".regime_calibrator",
 }
 
 
 def __getattr__(name: str) -> Any:
     if name not in _LAZY_FITTERS:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    value = getattr(import_module(".fitters", __name__), name)
+    value = getattr(import_module(_LAZY_FITTERS[name], __name__), name)
     globals()[name] = value
     return value
 
@@ -44,7 +49,11 @@ __all__ = [
     "QuantileStateCalibrator",
     "RegimeCalibrationArtifact",
     "RegimeCalibrator",
+    "RegimeDurationModel",
+    "RegimeEmissionModel",
     "StateCalibrationArtifact",
     "StateCalibrator",
     "StateRegimeSurface",
+    "SwitchingDiffusionPrior",
+    "SwitchingDiffusionPriorCalibrator",
 ]

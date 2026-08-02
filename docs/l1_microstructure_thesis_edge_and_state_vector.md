@@ -206,6 +206,85 @@ Entry requires both posterior mass beyond costs and agreement from decay-shrunk 
 
 Important sequencing fact: at decision time the current transition’s own drift is still unknown. The trade uses the empirical distribution of earlier outcomes of the same edge class. You trade the conditional expectation of that edge type, not the realized path that has just started.
 
+## Soft regime mixture (decision readout)
+
+Kernel **training** still hard-assigns each observed transition to the MAP regime:
+
+\[
+e^{\text{train}} = (s_{\text{from}}, s_{\text{to}}, R^{\star}),\quad R^{\star} = \arg\max_R P(R \mid \text{history}).
+\]
+
+Decision **readout** can mix across regimes using the full posterior (enabled by default via `DecisionConfig.soft_regime_mixture`):
+
+\[
+\mathbb{E}[d_H \mid s_{\text{from}}, s_{\text{to}}, \text{history}]
+=
+\sum_R P(R \mid \text{history})\, \mathbb{E}[d_H \mid s_{\text{from}}, s_{\text{to}}, R].
+\]
+
+Operationally:
+
+1. Drop regimes with mass below `soft_regime_min_weight`, renormalize survivors.
+2. Gate on **effective** counts and stability metrics: \(\sum_R w_R \cdot \text{metric}_R\).
+3. Form a mixture of per-regime NI-Gamma posteriors (mean, variance, directional probabilities).
+4. Require agreement from the mixture shrunk drift \(\sum_R w_R \mu^{\text{shrunk}}_R\).
+
+This keeps discrete edge tables identifiable while avoiding hard MAP flips when the regime filter is uncertain. Trade intents still log the primary (MAP) edge identity for auditability.
+
+## Fitted regime emissions (EM)
+
+The regime layer is a continuous-time HMM-style filter: predict with holding-time transitions, update with emissions. Hand-scored emissions remain the cold-start default. When a state panel is available, `EmpiricalRegimeCalibrator` fits diagonal-Gaussian emissions:
+
+\[
+P(x_t \mid R) = \prod_{d=1}^{D} \mathcal{N}(x_{t,d}; \mu_{R,d}, \sigma_{R,d}^{2})
+\]
+
+on continuous features \((S, Q, I, F, V)\). EM iterates:
+
+1. **E-step:** sequential responsibilities \(\gamma_t(R)\) via the same predict–update filter used online (timestamps when present).
+2. **M-step:** weighted means and stds per regime.
+
+Runtime `RegimeInferencer` prefers fitted emissions when `RegimeCalibrationArtifact.emission_model` is present (`RegimeConfig.use_fitted_emissions`). Optional `emission_heuristic_blend` mixes hand scores back in for regularization. Priors and holding times continue to be estimated from the panel as before.
+
+## HSMM holding times (Weibull sojourns)
+
+The memoryless exponential filter uses stay probability \(\mathrm{e}^{-\Delta t / \mu_R}\). Real regimes often show **duration dependence**: early exits are less likely than a constant hazard implies.
+
+`EmpiricalRegimeCalibrator` fits a **Weibull HSMM** sojourn model from MAP regime runs:
+
+1. Segment consecutive identical `dominant_regime` stretches (session gaps excluded).
+2. Mean sojourn \(\mu_R\) → `holding_time_seconds`.
+3. Shape \(k_R\) from the coefficient of variation (same moment map as the transparent semi-Markov trainer). \(k=1\) recovers exponential; \(k>1\) is more persistent.
+
+At runtime the predict step uses conditional Weibull survival given dwell in the current MAP regime:
+
+\[
+P(T > d+\Delta t \mid T > d)
+=
+\exp\!\Big(-\big[((d+\Delta t)/s)^k - (d/s)^k\big]\Big),
+\quad s = \mu / \Gamma(1+1/k).
+\]
+
+Enabled when `RegimeDurationModel` is present and `RegimeConfig.use_hsmm_durations` is true. Recovery snapshots store `dominant_regime` and `regime_started_at_ns` so dwell is restart-safe.
+
+## Switching-diffusion prior on post-edge drift
+
+Edges remain the tradable atoms. The continuous complement is a low-dimensional regime-switching diffusion prior for short-horizon mid drift:
+
+\[
+\mathrm{d}m_t = \mu_R\,\mathrm{d}t + \sigma_R\,\mathrm{d}W_t
+\]
+
+Integrated over the decision horizon \(H\):
+
+\[
+d_H \;\approx\; \mathcal{N}(\mu_R H,\; \sigma_R^2 H)
+\]
+
+`SwitchingDiffusionPriorCalibrator` estimates \((\mu_R, \sigma_R)\) from transition-panel `realized_drift_bps` (per regime, at the runtime horizon). At decision time those moments become the NI-Gamma prior \((\mu_0, \kappa_0, \alpha_0, \beta_0)\) for `DecisionEngine.estimate_posterior`, so sparse edges shrink toward a regime-structural mean rather than toward zero. Soft-regime mixture uses each component’s own regime prior before mixing posteriors.
+
+This is **not** a full LOB SPDE. It is a structural regularizer for \(\mathbb{E}[d_H \mid e]\) and multi-horizon consistency. Disable with `DecisionConfig.use_switching_diffusion_prior = False`.
+
 ## End-to-end flow
 
 ```text
@@ -215,21 +294,22 @@ L1 quote/trade
  continuous vector X = (S, Q, I, F, V)     ← current book geometry
       │
       ├── discretize → label s               ← state-space cell
-      └── slow filter → regime R             ← market climate
+      └── slow filter → regime posterior P(R)  ← market climate
       │
       ▼
  Mahalanobis(X_prev, X_now) > τ ?
       │ no  → observe only; no decision
       │ yes
       ▼
- edge e = (s_prev → s_now | R)
+ train on e* = (s_prev → s_now | R_MAP)
+ decide with soft mixture over R of same (s_prev, s_now)
       │
       ├── schedule microprice drift over horizon H
-      ├── update kernel stats for e
-      └── look up historical {d_e} + diagnostics
+      ├── update kernel stats for e*
+      └── mix historical {d | e_R} + diagnostics by P(R)
               │
               ▼
-        posterior: P(d_e clears costs | e)
+        posterior: P(d clears costs | soft edge)
               │
               ▼
         BUY / SELL / HOLD → risk → execution

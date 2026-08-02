@@ -19,7 +19,7 @@ from .portfolio import PortfolioAllocator
 from .recovery import PendingOutcome, StateMachineRecoveryCodec, StateMachineRecoverySnapshot
 from .regime import MicrostructureRegime, RegimeInferencer, RegimePosterior
 from .risk import OpenPosition, RiskDecision, RiskEngine
-from .transitions import EdgeKey, TransitionDiagnostic, TransitionKernel
+from .transitions import EdgeKey, SoftEdgeView, TransitionDiagnostic, TransitionKernel
 
 
 @dataclass(slots=True)
@@ -67,7 +67,16 @@ class L1MicrostructureStateMachine:
         self.transition_kernel = TransitionKernel(self.config.transition)
         if self.runtime_artifacts.transition_model is not None:
             self.transition_kernel.load_trained_payload(self.runtime_artifacts.transition_model)
-        self.decision_engine = DecisionEngine(self.config.decision, self.config.transition)
+        diffusion_prior = (
+            self.runtime_artifacts.regime_calibration.diffusion_prior
+            if self.runtime_artifacts.regime_calibration is not None
+            else None
+        )
+        self.decision_engine = DecisionEngine(
+            self.config.decision,
+            self.config.transition,
+            diffusion_prior=diffusion_prior,
+        )
         self.execution_simulator = ExecutionSimulator(
             self.config.execution,
             self.runtime_artifacts.execution_calibration,
@@ -140,18 +149,31 @@ class L1MicrostructureStateMachine:
         if self.previous_state is not None and self.transition_kernel.is_transition(
             self.previous_state.vector, state.vector
         ):
+            # Train under MAP regime (hard edge key); decide with optional soft mixture.
             transition_edge = EdgeKey(self.previous_state.label, state.label, regime.dominant_regime)
             edge_stats = self.transition_kernel.observe_transition(
                 transition_edge,
                 holding_time_ns=state.timestamp_ns - self.previous_state.timestamp_ns,
             )
-            diagnostic = self.transition_kernel.diagnostic(transition_edge)
+            soft_view: SoftEdgeView | None = None
+            if self.config.decision.soft_regime_mixture:
+                soft_view = self.transition_kernel.soft_edge_view(
+                    self.previous_state.label,
+                    state.label,
+                    regime.probabilities,
+                    primary_regime=regime.dominant_regime,
+                    min_weight=self.config.decision.soft_regime_min_weight,
+                )
+                diagnostic = soft_view.diagnostic
+            else:
+                diagnostic = self.transition_kernel.diagnostic(transition_edge)
             provisional_intent = self.decision_engine.decide(
                 transition_edge,
                 edge_stats,
                 diagnostic,
                 regime,
                 state,
+                soft_view=soft_view,
             )
             execution_cost_bps = 0.0
             if self.execution_simulator.execution_calibration is not None:
@@ -170,6 +192,7 @@ class L1MicrostructureStateMachine:
                     if self.execution_simulator.execution_calibration is not None
                     else None
                 ),
+                soft_view=soft_view,
             )
             self.pending_outcomes.append(
                 PendingOutcome(

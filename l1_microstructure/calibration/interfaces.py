@@ -44,10 +44,87 @@ class StateCalibrationArtifact:
 
 
 @dataclass(frozen=True, slots=True)
+class RegimeEmissionModel:
+    """
+    Diagonal-Gaussian emission densities P(x | R) for continuous L1 features.
+
+    Means and stds are aligned with ``feature_names``. Empty models are treated as
+    absent so older artifacts without emissions keep the heuristic score path.
+    """
+
+    feature_names: tuple[str, ...]
+    means: dict[str, tuple[float, ...]]
+    stds: dict[str, tuple[float, ...]]
+    effective_weight: dict[str, float] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class RegimeDurationModel:
+    """
+    HSMM sojourn model: Weibull duration shapes per regime.
+
+    Mean sojourn times live on ``RegimeCalibrationArtifact.holding_time_seconds``.
+    Shape ``k = 1`` recovers the memoryless exponential (CTMC) special case.
+    Shape ``k > 1`` makes early exits less likely (more persistent regimes).
+    """
+
+    family: str = "weibull"
+    shapes: dict[str, float] = field(default_factory=dict)
+    run_count: dict[str, int] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class SwitchingDiffusionPrior:
+    """
+    Low-dimensional regime-switching diffusion prior for short-horizon mid drift.
+
+    Structural model (per regime R):
+
+        dm_t = μ_R dt + σ_R dW_t
+
+    Horizon-H integrated drift in bps is treated as approximately
+
+        d_H ~ Normal(μ_R · H, σ_R² · H)
+
+    and mapped into NI-Gamma prior hyperparameters for edge posteriors. This
+    regularizes sparse edges without replacing the discrete edge identity.
+    """
+
+    reference_horizon_ns: int
+    drift_rate_bps_per_sec: dict[str, float]
+    volatility_bps_per_sqrt_sec: dict[str, float]
+    sample_count: dict[str, int] = field(default_factory=dict)
+    global_drift_rate_bps_per_sec: float = 0.0
+    global_volatility_bps_per_sqrt_sec: float = 1.0
+    prior_strength: float = 2.0
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def mean_bps(self, regime: str, horizon_ns: int | None = None) -> float:
+        seconds = self._horizon_seconds(horizon_ns)
+        rate = self.drift_rate_bps_per_sec.get(regime, self.global_drift_rate_bps_per_sec)
+        return float(rate) * seconds
+
+    def variance_bps2(self, regime: str, horizon_ns: int | None = None) -> float:
+        seconds = self._horizon_seconds(horizon_ns)
+        vol = self.volatility_bps_per_sqrt_sec.get(
+            regime,
+            self.global_volatility_bps_per_sqrt_sec,
+        )
+        return max(float(vol) ** 2 * seconds, 1e-12)
+
+    def _horizon_seconds(self, horizon_ns: int | None) -> float:
+        ns = int(horizon_ns) if horizon_ns is not None else int(self.reference_horizon_ns)
+        return max(ns, 1) / 1_000_000_000.0
+
+
+@dataclass(frozen=True, slots=True)
 class RegimeCalibrationArtifact:
     symbol: str
     regime_priors: dict[str, float]
     holding_time_seconds: dict[str, float]
+    emission_model: RegimeEmissionModel | None = None
+    duration_model: RegimeDurationModel | None = None
+    diffusion_prior: SwitchingDiffusionPrior | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
 

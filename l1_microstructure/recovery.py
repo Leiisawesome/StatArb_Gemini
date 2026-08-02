@@ -58,6 +58,8 @@ class RegimeRecoveryState:
     state_window: list[ObservedState]
     previous_probabilities: dict[MicrostructureRegime, float] | None
     previous_timestamp_ns: int | None
+    dominant_regime: MicrostructureRegime | None = None
+    regime_started_at_ns: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,6 +147,8 @@ class StateMachineRecoveryCodec:
                 state_window=deepcopy(list(machine.regime_inferencer.state_window)),
                 previous_probabilities=deepcopy(machine.regime_inferencer.previous_probabilities),
                 previous_timestamp_ns=machine.regime_inferencer.previous_timestamp_ns,
+                dominant_regime=machine.regime_inferencer.dominant_regime,
+                regime_started_at_ns=machine.regime_inferencer.regime_started_at_ns,
             ),
             transition_state=TransitionRecoveryState(
                 edge_stats=deepcopy(machine.transition_kernel.edge_stats),
@@ -209,6 +213,8 @@ class StateMachineRecoveryCodec:
         machine.regime_inferencer.rebuild_context_sums()
         machine.regime_inferencer.previous_probabilities = deepcopy(regime.previous_probabilities)
         machine.regime_inferencer.previous_timestamp_ns = regime.previous_timestamp_ns
+        machine.regime_inferencer.dominant_regime = regime.dominant_regime
+        machine.regime_inferencer.regime_started_at_ns = regime.regime_started_at_ns
 
         transition = snapshot.transition_state
         machine.transition_kernel.edge_stats = deepcopy(transition.edge_stats)

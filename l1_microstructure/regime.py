@@ -10,9 +10,24 @@ from typing import Deque
 
 import numpy as np
 
-from .calibration.interfaces import RegimeCalibrationArtifact
+from .calibration.interfaces import (
+    RegimeCalibrationArtifact,
+    RegimeDurationModel,
+    RegimeEmissionModel,
+)
 from .config import FeatureConfig, RegimeConfig
 from .features import FlickerState, ObservedState, SpreadState, VolatilityState
+from .regime_transition import predict_regime_probabilities, stay_probability
+from .stats.distributions import conditional_weibull_survival, diagonal_gaussian_log_likelihood
+
+# Re-export for callers that historically imported survival from this module.
+__all__ = [
+    "MicrostructureRegime",
+    "SlowContext",
+    "RegimePosterior",
+    "RegimeInferencer",
+    "conditional_weibull_survival",
+]
 
 
 class MicrostructureRegime(str, Enum):
@@ -64,6 +79,8 @@ class RegimeInferencer:
         self._imbalance_sum = 0.0
         self.previous_probabilities: dict[MicrostructureRegime, float] | None = None
         self.previous_timestamp_ns: int | None = None
+        self.dominant_regime: MicrostructureRegime | None = None
+        self.regime_started_at_ns: int | None = None
         # The state space is fixed at four regimes. Keep its transition constants
         # as scalar tuples so the per-event filter does not allocate tiny NumPy
         # arrays and matrices.
@@ -73,6 +90,17 @@ class RegimeInferencer:
         )
         self._transition_leave_weights = tuple(
             self._leave_weights(row_index) for row_index in range(len(self.REGIME_ORDER))
+        )
+        self._emission_model = self._load_emission_model(regime_calibration)
+        self._emission_feature_index = self._build_emission_feature_index(self._emission_model)
+        self._duration_model = self._load_duration_model(regime_calibration)
+        self._cached_duration_shapes = tuple(
+            self._duration_shape(regime) for regime in self.REGIME_ORDER
+        )
+        self._use_hsmm = bool(
+            self.config.use_hsmm_durations
+            and self._duration_model is not None
+            and self._duration_model.shapes
         )
 
     def update(self, state: ObservedState) -> RegimePosterior:
@@ -87,12 +115,15 @@ class RegimeInferencer:
             MicrostructureRegime.LIQUIDITY_SHOCK: self._liquidity_shock_score(state, slow_context),
             MicrostructureRegime.COMPETITIVE_LIQUIDITY: self._competitive_score(state, slow_context),
         }
-        emission = self._emission_probabilities(scores)
+        emission = self._resolve_emission_probabilities(state, scores)
         predicted = self._predicted_probabilities(state.timestamp_ns)
         probabilities = self._filtered_probabilities(predicted, emission)
         dominant_regime = max(probabilities, key=probabilities.get)
         confidence = probabilities[dominant_regime]
         expected_holding_time_ns = self._expected_holding_time_ns(dominant_regime)
+        if self.dominant_regime != dominant_regime:
+            self.dominant_regime = dominant_regime
+            self.regime_started_at_ns = state.timestamp_ns
         self.previous_probabilities = probabilities
         self.previous_timestamp_ns = state.timestamp_ns
 
@@ -192,6 +223,106 @@ class RegimeInferencer:
             for regime, weight in zip(self.REGIME_ORDER, weights)
         }
 
+    def _resolve_emission_probabilities(
+        self,
+        state: ObservedState,
+        scores: dict[MicrostructureRegime, float],
+    ) -> dict[MicrostructureRegime, float]:
+        heuristic = self._emission_probabilities(scores)
+        if (
+            self._emission_model is None
+            or not self.config.use_fitted_emissions
+            or not self._emission_feature_index
+        ):
+            return heuristic
+
+        fitted = self._fitted_emission_probabilities(state)
+        blend = min(max(float(self.config.emission_heuristic_blend), 0.0), 1.0)
+        if blend <= 0.0:
+            return fitted
+        if blend >= 1.0:
+            return heuristic
+
+        mixed = {
+            regime: (1.0 - blend) * fitted[regime] + blend * heuristic[regime]
+            for regime in self.REGIME_ORDER
+        }
+        total = sum(mixed.values())
+        if total <= 0.0:
+            return heuristic
+        return {regime: value / total for regime, value in mixed.items()}
+
+    def _fitted_emission_probabilities(self, state: ObservedState) -> dict[MicrostructureRegime, float]:
+        assert self._emission_model is not None
+        features = self._emission_feature_vector(state)
+        log_likelihoods = {
+            regime: self._diagonal_gaussian_log_likelihood(
+                features,
+                self._emission_model.means.get(regime.value, ()),
+                self._emission_model.stds.get(regime.value, ()),
+            )
+            for regime in self.REGIME_ORDER
+        }
+        maximum = max(log_likelihoods.values())
+        weights = {
+            regime: exp(log_likelihoods[regime] - maximum)
+            for regime in self.REGIME_ORDER
+        }
+        total = sum(weights.values())
+        floor = self.config.posterior_floor
+        if total <= 0.0:
+            return {regime: 1.0 / len(self.REGIME_ORDER) for regime in self.REGIME_ORDER}
+        probabilities = {
+            regime: max(weight / total, floor)
+            for regime, weight in weights.items()
+        }
+        renorm = sum(probabilities.values())
+        return {regime: value / renorm for regime, value in probabilities.items()}
+
+    def _emission_feature_vector(self, state: ObservedState) -> tuple[float, ...]:
+        accessors = {
+            "spread_norm": lambda: float(state.spread_norm),
+            "quote_pressure": lambda: float(state.quote_pressure),
+            "trade_pressure": lambda: float(state.trade_pressure),
+            "flicker_intensity": lambda: float(state.flicker_intensity),
+            "realized_volatility": lambda: float(state.realized_volatility),
+        }
+        values: list[float] = []
+        for name in self._emission_feature_index:
+            getter = accessors.get(name)
+            if getter is None:
+                raise ValueError(
+                    f"fitted emission model requests unsupported feature {name!r}; "
+                    f"supported={sorted(accessors)}"
+                )
+            values.append(getter())
+        return tuple(values)
+
+    @staticmethod
+    def _diagonal_gaussian_log_likelihood(
+        observation: tuple[float, ...],
+        mean: tuple[float, ...],
+        std: tuple[float, ...],
+    ) -> float:
+        return diagonal_gaussian_log_likelihood(observation, mean, std)
+
+    @staticmethod
+    def _load_emission_model(
+        regime_calibration: RegimeCalibrationArtifact | None,
+    ) -> RegimeEmissionModel | None:
+        if regime_calibration is None:
+            return None
+        model = regime_calibration.emission_model
+        if model is None or not model.feature_names or not model.means or not model.stds:
+            return None
+        return model
+
+    @staticmethod
+    def _build_emission_feature_index(model: RegimeEmissionModel | None) -> tuple[str, ...]:
+        if model is None:
+            return ()
+        return tuple(str(name) for name in model.feature_names)
+
     def _predicted_probabilities(self, timestamp_ns: int) -> dict[MicrostructureRegime, float]:
         if self.previous_probabilities is None or self.previous_timestamp_ns is None:
             return self._initial_probabilities()
@@ -201,22 +332,41 @@ class RegimeInferencer:
             return dict(self.previous_probabilities)
 
         floor = self.config.posterior_floor
-        previous = tuple(self.previous_probabilities.get(regime, floor) for regime in self.REGIME_ORDER)
-        predicted = [0.0] * len(self.REGIME_ORDER)
-        for row_index, previous_probability in enumerate(previous):
-            holding_time_ns = max(self._cached_holding_times_ns[row_index], 1)
-            stay_probability = min(max(exp(-dt_ns / holding_time_ns), floor), 1.0)
-            predicted[row_index] += previous_probability * stay_probability
-            leave_mass = previous_probability * max(1.0 - stay_probability, 0.0)
-            for column_index, weight in enumerate(self._transition_leave_weights[row_index]):
-                predicted[column_index] += leave_mass * weight
-
-        predicted = [max(probability, floor) for probability in predicted]
-        total = sum(predicted)
-        return {
-            regime: probability / total
-            for regime, probability in zip(self.REGIME_ORDER, predicted)
+        dwell_ns = 0
+        if self.regime_started_at_ns is not None:
+            dwell_ns = max(int(self.previous_timestamp_ns - self.regime_started_at_ns), 0)
+        order = tuple(regime.value for regime in self.REGIME_ORDER)
+        previous = {
+            regime.value: self.previous_probabilities.get(regime, floor)
+            for regime in self.REGIME_ORDER
         }
+        leave_weights = {
+            regime.value: self._transition_leave_weights[index]
+            for index, regime in enumerate(self.REGIME_ORDER)
+        }
+        holding = {
+            regime.value: self._cached_holding_times_ns[index]
+            for index, regime in enumerate(self.REGIME_ORDER)
+        }
+        shapes = {
+            regime.value: self._cached_duration_shapes[index]
+            for index, regime in enumerate(self.REGIME_ORDER)
+        }
+        predicted = predict_regime_probabilities(
+            previous,
+            regime_order=order,
+            dt_ns=dt_ns,
+            holding_times_ns=holding,
+            duration_shapes=shapes,
+            leave_weights=leave_weights,
+            dominant_regime=(
+                self.dominant_regime.value if self.dominant_regime is not None else None
+            ),
+            dwell_ns=dwell_ns,
+            use_hsmm=self._use_hsmm,
+            floor=floor,
+        )
+        return {regime: predicted[regime.value] for regime in self.REGIME_ORDER}
 
     def _filtered_probabilities(
         self,
@@ -241,15 +391,29 @@ class RegimeInferencer:
 
     def _transition_matrix(self, dt_ns: int) -> np.ndarray:
         rows: list[list[float]] = []
+        floor = self.config.posterior_floor
+        dwell_ns = 0
+        if (
+            self._use_hsmm
+            and self.regime_started_at_ns is not None
+            and self.previous_timestamp_ns is not None
+        ):
+            dwell_ns = max(int(self.previous_timestamp_ns - self.regime_started_at_ns), 0)
         for row_index, leave_weights in enumerate(self._transition_leave_weights):
-            holding_time_ns = max(self._cached_holding_times_ns[row_index], 1)
-            stay_probability = min(
-                max(exp(-dt_ns / holding_time_ns), self.config.posterior_floor),
-                1.0,
+            current_dwell = (
+                dwell_ns if self.dominant_regime is self.REGIME_ORDER[row_index] else 0
             )
-            leave_mass = max(1.0 - stay_probability, 0.0)
+            stay = stay_probability(
+                dwell_ns=current_dwell,
+                dt_ns=dt_ns,
+                mean_holding_ns=self._cached_holding_times_ns[row_index],
+                duration_shape=self._cached_duration_shapes[row_index],
+                use_hsmm=self._use_hsmm,
+                floor=floor,
+            )
+            leave_mass = max(1.0 - stay, 0.0)
             row = [leave_mass * weight for weight in leave_weights]
-            row[row_index] = stay_probability
+            row[row_index] = stay
             rows.append(row)
         return np.asarray(rows, dtype=float)
 
@@ -292,3 +456,20 @@ class RegimeInferencer:
             MicrostructureRegime.COMPETITIVE_LIQUIDITY: self.config.competitive_liquidity_holding_time_seconds,
         }[regime]
         return int(seconds * 1_000_000_000)
+
+    def _duration_shape(self, regime: MicrostructureRegime) -> float:
+        default = max(float(self.config.default_duration_shape), 1e-6)
+        if self._duration_model is None:
+            return default
+        return max(float(self._duration_model.shapes.get(regime.value, default)), 1e-6)
+
+    @staticmethod
+    def _load_duration_model(
+        regime_calibration: RegimeCalibrationArtifact | None,
+    ) -> RegimeDurationModel | None:
+        if regime_calibration is None:
+            return None
+        model = regime_calibration.duration_model
+        if model is None or not model.shapes:
+            return None
+        return model

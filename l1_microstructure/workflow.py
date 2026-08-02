@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from bisect import bisect_left, bisect_right
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
@@ -24,6 +24,7 @@ from .calibration import (
     EmpiricalRegimeCalibrator,
     ExecutionCalibrationDataset,
     QuantileStateCalibrator,
+    SwitchingDiffusionPriorCalibrator,
 )
 from .training import EmpiricalTransitionTrainer
 
@@ -597,6 +598,14 @@ class ArtifactDrivenResearchWorkflow:
         regime_artifact = EmpiricalRegimeCalibrator().fit(
             CalibrationDataset(symbol=symbol, features=state_panel.frame, metadata=state_panel.metadata)
         )
+        diffusion_prior = SwitchingDiffusionPriorCalibrator(
+            reference_horizon_ns=self.framework_config.transition.drift_horizon_ns,
+            prior_strength=self.framework_config.decision.diffusion_prior_strength,
+            min_volatility_bps_per_sqrt_sec=(
+                self.framework_config.decision.diffusion_min_volatility_bps_per_sqrt_sec
+            ),
+        ).fit(transition_panel.frame)
+        regime_artifact = replace(regime_artifact, diffusion_prior=diffusion_prior)
         execution_artifact = EmpiricalExecutionCalibrator().fit(
             ExecutionCalibrationDataset(
                 symbol=symbol,

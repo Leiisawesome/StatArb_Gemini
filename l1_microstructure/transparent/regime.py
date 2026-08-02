@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from itertools import permutations
-from math import exp, gamma, pi
+from math import pi
 from typing import Iterable
 
 import numpy as np
 
 from l1_microstructure.features import ObservedState
 from l1_microstructure.regime import MicrostructureRegime
+from l1_microstructure.stats.distributions import conditional_weibull_survival
 
 from .contracts import TRANSPARENT_ENGINE_VERSION
 from .vector import STATE_VECTOR_FEATURES, StateVectorModel
@@ -372,7 +373,7 @@ class SemiMarkovRegimeRuntime:
         base = np.asarray(self.model.transition_matrix, dtype=float)
         for index in range(len(REGIME_ORDER)):
             current_dwell = dwell_ns if index == self.dominant_index else 0
-            stays[index] = _conditional_weibull_survival(
+            stays[index] = conditional_weibull_survival(
                 current_dwell,
                 dt_ns,
                 self.model.expected_duration_ns[index],
@@ -391,12 +392,3 @@ class SemiMarkovRegimeRuntime:
         predicted = np.maximum(predicted, 1e-12)
         predicted /= np.sum(predicted)
         return predicted, stays
-
-
-def _conditional_weibull_survival(dwell_ns: int, dt_ns: int, mean_ns: int, shape: float) -> float:
-    if dt_ns <= 0:
-        return 1.0
-    scale = max(float(mean_ns) / gamma(1.0 + 1.0 / shape), 1.0)
-    start = (max(float(dwell_ns), 0.0) / scale) ** shape
-    end = ((max(float(dwell_ns), 0.0) + float(dt_ns)) / scale) ** shape
-    return float(min(max(exp(-(end - start)), 1e-9), 1.0))

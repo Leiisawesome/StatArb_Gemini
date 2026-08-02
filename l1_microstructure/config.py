@@ -25,6 +25,15 @@ class RegimeConfig:
     liquidity_shock_holding_time_seconds: float = 2.0
     competitive_liquidity_holding_time_seconds: float = 4.0
     posterior_floor: float = 1e-6
+    # When a RegimeEmissionModel is present on the calibration artifact, use it
+    # for filter emissions. Blend in [0, 1] mixes heuristic scores back in:
+    # 0 = pure fitted likelihood, 1 = pure hand-scored emissions.
+    use_fitted_emissions: bool = True
+    emission_heuristic_blend: float = 0.0
+    # When a RegimeDurationModel is present, use Weibull conditional survival
+    # (HSMM sojourns) instead of memoryless exponential holding times.
+    use_hsmm_durations: bool = True
+    default_duration_shape: float = 2.0
 
 
 @dataclass(slots=True)
@@ -68,6 +77,18 @@ class DecisionConfig:
     posterior_prior_strength: float = 1.0
     posterior_prior_alpha: float = 3.0
     posterior_prior_beta: float = 4.0
+    # Soft-regime edge mixture: E[d|from,to,history] = sum_R P(R|history) E[d|from,to,R]
+    # Kernel training still hard-assigns under the MAP regime; only decision readout mixes.
+    soft_regime_mixture: bool = True
+    soft_regime_min_weight: float = 0.05
+    # Fail closed when soft mixture puts less posterior mass on edges with data.
+    soft_regime_min_supported_weight: float = 0.50
+    # Switching-diffusion prior: regime-conditioned NI-Gamma hyperparameters from
+    # dm = μ_R dt + σ_R dW. When a fitted prior is present it is used unless this
+    # flag is false. prior_strength is applied at fit time onto the artifact.
+    use_switching_diffusion_prior: bool = True
+    diffusion_prior_strength: float = 2.0
+    diffusion_min_volatility_bps_per_sqrt_sec: float = 0.25
 
 
 @dataclass(slots=True)
