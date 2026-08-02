@@ -33,11 +33,28 @@ horizon, matching runtime behavior. Shadow disagreement counts are exact;
 serialized comparison examples and latency samples are deterministically
 bounded so a full-day report remains operationally reviewable.
 
+Promotion also has absolute actionability gates. By default, a candidate must
+select at least 100 actions, act on at least 0.01% of shared opportunities,
+achieve at least a 52% hit rate on those selected actions, and produce
+non-negative mean net drift per selected action (net of modeled execution cost).
+The full-opportunity net-drift comparison remains useful, but cannot be diluted
+by HOLD observations to make an inert or loss-making candidate pass. Expected
+utility weights forecast drift by transition confidence and applies a fractional
+predictive-std uncertainty penalty so strong hierarchical edges remain
+actionable without disabling the actionability floors. Validation reports
+created before these decision-level metrics and thresholds existed are
+intentionally rejected and must be regenerated from held-out data.
+
+Selected-action net drift subtracts the execution cost used by the utility
+decision for the selected horizon. The directional label threshold remains a
+separate classification boundary and cannot substitute for modeled execution
+cost in the economic gate.
+
 A v2 run contains state and execution calibration, state-vector, semi-Markov regime, hierarchical transition, and utility artifacts. The validation report binds the SHA-256 payload hash of every model artifact. Published run IDs are immutable, and selection fails closed if an artifact, report, version, symbol, or run association changes.
 
 ## Research workflow
 
-Use `TransparentArtifactDrivenWorkflow` with at least two non-overlapping rolling splits. Promotion thresholds must be declared before the run.
+Use `TransparentArtifactDrivenWorkflow` with at least two non-overlapping rolling splits. Promotion thresholds must be declared before the run. Production-candidate evidence must span complete sessions: the CLI accepts repeated `--trade-date` values and, with at least six dates, creates two expanding splits with four and five training sessions followed by one untouched session each. All feature, vector, regime, transition, and label state resets at each session boundary. A single-date run is an intraday diagnostic, not cross-session promotion evidence.
 
 ```python
 from l1_microstructure.transparent import (
@@ -51,6 +68,18 @@ workflow = TransparentArtifactDrivenWorkflow(
 )
 result = workflow.run(symbol="AAPL", events=events, splits=splits)
 print(result.validation_report.to_dict())
+```
+
+```powershell
+uv run l1-microstructure transparent-workflow `
+  --artifact-root var/artifacts `
+  --symbol AAPL `
+  --trade-date 2026-07-15 `
+  --trade-date 2026-07-16 `
+  --trade-date 2026-07-17 `
+  --trade-date 2026-07-20 `
+  --trade-date 2026-07-21 `
+  --trade-date 2026-07-22
 ```
 
 Failed runs remain available for audit but `TransparentArtifactSelector(...).resolve(...)` will not load them with its default `passing_only=True` policy.

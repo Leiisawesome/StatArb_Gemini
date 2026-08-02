@@ -101,10 +101,25 @@ class DecisionEngine:
         diagnostic: TransitionDiagnostic,
         regime: RegimePosterior,
         state: ObservedState,
+        *,
+        execution_cost_bps: float | None = None,
     ) -> TradeIntent:
-        threshold_bps = self.config.transaction_cost_bps + self.config.risk_premium_bps * max(
-            state.realized_volatility * 10_000.0,
-            0.1,
+        if execution_cost_bps is not None and (
+            not np.isfinite(execution_cost_bps) or execution_cost_bps < 0.0
+        ):
+            raise ValueError("execution cost must be finite and non-negative")
+        transaction_cost_bps = (
+            self.config.transaction_cost_bps
+            if execution_cost_bps is None
+            else float(execution_cost_bps)
+        )
+        threshold_bps = (
+            transaction_cost_bps
+            + self.config.risk_premium_bps
+            * max(
+                state.realized_volatility * 10_000.0,
+                0.1,
+            )
         )
         posterior = self.estimate_posterior(edge_stats.posterior_samples_bps, threshold_bps)
         observation_confidence = self._observation_confidence(posterior, regime)

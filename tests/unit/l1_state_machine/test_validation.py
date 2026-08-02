@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pandas as pd
+import pytest
 
 from l1_microstructure.validation import RegimeSplitSpec, RollingValidationHarness
 
@@ -123,6 +124,26 @@ def test_rolling_validation_harness_flags_regime_and_edge_failures() -> None:
     assert any("tracking error" in failure for failure in report.failures)
     assert any("kill switch" in failure for failure in report.failures)
     assert any("bootstrap hit-rate" in failure for failure in report.failures)
+
+
+def test_validation_prefers_origin_paired_tracking_error() -> None:
+    harness = RollingValidationHarness()
+    frame = pd.DataFrame(
+        [
+            {
+                "expected_drift_bps": 100.0,
+                "realized_drift_bps": -100.0,
+                "drift_tracking_abs_error_bps": 0.25,
+            },
+            {
+                "expected_drift_bps": -100.0,
+                "realized_drift_bps": 100.0,
+                "drift_tracking_abs_error_bps": 0.75,
+            },
+        ]
+    )
+
+    assert harness._drift_tracking_error(frame) == pytest.approx(0.5)
 
 
 def test_rolling_validation_harness_surfaces_bootstrap_decay_failure() -> None:

@@ -76,6 +76,7 @@ class EnginePredictionRecord:
     resident_bytes: int = 0
     probability_down: float | None = None
     selected_direction: int | None = None
+    execution_cost_bps: float | None = None
 
     def __post_init__(self) -> None:
         if not 0.0 <= self.probability_up <= 1.0:
@@ -93,6 +94,10 @@ class EnginePredictionRecord:
             raise ValueError("operational measurements cannot be negative")
         if self.selected_direction not in {None, -1, 0, 1}:
             raise ValueError("selected prediction direction must be -1, 0, 1, or omitted")
+        if self.execution_cost_bps is not None and (
+            not np.isfinite(self.execution_cost_bps) or self.execution_cost_bps < 0.0
+        ):
+            raise ValueError("prediction execution cost must be finite and non-negative")
 
     @property
     def target_up(self) -> float:
@@ -135,10 +140,15 @@ class EnginePredictionRecord:
 
     @property
     def signed_net_drift_bps(self) -> float:
+        execution_cost = (
+            self.threshold_bps
+            if self.execution_cost_bps is None
+            else self.execution_cost_bps
+        )
         if self.direction > 0:
-            return self.realized_drift_bps - self.threshold_bps
+            return self.realized_drift_bps - execution_cost
         if self.direction < 0:
-            return -self.realized_drift_bps - self.threshold_bps
+            return -self.realized_drift_bps - execution_cost
         return 0.0
 
 
@@ -155,6 +165,8 @@ class EngineEvaluation:
     peak_resident_bytes: int
     decisive_count: int = 0
     decision_rate: float = 0.0
+    decision_hit_rate: float = 0.0
+    mean_decision_net_drift_bps: float = 0.0
 
     def __post_init__(self) -> None:
         if self.sample_count <= 0:
@@ -164,6 +176,7 @@ class EngineEvaluation:
             self.calibration_error,
             self.directional_hit_rate,
             self.edge_coverage,
+            self.decision_hit_rate,
         )
         if any(not np.isfinite(value) or not 0.0 <= value <= 1.0 for value in bounded):
             raise ValueError("engine evaluation bounded metrics must be finite and in [0, 1]")
@@ -177,6 +190,7 @@ class EngineEvaluation:
             or self.decisive_count < 0
             or self.decisive_count > self.sample_count
             or not 0.0 <= self.decision_rate <= 1.0
+            or not np.isfinite(self.mean_decision_net_drift_bps)
         ):
             raise ValueError("engine evaluation operational metrics are invalid")
 
@@ -228,7 +242,12 @@ def evaluate_prediction_records(
         else 0.0
     )
     action_directions = np.asarray([record.direction for record in values], dtype=int)
-    decisive_count = int(np.count_nonzero(action_directions))
+    action_decisive = action_directions != 0
+    decisive_count = int(np.count_nonzero(action_decisive))
+    decision_correct = ((action_directions > 0) & (targets[:, 0] == 1.0)) | (
+        (action_directions < 0) & (targets[:, 1] == 1.0)
+    )
+    signed_net_drifts = np.asarray([record.signed_net_drift_bps for record in values], dtype=float)
     return EngineEvaluation(
         sample_count=len(values),
         brier_score=brier,
@@ -236,11 +255,17 @@ def evaluate_prediction_records(
         calibration_error=calibration_error,
         directional_hit_rate=hit_rate,
         edge_coverage=float(np.mean([record.edge_seen for record in values])),
-        mean_signed_net_drift_bps=float(np.mean([record.signed_net_drift_bps for record in values])),
+        mean_signed_net_drift_bps=float(np.mean(signed_net_drifts)),
         p95_latency_ns=float(np.quantile([record.latency_ns for record in values], 0.95)),
         peak_resident_bytes=max(record.resident_bytes for record in values),
         decisive_count=decisive_count,
         decision_rate=float(decisive_count / len(values)),
+        decision_hit_rate=(
+            float(np.mean(decision_correct[action_decisive])) if decisive_count else 0.0
+        ),
+        mean_decision_net_drift_bps=(
+            float(np.mean(signed_net_drifts[action_decisive])) if decisive_count else 0.0
+        ),
     )
 
 
@@ -274,6 +299,10 @@ class PromotionThresholds:
     maximum_latency_ratio: float = 1.20
     maximum_memory_ratio: float = 1.20
     minimum_candidate_samples: int = 100
+    minimum_candidate_decisions: int = 100
+    minimum_candidate_decision_rate: float = 0.0001
+    minimum_decision_hit_rate: float = 0.52
+    minimum_mean_decision_net_drift_bps: float = 0.0
 
     def __post_init__(self) -> None:
         if not 0.0 <= self.minimum_brier_improvement_fraction < 1.0:
@@ -288,8 +317,13 @@ class PromotionThresholds:
         ):
             if value < 0.0:
                 raise ValueError("promotion ratios cannot be negative")
-        if self.minimum_candidate_samples <= 0:
-            raise ValueError("minimum candidate samples must be positive")
+        if self.minimum_candidate_samples <= 0 or self.minimum_candidate_decisions <= 0:
+            raise ValueError("minimum candidate samples and decisions must be positive")
+        for value in (self.minimum_candidate_decision_rate, self.minimum_decision_hit_rate):
+            if not 0.0 <= value <= 1.0:
+                raise ValueError("absolute decision thresholds must be in [0, 1]")
+        if not np.isfinite(self.minimum_mean_decision_net_drift_bps):
+            raise ValueError("minimum decision net drift must be finite")
 
 
 @dataclass(frozen=True, slots=True)
@@ -345,6 +379,27 @@ class TransparentPromotionGate:
                 float(threshold.minimum_candidate_samples),
             ),
             PromotionCheck(
+                "decisions.minimum",
+                candidate.decisive_count >= threshold.minimum_candidate_decisions,
+                float(baseline.decisive_count),
+                float(candidate.decisive_count),
+                float(threshold.minimum_candidate_decisions),
+            ),
+            PromotionCheck(
+                "decisions.rate",
+                candidate.decision_rate >= threshold.minimum_candidate_decision_rate,
+                baseline.decision_rate,
+                candidate.decision_rate,
+                threshold.minimum_candidate_decision_rate,
+            ),
+            PromotionCheck(
+                "decisions.hit_rate",
+                candidate.decision_hit_rate >= threshold.minimum_decision_hit_rate,
+                baseline.decision_hit_rate,
+                candidate.decision_hit_rate,
+                threshold.minimum_decision_hit_rate,
+            ),
+            PromotionCheck(
                 "calibration.brier",
                 candidate.brier_score <= brier_limit,
                 baseline.brier_score,
@@ -385,6 +440,16 @@ class TransparentPromotionGate:
                 baseline.mean_signed_net_drift_bps,
                 candidate.mean_signed_net_drift_bps,
                 net_drift_limit,
+            ),
+            PromotionCheck(
+                "economics.decision_net_drift",
+                (
+                    candidate.mean_decision_net_drift_bps
+                    >= threshold.minimum_mean_decision_net_drift_bps
+                ),
+                baseline.mean_decision_net_drift_bps,
+                candidate.mean_decision_net_drift_bps,
+                threshold.minimum_mean_decision_net_drift_bps,
             ),
             PromotionCheck(
                 "performance.latency",

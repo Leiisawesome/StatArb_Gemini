@@ -284,6 +284,35 @@ def test_decision_engine_requires_probability_net_of_costs() -> None:
     assert intent.action is TradeAction.BUY
 
 
+def test_explicit_execution_cost_replaces_fixed_cost_proxy() -> None:
+    config = FrameworkConfig()
+    config.decision.transaction_cost_bps = 9.0
+    config.decision.risk_premium_bps = 0.0
+    config.transition.min_edge_observations = 0
+    config.transition.min_edge_training_sessions = 0
+    config.transition.min_directional_consensus = 0.0
+    config.transition.min_cross_session_hit_rate = 0.0
+    config.transition.min_cross_session_hit_consensus = 0.0
+    decision_engine = DecisionEngine(config.decision, config.transition)
+    kernel = TransitionKernel(config.transition)
+    edge = EdgeKey("a", "b", MicrostructureRegime.EXECUTION_FLOW)
+    kernel.observe_transition(edge, 1_000)
+    kernel.attach_drift(edge, 5.0)
+    state = FeatureEngine().update(_quote(1_000_000_000, 100.0, 100.01, 200, 100))
+    regime = L1MicrostructureStateMachine(config).regime_inferencer.update(state)
+
+    intent = decision_engine.decide(
+        edge,
+        kernel.get_edge(edge),
+        kernel.diagnostic(edge),
+        regime,
+        state,
+        execution_cost_bps=2.0,
+    )
+
+    assert intent.posterior.threshold_bps == 2.0
+
+
 def test_decision_engine_requires_stable_multi_session_direction() -> None:
     config = FrameworkConfig()
     config.transition.min_edge_observations = 3
@@ -544,6 +573,30 @@ def test_execution_simulator_reduces_aggressiveness_under_low_observation_confid
     assert low_report.slippage_bps < high_report.slippage_bps
 
 
+def test_execution_round_trip_cost_matches_spread_and_modeled_slippage() -> None:
+    config = FrameworkConfig()
+    simulator = ExecutionSimulator(config.execution)
+    state = FeatureEngine().update(_quote(1_000_000_000, 100.0, 100.01, 300, 300))
+
+    assert state is not None
+
+    intent = TradeIntent(
+        action=TradeAction.BUY,
+        edge=EdgeKey(state.label, state.label, MicrostructureRegime.CALM_LIQUIDITY),
+        posterior=PosteriorEstimate(4.0, 1.0, 0.8, 0.2, 1.0, 20),
+        expected_holding_time_ns=1_000_000_000,
+        reason="unit-test",
+        observation_confidence=1.0,
+    )
+    request = simulator.build_request(intent, state, quantity=100)
+    report = simulator.execute(request, state)
+    spread_bps = state.book.spread / state.book.midpoint * 10_000.0
+
+    assert simulator.estimated_round_trip_cost_bps(intent, state) == pytest.approx(
+        spread_bps + 2.0 * report.slippage_bps
+    )
+
+
 def test_state_machine_sizes_incrementally_against_portfolio_target_weight() -> None:
     config = FrameworkConfig()
     config.risk.max_position_fraction = 0.50
@@ -650,9 +703,41 @@ def test_pipeline_resolves_forward_drift_outcomes() -> None:
 
     assert any(update.transition_edge is not None for update in updates)
     assert any(update.resolved_outcomes for update in updates)
+    resolved_pairs = [pair for update in updates for pair in update.resolved_drift_pairs]
+    assert resolved_pairs
+    assert all(np.isfinite(expected) and np.isfinite(realized) for expected, realized in resolved_pairs)
     summary = machine.summarize_transition_edges()
     assert not summary.empty
     assert "drift_mean_bps" in summary.columns
+
+
+def test_state_machine_uses_validated_artifact_runtime_horizon_without_mutating_caller_config() -> None:
+    config = FrameworkConfig()
+    artifacts = RuntimeArtifactBundle(
+        transition_model={
+            "runtime_horizon_ns": 15_000_000_000,
+            "sample_count": 0,
+            "edges": {},
+        }
+    )
+
+    machine = L1MicrostructureStateMachine(config, runtime_artifacts=artifacts)
+
+    assert config.transition.drift_horizon_ns == 3_000_000_000
+    assert machine.config.transition.drift_horizon_ns == 15_000_000_000
+
+
+def test_state_machine_rejects_invalid_artifact_runtime_horizon() -> None:
+    artifacts = RuntimeArtifactBundle(
+        transition_model={
+            "runtime_horizon_ns": 1_500_000,
+            "sample_count": 0,
+            "edges": {},
+        }
+    )
+
+    with pytest.raises(ValueError, match="positive whole number of milliseconds"):
+        L1MicrostructureStateMachine(runtime_artifacts=artifacts)
 
 
 def test_state_machine_rejects_events_for_a_different_symbol() -> None:

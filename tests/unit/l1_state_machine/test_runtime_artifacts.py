@@ -129,6 +129,7 @@ def test_simulator_runner_consumes_runtime_artifacts(tmp_path) -> None:
                 "from_state": "tight|neutral|neutral|stable|quiet",
                 "to_state": "wide|buy_heavy|buy_heavy|chaotic|stressed",
                 "regime": "execution_flow",
+                "horizon_ns": 3_000_000_000,
                 "holding_time_ns": 1_000_000_000,
                 "realized_drift_bps": 2.0,
             },
@@ -137,6 +138,7 @@ def test_simulator_runner_consumes_runtime_artifacts(tmp_path) -> None:
                 "from_state": "tight|neutral|neutral|stable|quiet",
                 "to_state": "wide|buy_heavy|buy_heavy|chaotic|stressed",
                 "regime": "execution_flow",
+                "horizon_ns": 3_000_000_000,
                 "holding_time_ns": 2_000_000_000,
                 "realized_drift_bps": 3.0,
             },
@@ -226,6 +228,12 @@ def test_execution_calibration_artifact_changes_fill_surface() -> None:
     assert artifact.alignment_weight >= 1.0
     assert artifact.regime_fill_multipliers["execution_flow"] > artifact.regime_fill_multipliers["liquidity_shock"]
     assert artifact.regime_slippage_multipliers["liquidity_shock"] >= artifact.regime_slippage_multipliers["execution_flow"]
+    assert (
+        2.0
+        * artifact.adverse_selection_weight
+        * max(artifact.regime_slippage_multipliers.values())
+        <= 0.50
+    )
 
 
 def test_feature_engine_uses_regime_conditioned_state_surface_when_hint_is_available() -> None:

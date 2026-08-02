@@ -63,6 +63,20 @@ def test_transition_config_drift_horizon_fallback() -> None:
     assert values[0] == 1_000_000
 
 
+def test_transition_config_keeps_runtime_horizon_distinct_from_training_horizons() -> None:
+    config = TransitionConfig(
+        drift_horizon_ms=15_000,
+        drift_horizons_ms=(3_000, 15_000, 60_000),
+    )
+
+    assert config.drift_horizon_ns == 15_000_000_000
+    assert config.drift_horizon_ns_values == (
+        3_000_000_000,
+        15_000_000_000,
+        60_000_000_000,
+    )
+
+
 def test_decision_engine_sell_path_and_normal_cdf_edge() -> None:
     """Covers decision.py: SELL path and _normal_cdf with std<=0."""
     config = FrameworkConfig()
@@ -301,6 +315,32 @@ def test_transitions_load_compact_summary_statistics() -> None:
     assert stats.mean_holding_time_ns == 2_000.0
     assert stats.drift_mean_bps == 2.0
     assert stats.drift_std_bps == 1.0
+
+
+def test_loaded_edge_recency_starts_at_artifact_boundary() -> None:
+    kernel = TransitionKernel()
+    kernel.load_trained_payload({
+        "sample_count": 1_000_000,
+        "edges": {
+            "e1": {
+                "from_state": "a",
+                "to_state": "b",
+                "regime": "execution_flow",
+                "count": 200,
+                "session_drift_means_bps": [2.0, 2.5, 3.0, 3.5],
+                "directional_consensus": 1.0,
+                "cross_session_hit_rates": [0.6, 0.7, 0.8, 0.9],
+                "cross_session_hit_rate": 0.75,
+                "cross_session_hit_consensus": 1.0,
+            }
+        },
+    })
+
+    edge = EdgeKey("a", "b", MicrostructureRegime.EXECUTION_FLOW)
+    stats = kernel.get_edge(edge)
+
+    assert stats.last_observation_index == kernel.observation_index
+    assert kernel.shrunk_drift_mean(edge) == stats.decision_drift_mean_bps
 
 
 def test_edge_statistics_signal_to_noise_zero_std() -> None:

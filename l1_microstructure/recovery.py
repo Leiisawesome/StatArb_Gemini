@@ -27,6 +27,7 @@ class PendingOutcome:
     edge: EdgeKey
     reference_price: float
     resolve_timestamp_ns: int
+    expected_drift_bps: float | None = None
 
 
 @dataclass(frozen=True, slots=True)

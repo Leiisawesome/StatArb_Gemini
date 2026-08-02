@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Deque, Iterable
 
 import numpy as np
@@ -33,6 +33,7 @@ class FrameworkUpdate:
     submitted_requests: list[ExecutionRequest] = field(default_factory=list)
     execution_reports: list[ExecutionReport] = field(default_factory=list)
     resolved_outcomes: list[tuple[EdgeKey, float]] = field(default_factory=list)
+    resolved_drift_pairs: list[tuple[float, float]] = field(default_factory=list)
 
 
 class L1MicrostructureStateMachine:
@@ -42,8 +43,8 @@ class L1MicrostructureStateMachine:
         runtime_artifacts: RuntimeArtifactBundle | None = None,
         route_orders_externally: bool = False,
     ):
-        self.config = config or FrameworkConfig()
         self.runtime_artifacts = runtime_artifacts or RuntimeArtifactBundle()
+        self.config = self._config_for_runtime_artifacts(config or FrameworkConfig())
         self.route_orders_externally = route_orders_externally
         artifact_symbols = {
             artifact.symbol
@@ -87,6 +88,21 @@ class L1MicrostructureStateMachine:
         self.realized_volatility_by_symbol: dict[str, float] = {}
         self.late_event_count: int = 0
 
+    def _config_for_runtime_artifacts(self, config: FrameworkConfig) -> FrameworkConfig:
+        transition_model = self.runtime_artifacts.transition_model
+        if not isinstance(transition_model, dict) or "runtime_horizon_ns" not in transition_model:
+            return config
+        runtime_horizon_ns = int(transition_model["runtime_horizon_ns"])
+        if runtime_horizon_ns <= 0 or runtime_horizon_ns % 1_000_000 != 0:
+            raise ValueError("transition model runtime horizon must be a positive whole number of milliseconds")
+        runtime_horizon_ms = runtime_horizon_ns // 1_000_000
+        if config.transition.drift_horizon_ms == runtime_horizon_ms:
+            return config
+        return replace(
+            config,
+            transition=replace(config.transition, drift_horizon_ms=runtime_horizon_ms),
+        )
+
     def snapshot_state(self) -> StateMachineRecoverySnapshot:
         return StateMachineRecoveryCodec.snapshot(self)
 
@@ -108,7 +124,7 @@ class L1MicrostructureStateMachine:
         self._record_symbol_return(state)
         regime = self.regime_inferencer.update(state)
         self.feature_engine.set_regime_hint(regime.dominant_regime.value)
-        resolved_outcomes = self._resolve_pending_outcomes(state)
+        resolved_outcomes, resolved_drift_pairs = self._resolve_pending_outcomes(state)
         execution_reports = self._process_pending_orders(state)
         if self.route_orders_externally:
             submitted_requests = self._manage_open_position_requests(state, regime)
@@ -130,14 +146,39 @@ class L1MicrostructureStateMachine:
                 holding_time_ns=state.timestamp_ns - self.previous_state.timestamp_ns,
             )
             diagnostic = self.transition_kernel.diagnostic(transition_edge)
+            provisional_intent = self.decision_engine.decide(
+                transition_edge,
+                edge_stats,
+                diagnostic,
+                regime,
+                state,
+            )
+            execution_cost_bps = 0.0
+            if self.execution_simulator.execution_calibration is not None:
+                execution_cost_bps = self.execution_simulator.estimated_round_trip_cost_bps(
+                    provisional_intent,
+                    state,
+                )
+            intent = self.decision_engine.decide(
+                transition_edge,
+                edge_stats,
+                diagnostic,
+                regime,
+                state,
+                execution_cost_bps=(
+                    execution_cost_bps
+                    if self.execution_simulator.execution_calibration is not None
+                    else None
+                ),
+            )
             self.pending_outcomes.append(
                 PendingOutcome(
                     edge=transition_edge,
                     reference_price=state.book.microprice,
                     resolve_timestamp_ns=state.timestamp_ns + self.config.transition.drift_horizon_ns,
+                    expected_drift_bps=float(intent.posterior.mean_bps),
                 )
             )
-            intent = self.decision_engine.decide(transition_edge, edge_stats, diagnostic, regime, state)
             risk_decision = self._authorize_intent(intent, state)
             if risk_decision.approved:
                 request = self.execution_simulator.build_request(intent, state, risk_decision.quantity)
@@ -157,6 +198,7 @@ class L1MicrostructureStateMachine:
             submitted_requests=submitted_requests,
             execution_reports=execution_reports,
             resolved_outcomes=resolved_outcomes,
+            resolved_drift_pairs=resolved_drift_pairs,
         )
 
     def ingest_execution_report(self, report: ExecutionReport) -> None:
@@ -394,8 +436,12 @@ class L1MicrostructureStateMachine:
         )
         history.append(float(np.log(midpoint / previous_midpoint)))
 
-    def _resolve_pending_outcomes(self, state: ObservedState) -> list[tuple[EdgeKey, float]]:
+    def _resolve_pending_outcomes(
+        self,
+        state: ObservedState,
+    ) -> tuple[list[tuple[EdgeKey, float]], list[tuple[float, float]]]:
         resolved: list[tuple[EdgeKey, float]] = []
+        drift_pairs: list[tuple[float, float]] = []
         while self.pending_outcomes and self.pending_outcomes[0].resolve_timestamp_ns <= state.timestamp_ns:
             pending = self.pending_outcomes.popleft()
             if pending.reference_price <= 0:
@@ -403,7 +449,9 @@ class L1MicrostructureStateMachine:
             drift_bps = ((state.book.microprice - pending.reference_price) / pending.reference_price) * 10_000.0
             self.transition_kernel.attach_drift(pending.edge, drift_bps)
             resolved.append((pending.edge, float(drift_bps)))
-        return resolved
+            if pending.expected_drift_bps is not None:
+                drift_pairs.append((float(pending.expected_drift_bps), float(drift_bps)))
+        return resolved, drift_pairs
 
     def _process_pending_orders(self, state: ObservedState) -> list[ExecutionReport]:
         reports: list[ExecutionReport] = []

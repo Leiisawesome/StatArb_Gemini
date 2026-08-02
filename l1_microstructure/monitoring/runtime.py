@@ -115,17 +115,25 @@ class RuntimeMonitor:
 
     def publish_update(self, update: FrameworkUpdate, machine: L1MicrostructureStateMachine) -> RuntimeSnapshot:
         total_reports = max(len(machine.execution_history), 1)
+        resolved_expected_drift = None
         resolved_realized_drift = None
-        if update.resolved_outcomes:
+        drift_tracking_abs_error = None
+        if update.resolved_drift_pairs:
+            resolved_expected_drift = float(
+                sum(expected for expected, _ in update.resolved_drift_pairs) / len(update.resolved_drift_pairs)
+            )
             resolved_realized_drift = float(
-                sum(drift for _, drift in update.resolved_outcomes) / len(update.resolved_outcomes)
+                sum(realized for _, realized in update.resolved_drift_pairs) / len(update.resolved_drift_pairs)
+            )
+            drift_tracking_abs_error = float(
+                sum(abs(expected - realized) for expected, realized in update.resolved_drift_pairs)
+                / len(update.resolved_drift_pairs)
             )
 
         edge_count = 0
         if update.transition_edge is not None:
             edge_count = machine.transition_kernel.get_edge(update.transition_edge).count
 
-        expected_drift_bps = update.intent.posterior.mean_bps if update.intent is not None else None
         snapshot = RuntimeSnapshot(
             timestamp_ns=update.state.timestamp_ns,
             state_label=update.state.label,
@@ -137,10 +145,13 @@ class RuntimeMonitor:
                 "edge_activation_count": edge_count,
                 "fill_rate": machine.fill_count / total_reports,
                 "cancel_rate": machine.cancel_count / total_reports,
-                "expected_drift_bps": expected_drift_bps,
+                "expected_drift_bps": resolved_expected_drift,
                 "realized_drift_bps": resolved_realized_drift,
+                "drift_tracking_abs_error_bps": drift_tracking_abs_error,
                 "kill_switch_active": machine.risk_engine.halted,
                 "trade_count": machine.risk_engine.trade_count,
+                "realized_pnl": machine.risk_engine.realized_pnl,
+                "drawdown": machine.risk_engine.drawdown,
             },
         )
         self.sink.publish(snapshot)

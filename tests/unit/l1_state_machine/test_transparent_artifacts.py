@@ -43,8 +43,36 @@ def _trained_artifacts():
 
 
 def _validation_report(passed: bool) -> dict[str, object]:
-    baseline = EngineEvaluation(2, 0.25, 0.69, 0.10, 0.5, 0.0, -1.0, 100.0, 1_000)
-    candidate = EngineEvaluation(2, 0.10, 0.30, 0.05, 1.0, 1.0, 2.0, 100.0, 1_000)
+    baseline = EngineEvaluation(
+        2,
+        0.25,
+        0.69,
+        0.10,
+        0.5,
+        0.0,
+        -1.0,
+        100.0,
+        1_000,
+        decisive_count=2,
+        decision_rate=1.0,
+        decision_hit_rate=0.5,
+        mean_decision_net_drift_bps=-1.0,
+    )
+    candidate = EngineEvaluation(
+        2,
+        0.10,
+        0.30,
+        0.05,
+        1.0,
+        1.0,
+        2.0,
+        100.0,
+        1_000,
+        decisive_count=2,
+        decision_rate=1.0,
+        decision_hit_rate=1.0,
+        mean_decision_net_drift_bps=2.0,
+    )
     thresholds = PromotionThresholds(
         minimum_brier_improvement_fraction=0.0,
         maximum_log_loss_ratio=1.0,
@@ -54,6 +82,7 @@ def _validation_report(passed: bool) -> dict[str, object]:
         maximum_latency_ratio=1.0,
         maximum_memory_ratio=1.0,
         minimum_candidate_samples=2,
+        minimum_candidate_decisions=2,
     )
     promotion = TransparentPromotionGate(thresholds).evaluate(baseline, candidate)
     return {
@@ -153,4 +182,21 @@ def test_v2_publisher_rejects_unsubstantiated_validation_flag(tmp_path) -> None:
             trade_date="2026-07-14",
             artifacts=_trained_artifacts(),
             validation_report={"passed": True},
+        )
+
+
+def test_v2_publisher_rejects_legacy_validation_without_decision_evidence(tmp_path) -> None:
+    validation_report = _validation_report(True)
+    for evaluation_name in ("baseline", "candidate"):
+        evaluation = validation_report[evaluation_name]
+        assert isinstance(evaluation, dict)
+        evaluation.pop("decision_hit_rate")
+        evaluation.pop("mean_decision_net_drift_bps")
+
+    with pytest.raises(ValueError, match="decision evidence is incomplete"):
+        TransparentArtifactPublisher(LocalArtifactStore(tmp_path)).publish(
+            run_id="legacy-approval",
+            trade_date="2026-07-14",
+            artifacts=_trained_artifacts(),
+            validation_report=validation_report,
         )

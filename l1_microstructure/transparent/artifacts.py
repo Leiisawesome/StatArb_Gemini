@@ -355,6 +355,22 @@ def _validate_validation_report(payload: dict[str, object]) -> None:
         raise ValueError("transparent validation baseline and candidate samples are not aligned")
     if not isinstance(payload["thresholds"], dict):
         raise ValueError("transparent validation thresholds are malformed")
+    required_evaluation_fields = {
+        "decisive_count",
+        "decision_rate",
+        "decision_hit_rate",
+        "mean_decision_net_drift_bps",
+    }
+    if required_evaluation_fields.difference(baseline) or required_evaluation_fields.difference(candidate):
+        raise ValueError("transparent validation decision evidence is incomplete")
+    required_threshold_fields = {
+        "minimum_candidate_decisions",
+        "minimum_candidate_decision_rate",
+        "minimum_decision_hit_rate",
+        "minimum_mean_decision_net_drift_bps",
+    }
+    if required_threshold_fields.difference(payload["thresholds"]):
+        raise ValueError("transparent validation decision thresholds are incomplete")
     try:
         baseline_evaluation = EngineEvaluation(**baseline)
         candidate_evaluation = EngineEvaluation(**candidate)

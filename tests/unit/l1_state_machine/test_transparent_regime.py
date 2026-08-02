@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 import numpy as np
 
@@ -110,3 +112,37 @@ def test_semi_markov_duration_shape_is_fitted_from_variable_regime_runs() -> Non
     assert means[0] > 0
     assert 0.5 <= shapes[0] <= 10.0
     assert shapes[0] != 2.0
+
+
+def test_semi_markov_duration_fit_excludes_cross_session_gap() -> None:
+    assignments = np.asarray([0, 0, 0, 0], dtype=int)
+    base_states = tuple(_state(index, 0) for index in range(4))
+    second_day_ns = (
+        base_states[1].timestamp_ns
+        + 12 * 60 * 60 * 1_000_000_000
+    )
+    states = (
+        base_states[0],
+        base_states[1],
+        replace(
+            base_states[2],
+            timestamp_ns=second_day_ns,
+            book=replace(base_states[2].book, timestamp_ns=second_day_ns),
+        ),
+        replace(
+            base_states[3],
+            timestamp_ns=second_day_ns + 1_000_000_000,
+            book=replace(
+                base_states[3].book,
+                timestamp_ns=second_day_ns + 1_000_000_000,
+            ),
+        ),
+    )
+
+    means, _ = SemiMarkovRegimeTrainer()._fit_duration_models(
+        states,
+        assignments,
+        ("day-1", "day-1", "day-2", "day-2"),
+    )
+
+    assert means[0] < 10_000_000_000

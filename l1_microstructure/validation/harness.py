@@ -42,6 +42,7 @@ class RollingValidationHarness:
     execution_cancel_rate_column: str = "cancel_rate"
     execution_expected_drift_column: str = "expected_drift_bps"
     execution_realized_drift_column: str = "realized_drift_bps"
+    execution_tracking_error_column: str = "drift_tracking_abs_error_bps"
     execution_kill_switch_column: str = "kill_switch_active"
 
     def run(
@@ -350,6 +351,13 @@ class RollingValidationHarness:
     def _drift_tracking_error(self, frame: pd.DataFrame) -> float:
         if frame.empty:
             return 0.0
+        if self.execution_tracking_error_column in frame.columns:
+            paired_errors = pd.to_numeric(
+                frame[self.execution_tracking_error_column],
+                errors="coerce",
+            ).dropna()
+            if not paired_errors.empty:
+                return float(paired_errors.mean())
         required = {self.execution_expected_drift_column, self.execution_realized_drift_column}
         if not required.issubset(frame.columns):
             return 0.0

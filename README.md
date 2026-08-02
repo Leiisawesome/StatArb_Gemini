@@ -118,6 +118,8 @@ Current commands implemented by `l1_microstructure/cli.py` are:
 | `transparent-workflow` | Build and validate a transparent v2 shadow candidate from historical data |
 | `list-runs` | Inspect saved run manifests and filter by date, pass/fail, or quality gates |
 | `list-transparent-runs` | Inspect transparent v2 manifests and filter to validation-approved runs |
+| `batch-workflow` | Run the v1 research workflow once per symbol in a comma-separated list |
+| `batch-transparent-workflow` | Run transparent v2 once per symbol in a comma-separated list |
 | `paper-historical` | Load a stored artifact bundle and run the paper path against historical data |
 | `paper-live` | Load a stored artifact bundle and run the paper path against the live subscription flow |
 | `live-routed` | Exercise the lightweight routed boundary against a paper broker account |
@@ -146,6 +148,53 @@ leave-one-session-out directional reliability is weak.
 Feature, regime, transition, and replay state reset at every session boundary. A single
 `--trade-date` remains available for smoke testing and uses the legacy intraday
 half split.
+
+Build a transparent v2 candidate from at least six completed sessions so its
+two default promotion splits each test a complete unseen session:
+
+```powershell
+python -m l1_microstructure transparent-workflow `
+  --artifact-root output/l1_microstructure_artifacts `
+  --symbol AAPL `
+  --trade-date 2024-03-05 `
+  --trade-date 2024-03-06 `
+  --trade-date 2024-03-07 `
+  --trade-date 2024-03-08 `
+  --trade-date 2024-03-11 `
+  --trade-date 2024-03-12
+```
+
+V2 feature, vector, regime, transition, and label state reset at session
+boundaries. Multi-session validation uses expanding training windows and one
+complete held-out session per split. A one-date run remains an intraday
+diagnostic and is not cross-session promotion evidence.
+
+Train several symbols with the same date list (still **one model per symbol**):
+
+```powershell
+python -m l1_microstructure batch-workflow `
+  --artifact-root output/l1_microstructure_artifacts `
+  --symbols AAPL,MSFT `
+  --trade-date 2024-03-06 `
+  --trade-date 2024-03-07 `
+  --trade-date 2024-03-08 `
+  --trade-date 2024-03-11 `
+  --trade-date 2024-03-12
+python -m l1_microstructure batch-transparent-workflow `
+  --artifact-root output/l1_microstructure_artifacts `
+  --symbols AAPL,MSFT `
+  --trade-date 2024-03-05 `
+  --trade-date 2024-03-06 `
+  --trade-date 2024-03-07 `
+  --trade-date 2024-03-08 `
+  --trade-date 2024-03-11 `
+  --trade-date 2024-03-12
+```
+
+Paper/production campaigns accept any configured universe of 1–25 symbols in
+`config/production.json`. Each symbol must pin its own promoted v1 (and v2
+shadow) run IDs. Multi-symbol live paper uses `ProductionRuntime`, not the
+single-symbol legacy paper runners.
 
 Inspect saved runs:
 
