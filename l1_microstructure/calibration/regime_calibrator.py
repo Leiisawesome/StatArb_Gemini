@@ -362,7 +362,8 @@ class EmpiricalRegimeCalibrator:
             regime: max(int(float(holding_time_seconds.get(regime, 1.0)) * 1_000_000_000), 1)
             for regime in regime_order
         }
-        use_hsmm = any(float(duration_shapes.get(regime, 1.0)) != 1.0 for regime in regime_order)
+        # Match online filter: duration model present ⇒ Weibull stay; shape=1 is exponential.
+        use_hsmm = True
 
         for index, observation in enumerate(observations):
             log_likelihoods = {

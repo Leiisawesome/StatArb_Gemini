@@ -79,7 +79,8 @@ class DecisionConfig:
     posterior_prior_beta: float = 4.0
     # Soft-regime edge mixture: E[d|from,to,history] = sum_R P(R|history) E[d|from,to,R]
     # Kernel training still hard-assigns under the MAP regime; only decision readout mixes.
-    soft_regime_mixture: bool = True
+    # Off by default until a retrain + OOS gate promotes it (behavior change for cold starts).
+    soft_regime_mixture: bool = False
     soft_regime_min_weight: float = 0.05
     # Fail closed when soft mixture puts less posterior mass on edges with data.
     soft_regime_min_supported_weight: float = 0.50

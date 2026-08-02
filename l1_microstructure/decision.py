@@ -236,7 +236,7 @@ class DecisionEngine:
         observation_confidence = self._observation_confidence(posterior, regime)
         edge = view.primary_edge
         holding_time_ns = regime.expected_holding_time_ns
-        reason_prefix = "soft-regime " if soft_mixture and len(view.components) > 1 else ""
+        multi_soft = soft_mixture and len(view.components) > 1
 
         if soft_mixture and view.supported_weight < self.config.soft_regime_min_supported_weight:
             return self._hold(
@@ -287,24 +287,34 @@ class DecisionEngine:
             posterior.probability_up > self.config.entry_probability_threshold
             and view.shrunk_drift_bps > 0.0
         ):
+            reason = (
+                "soft-regime posterior drift exceeds costs"
+                if multi_soft
+                else "posterior drift exceeds costs"
+            )
             return TradeIntent(
                 TradeAction.BUY,
                 edge,
                 posterior,
                 holding_time_ns,
-                f"{reason_prefix}posterior drift exceeds costs".strip(),
+                reason,
                 observation_confidence=observation_confidence,
             )
         if (
             posterior.probability_down > self.config.entry_probability_threshold
             and view.shrunk_drift_bps < 0.0
         ):
+            reason = (
+                "soft-regime negative posterior drift exceeds costs"
+                if multi_soft
+                else "negative posterior drift exceeds costs"
+            )
             return TradeIntent(
                 TradeAction.SELL,
                 edge,
                 posterior,
                 holding_time_ns,
-                f"{reason_prefix}negative posterior drift exceeds costs".strip(),
+                reason,
                 observation_confidence=observation_confidence,
             )
         return self._hold(

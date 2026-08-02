@@ -207,12 +207,68 @@ def test_soft_decision_mixes_opposing_regime_edges() -> None:
     assert soft_intent.edge == edge_calm  # primary identity remains MAP
 
 
-def test_pipeline_uses_soft_mixture_by_default() -> None:
+def test_soft_mixture_is_opt_in_by_default() -> None:
     config = FrameworkConfig()
-    assert config.decision.soft_regime_mixture is True
+    assert config.decision.soft_regime_mixture is False
     machine = L1MicrostructureStateMachine(config)
-    # Smoke: machine constructs and processes without error under soft path.
     first = machine.on_event(_quote(1_000_000_000, 100.0, 100.02))
     second = machine.on_event(_quote(2_000_000_000, 100.05, 100.08))
     assert first is not None
     assert second is not None
+
+
+def test_soft_decision_fails_closed_on_unsupported_regime_mass() -> None:
+    """Mixture mass on empty edges must not trade."""
+    config = FrameworkConfig()
+    config.transition.min_edge_observations = 10
+    config.transition.min_edge_training_sessions = 0
+    config.transition.min_directional_consensus = 0.0
+    config.transition.min_cross_session_hit_rate = 0.0
+    config.transition.min_cross_session_hit_consensus = 0.0
+    config.decision.min_alpha_score = 0.0
+    config.decision.min_observation_confidence = 0.0
+    config.decision.soft_regime_min_supported_weight = 0.50
+    config.decision.soft_regime_min_weight = 0.05
+
+    kernel = TransitionKernel(config.transition)
+    # Only flow has data; calm (dominant mass) is empty.
+    edge_flow = EdgeKey("a", "b", MicrostructureRegime.EXECUTION_FLOW)
+    _seed_edge(
+        kernel,
+        edge_flow,
+        count=40,
+        drifts=[6.0, 6.0, 6.0, 6.0],
+        sessions=[6.0, 6.0, 6.0, 6.0],
+    )
+
+    state = FeatureEngine().update(_quote(1_000_000_000))
+    assert state is not None
+    regime = _regime_posterior(
+        {
+            MicrostructureRegime.CALM_LIQUIDITY: 0.60,
+            MicrostructureRegime.EXECUTION_FLOW: 0.40,
+            MicrostructureRegime.LIQUIDITY_SHOCK: 0.0,
+            MicrostructureRegime.COMPETITIVE_LIQUIDITY: 0.0,
+        }
+    )
+    soft_view = kernel.soft_edge_view(
+        "a",
+        "b",
+        regime.probabilities,
+        primary_regime=regime.dominant_regime,
+        min_weight=config.decision.soft_regime_min_weight,
+    )
+    assert soft_view.supported_weight == 0.40  # only flow has observations
+    assert soft_view.supported_weight < config.decision.soft_regime_min_supported_weight
+
+    engine = DecisionEngine(config.decision, config.transition)
+    intent = engine.decide(
+        EdgeKey("a", "b", regime.dominant_regime),
+        kernel.get_edge(EdgeKey("a", "b", regime.dominant_regime)),
+        soft_view.diagnostic,
+        regime,
+        state,
+        soft_view=soft_view,
+    )
+    assert intent.action is TradeAction.HOLD
+    assert intent.reason == "insufficient supported regime mass"

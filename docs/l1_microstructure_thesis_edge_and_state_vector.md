@@ -214,7 +214,7 @@ Kernel **training** still hard-assigns each observed transition to the MAP regim
 e^{\text{train}} = (s_{\text{from}}, s_{\text{to}}, R^{\star}),\quad R^{\star} = \arg\max_R P(R \mid \text{history}).
 \]
 
-Decision **readout** can mix across regimes using the full posterior (enabled by default via `DecisionConfig.soft_regime_mixture`):
+Decision **readout** can mix across regimes using the full posterior (opt-in via `DecisionConfig.soft_regime_mixture`; default off until OOS promotion):
 
 \[
 \mathbb{E}[d_H \mid s_{\text{from}}, s_{\text{to}}, \text{history}]
