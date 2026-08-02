@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from math import erf, exp, sqrt
+from math import erf, exp, isfinite, sqrt
 
 from .config import DecisionConfig, TransitionConfig
 from .features import ObservedState
@@ -105,7 +105,7 @@ class DecisionEngine:
         execution_cost_bps: float | None = None,
     ) -> TradeIntent:
         if execution_cost_bps is not None and (
-            not np.isfinite(execution_cost_bps) or execution_cost_bps < 0.0
+            not isfinite(execution_cost_bps) or execution_cost_bps < 0.0
         ):
             raise ValueError("execution cost must be finite and non-negative")
         transaction_cost_bps = (
