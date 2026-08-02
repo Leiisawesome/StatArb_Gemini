@@ -4,9 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from math import erf, sqrt
-
-import numpy as np
+from math import erf, exp, sqrt
 
 from .config import DecisionConfig, TransitionConfig
 from .features import ObservedState
@@ -64,11 +62,13 @@ class DecisionEngine:
         if not samples:
             return PosteriorEstimate(0.0, float("inf"), 0.5, 0.5, threshold_bps, 0)
 
-        data = np.array(samples, dtype=float)
-        sample_count = data.size
-        sample_mean = float(np.mean(data))
-        centered = data - sample_mean
-        sample_ss = float(np.sum(centered * centered))
+        # Pure-Python moments: same NI-Gamma update, avoids NumPy alloc on every edge.
+        sample_count = len(samples)
+        sample_mean = sum(samples) / sample_count
+        sample_ss = 0.0
+        for value in samples:
+            delta = value - sample_mean
+            sample_ss += delta * delta
 
         mu0 = self.config.posterior_prior_mean_bps
         kappa0 = self.config.posterior_prior_strength
@@ -262,7 +262,7 @@ class DecisionEngine:
         else:
             dispersion_confidence = threshold_bps / (threshold_bps + max(posterior.std_bps, 0.0))
         observation_target = max(float(self.transition_config.min_edge_observations), 1.0)
-        sample_confidence = 1.0 - np.exp(-float(posterior.sample_count) / observation_target)
+        sample_confidence = 1.0 - exp(-float(posterior.sample_count) / observation_target)
         confidence = (
             0.35 * regime_confidence
             + 0.30 * directional_confidence

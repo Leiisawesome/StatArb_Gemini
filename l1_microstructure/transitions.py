@@ -83,14 +83,21 @@ class EdgeStatistics:
 
     @property
     def signal_to_noise(self) -> float:
-        samples = self.posterior_samples_bps
-        if len(samples) < 2:
-            return 0.0
-        mean = float(np.mean(samples))
-        std = float(np.std(samples, ddof=1))
+        # Prefer O(1) Welford stats when decisions use raw drift samples; session means
+        # remain a short list and use pure-Python moments (avoid NumPy on every edge).
         if self.session_drift_means_bps:
+            samples = self.session_drift_means_bps
+            count = len(samples)
+            if count < 2:
+                return 0.0
+            mean = sum(samples) / count
+            variance = sum((value - mean) ** 2 for value in samples) / (count - 1)
+            std = sqrt(max(variance, 0.0))
             return abs(mean) / max(std, 1e-6)
-        return abs(mean) / std if std > 0 else 0.0
+        if self._d_count < 2:
+            return 0.0
+        std = self.drift_std_bps
+        return abs(self._d_mean) / std if std > 0 else 0.0
 
     @property
     def training_session_count(self) -> int:
@@ -102,8 +109,10 @@ class EdgeStatistics:
 
     @property
     def decision_drift_mean_bps(self) -> float:
-        samples = self.posterior_samples_bps
-        return float(np.mean(samples)) if samples else 0.0
+        if self.session_drift_means_bps:
+            samples = self.session_drift_means_bps
+            return sum(samples) / len(samples) if samples else 0.0
+        return self.drift_mean_bps
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,7 +141,10 @@ class TransitionKernel:
         self._precision_stale_count: int = 0
 
     def mahalanobis_distance(self, previous_vector: np.ndarray, current_vector: np.ndarray) -> float:
-        delta = np.asarray(current_vector, dtype=float) - np.asarray(previous_vector, dtype=float)
+        # Vectors are small (5-D); avoid copy when already float arrays.
+        previous = previous_vector if isinstance(previous_vector, np.ndarray) else np.asarray(previous_vector, dtype=float)
+        current = current_vector if isinstance(current_vector, np.ndarray) else np.asarray(current_vector, dtype=float)
+        delta = current - previous
         if len(self.increment_history) < 5:
             self.increment_history.append(delta)
             return float(np.linalg.norm(delta))

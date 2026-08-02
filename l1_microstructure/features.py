@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from bisect import bisect_left, insort
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
-from math import floor, log, sqrt
+from math import exp, floor, log, sqrt
 from typing import Deque, Iterable
 
 import numpy as np
@@ -55,31 +55,46 @@ class ObservedState:
     trade_state: PressureState
     flicker_state: FlickerState
     volatility_state: VolatilityState
+    # Cached geometry/topology — built once; avoids realloc/join on every transition check.
+    _vector: np.ndarray = field(init=False, repr=False, compare=False, hash=False)
+    _label: str = field(init=False, repr=False, compare=False, hash=False)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "_vector",
+            np.array(
+                [
+                    self.spread_norm,
+                    self.quote_pressure,
+                    self.trade_pressure,
+                    self.flicker_intensity,
+                    self.realized_volatility,
+                ],
+                dtype=float,
+            ),
+        )
+        object.__setattr__(
+            self,
+            "_label",
+            "|".join(
+                (
+                    self.spread_state.value,
+                    self.quote_state.value,
+                    self.trade_state.value,
+                    self.flicker_state.value,
+                    self.volatility_state.value,
+                )
+            ),
+        )
 
     @property
     def vector(self) -> np.ndarray:
-        return np.array(
-            [
-                self.spread_norm,
-                self.quote_pressure,
-                self.trade_pressure,
-                self.flicker_intensity,
-                self.realized_volatility,
-            ],
-            dtype=float,
-        )
+        return self._vector
 
     @property
     def label(self) -> str:
-        return "|".join(
-            [
-                self.spread_state.value,
-                self.quote_state.value,
-                self.trade_state.value,
-                self.flicker_state.value,
-                self.volatility_state.value,
-            ]
-        )
+        return self._label
 
 
 class FeatureEngine:
@@ -110,6 +125,15 @@ class FeatureEngine:
         )
         self.flicker_intensity: float = self.flicker_baseline
         self.last_quote_ts: int | None = None
+        self._default_surface: StateRegimeSurface | None = None
+        if self.state_calibration is not None:
+            self._default_surface = StateRegimeSurface(
+                spread_quantiles=self.state_calibration.spread_quantiles,
+                volatility_quantiles=self.state_calibration.volatility_quantiles,
+                flicker_baseline=self.state_calibration.flicker_baseline,
+                quote_pressure_scale=self.state_calibration.quote_pressure_scale,
+                sample_count=0,
+            )
 
     def set_regime_hint(self, regime: str | None) -> None:
         self.active_regime_hint = regime
@@ -202,7 +226,7 @@ class FeatureEngine:
             self.flicker_intensity = self.flicker_baseline
             return
         dt_seconds = max((timestamp_ns - self.last_quote_ts) / 1_000_000_000.0, 1e-6)
-        mean_reversion = np.exp(-self.config.flicker_mean_reversion * dt_seconds)
+        mean_reversion = exp(-self.config.flicker_mean_reversion * dt_seconds)
         baseline = self.flicker_baseline
         self.flicker_intensity = baseline + (self.flicker_intensity - baseline) * mean_reversion
         self.flicker_intensity += self.config.flicker_jump
@@ -214,23 +238,31 @@ class FeatureEngine:
         dt_seconds = max((timestamp_ns - self.last_quote_ts) / 1_000_000_000.0, 0.0)
         return self.flicker_baseline + (
             self.flicker_intensity - self.flicker_baseline
-        ) * np.exp(-self.config.flicker_mean_reversion * dt_seconds)
+        ) * exp(-self.config.flicker_mean_reversion * dt_seconds)
 
     def _normalize_quote_pressure(self, pressure: float) -> float:
         surface = self._active_surface()
         if surface is None:
             return pressure
         scale = max(surface.quote_pressure_scale, 1e-6)
-        return float(np.clip(pressure / scale, -1.0, 1.0))
+        scaled = pressure / scale
+        if scaled > 1.0:
+            return 1.0
+        if scaled < -1.0:
+            return -1.0
+        return float(scaled)
 
     def _quote_pressure_posterior(self) -> float:
-        history = list(self.quote_history)
-        if len(history) < 2:
+        if len(self.quote_history) < 2:
             return 0.0
 
         buy_evidence = 1.0
         sell_evidence = 1.0
-        for previous, current in zip(history[:-1], history[1:]):
+        previous = None
+        for current in self.quote_history:
+            if previous is None:
+                previous = current
+                continue
             if current.bid_size >= previous.bid_size:
                 buy_evidence += 1.0
             else:
@@ -247,6 +279,7 @@ class FeatureEngine:
                 buy_evidence += 2.0
             elif current.ask_price > previous.ask_price:
                 sell_evidence += 2.0
+            previous = current
 
         posterior_mean = buy_evidence / (buy_evidence + sell_evidence)
         return float(2.0 * posterior_mean - 1.0)
@@ -331,13 +364,7 @@ class FeatureEngine:
             regime_surface = self.state_calibration.regime_surfaces.get(self.active_regime_hint)
             if regime_surface is not None:
                 return regime_surface
-        return StateRegimeSurface(
-            spread_quantiles=self.state_calibration.spread_quantiles,
-            volatility_quantiles=self.state_calibration.volatility_quantiles,
-            flicker_baseline=self.state_calibration.flicker_baseline,
-            quote_pressure_scale=self.state_calibration.quote_pressure_scale,
-            sample_count=0,
-        )
+        return self._default_surface
 
     def rebuild_rolling_caches(self) -> None:
         """Rebuild derived rolling state after snapshot recovery or direct restoration."""
