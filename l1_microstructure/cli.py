@@ -54,6 +54,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_workflow_command(args)
     if args.command == "transparent-workflow":
         return _run_transparent_workflow_command(args)
+    if args.command == "batch-workflow":
+        return _run_batch_workflow_command(args)
+    if args.command == "batch-transparent-workflow":
+        return _run_batch_transparent_workflow_command(args)
     if args.command == "list-runs":
         return _run_list_runs_command(args)
     if args.command == "list-transparent-runs":
@@ -109,6 +113,48 @@ def build_parser() -> argparse.ArgumentParser:
     )
     transparent_workflow_parser.add_argument("--run-id", default=None)
     transparent_workflow_parser.add_argument("--transition-threshold", type=float, default=None)
+
+    batch_workflow_parser = subparsers.add_parser(
+        "batch-workflow",
+        help="run v1 research workflow once per configured symbol (sequential)",
+    )
+    batch_workflow_parser.add_argument("--artifact-root", required=True)
+    batch_workflow_parser.add_argument(
+        "--symbols",
+        required=True,
+        help="comma-separated tickers, e.g. AAPL,MSFT,NVDA",
+    )
+    batch_workflow_parser.add_argument(
+        "--trade-date",
+        required=True,
+        action="append",
+        help="completed U.S. session date; repeat for walk-forward validation",
+    )
+    batch_workflow_parser.add_argument("--transition-threshold", type=float, default=None)
+    batch_workflow_parser.add_argument("--runtime-horizon-ms", type=int, default=None)
+    batch_workflow_parser.add_argument(
+        "--allow-unexecuted-validation",
+        action="store_true",
+        help="research-only override that permits validation without execution or bootstrap evidence",
+    )
+
+    batch_transparent_parser = subparsers.add_parser(
+        "batch-transparent-workflow",
+        help="run transparent v2 workflow once per configured symbol (sequential)",
+    )
+    batch_transparent_parser.add_argument("--artifact-root", required=True)
+    batch_transparent_parser.add_argument(
+        "--symbols",
+        required=True,
+        help="comma-separated tickers, e.g. AAPL,MSFT,NVDA",
+    )
+    batch_transparent_parser.add_argument(
+        "--trade-date",
+        required=True,
+        action="append",
+        help="completed U.S. session date; repeat for expanding cross-session validation",
+    )
+    batch_transparent_parser.add_argument("--transition-threshold", type=float, default=None)
 
     list_runs_parser = subparsers.add_parser("list-runs")
     list_runs_parser.add_argument("--artifact-root", required=True)
@@ -214,17 +260,41 @@ def _live_source() -> MassiveWebSocketDataSource:
     )
 
 
-def _run_workflow_command(args: argparse.Namespace) -> int:
-    source = _historical_source()
+def _parse_symbol_list(raw: str) -> tuple[str, ...]:
+    symbols = tuple(
+        dict.fromkeys(part.strip().upper() for part in raw.split(",") if part.strip())
+    )
+    if not symbols:
+        raise ValueError("at least one symbol is required")
+    if len(symbols) > 25:
+        raise ValueError("batch workflows accept at most 25 symbols")
+    return symbols
+
+
+def _trade_dates_from_args(args: argparse.Namespace) -> tuple[date, ...]:
     requested_dates = args.trade_date if isinstance(args.trade_date, list) else [args.trade_date]
-    trade_dates = tuple(sorted({date.fromisoformat(value) for value in requested_dates}))
-    events = [
+    return tuple(sorted({date.fromisoformat(value) for value in requested_dates}))
+
+
+def _load_symbol_events(
+    source: MassiveRESTDataSource,
+    *,
+    symbol: str,
+    trade_dates: tuple[date, ...],
+) -> list[MarketEvent]:
+    return [
         event
         for trade_date in trade_dates
         for event in source.load_historical(
-            HistoricalBatchRequest(symbols=(args.symbol,), trade_date=trade_date)
+            HistoricalBatchRequest(symbols=(symbol,), trade_date=trade_date)
         )
     ]
+
+
+def _run_workflow_command(args: argparse.Namespace) -> int:
+    source = _historical_source()
+    trade_dates = _trade_dates_from_args(args)
+    events = _load_symbol_events(source, symbol=args.symbol, trade_dates=trade_dates)
     workflow = ArtifactDrivenResearchWorkflow(
         args.artifact_root,
         framework_config=_framework_config(args.transition_threshold, args.runtime_horizon_ms),
@@ -251,15 +321,8 @@ def _run_workflow_command(args: argparse.Namespace) -> int:
 
 def _run_transparent_workflow_command(args: argparse.Namespace) -> int:
     source = _historical_source()
-    requested_dates = args.trade_date if isinstance(args.trade_date, list) else [args.trade_date]
-    trade_dates = tuple(sorted({date.fromisoformat(value) for value in requested_dates}))
-    events = [
-        event
-        for trade_date in trade_dates
-        for event in source.load_historical(
-            HistoricalBatchRequest(symbols=(args.symbol,), trade_date=trade_date)
-        )
-    ]
+    trade_dates = _trade_dates_from_args(args)
+    events = _load_symbol_events(source, symbol=args.symbol, trade_dates=trade_dates)
     workflow = TransparentArtifactDrivenWorkflow(
         args.artifact_root,
         framework_config=_framework_config(args.transition_threshold),
@@ -277,6 +340,113 @@ def _run_transparent_workflow_command(args: argparse.Namespace) -> int:
         sort_keys=True,
     ))
     return 0
+
+
+def _run_batch_workflow_command(args: argparse.Namespace) -> int:
+    symbols = _parse_symbol_list(args.symbols)
+    trade_dates = _trade_dates_from_args(args)
+    source = _historical_source()
+    results: list[dict[str, Any]] = []
+    failures: list[dict[str, str]] = []
+    for symbol in symbols:
+        try:
+            events = _load_symbol_events(source, symbol=symbol, trade_dates=trade_dates)
+            workflow = ArtifactDrivenResearchWorkflow(
+                args.artifact_root,
+                framework_config=_framework_config(
+                    args.transition_threshold,
+                    args.runtime_horizon_ms,
+                ),
+                validation_harness=(
+                    RollingValidationHarness(
+                        minimum_fill_rate=0.0,
+                        maximum_cancel_rate=1.0,
+                        maximum_drift_tracking_error_bps=float("inf"),
+                        minimum_directional_test_rows=0,
+                        bootstrap_sample_count=0,
+                        minimum_bootstrap_hit_rate_lower_bound=0.0,
+                        minimum_bootstrap_decay_ratio_lower_bound=0.0,
+                    )
+                    if args.allow_unexecuted_validation
+                    else None
+                ),
+            )
+            result = workflow.run(symbol=symbol, events=events)
+            payload = _workflow_result_to_json(result)
+            payload["trade_dates"] = [value.isoformat() for value in trade_dates]
+            results.append(payload)
+        except Exception as exc:
+            failures.append(
+                {
+                    "symbol": symbol,
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                }
+            )
+    print(
+        json.dumps(
+            {
+                "engine": "v1",
+                "symbols": list(symbols),
+                "trade_dates": [value.isoformat() for value in trade_dates],
+                "result_count": len(results),
+                "failure_count": len(failures),
+                "results": results,
+                "failures": failures,
+            },
+            sort_keys=True,
+        )
+    )
+    return 0 if not failures else 2
+
+
+def _run_batch_transparent_workflow_command(args: argparse.Namespace) -> int:
+    symbols = _parse_symbol_list(args.symbols)
+    trade_dates = _trade_dates_from_args(args)
+    source = _historical_source()
+    results: list[dict[str, Any]] = []
+    failures: list[dict[str, str]] = []
+    for symbol in symbols:
+        try:
+            events = _load_symbol_events(source, symbol=symbol, trade_dates=trade_dates)
+            workflow = TransparentArtifactDrivenWorkflow(
+                args.artifact_root,
+                framework_config=_framework_config(args.transition_threshold),
+            )
+            result = workflow.run(symbol=symbol, events=events)
+            results.append(
+                {
+                    "symbol": result.symbol,
+                    "run_id": result.run_id,
+                    "split_count": result.split_count,
+                    "trade_dates": [value.isoformat() for value in trade_dates],
+                    "artifact_ids": dict(result.manifest.artifact_ids),
+                    "validation": result.validation_report.to_dict(),
+                }
+            )
+        except Exception as exc:
+            failures.append(
+                {
+                    "symbol": symbol,
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                }
+            )
+    print(
+        json.dumps(
+            {
+                "engine": "v2",
+                "symbols": list(symbols),
+                "trade_dates": [value.isoformat() for value in trade_dates],
+                "result_count": len(results),
+                "failure_count": len(failures),
+                "results": results,
+                "failures": failures,
+            },
+            sort_keys=True,
+        )
+    )
+    return 0 if not failures else 2
 
 
 def _run_list_runs_command(args: argparse.Namespace) -> int:

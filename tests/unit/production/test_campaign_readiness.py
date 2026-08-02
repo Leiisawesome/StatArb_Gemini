@@ -12,12 +12,19 @@ from l1_microstructure.production.preflight import (
 )
 
 
-def _config(tmp_path, *, drill: bool = False) -> ProductionConfig:
+def _config(
+    tmp_path,
+    *,
+    drill: bool = False,
+    symbols: tuple[str, ...] = ("AAPL",),
+) -> ProductionConfig:
+    promoted = {symbol: f"{symbol.lower()}-v1-approved" for symbol in symbols}
+    shadow = {symbol: f"{symbol.lower()}-v2-approved" for symbol in symbols}
     return ProductionConfig(
-        symbols=("AAPL",),
+        symbols=symbols,
         artifact_root=tmp_path / "artifacts",
-        promoted_run_ids={"AAPL": "aapl-v1-approved"},
-        transparent_shadow_run_ids={"AAPL": "aapl-v2-approved"},
+        promoted_run_ids=promoted,
+        transparent_shadow_run_ids=shadow,
         database_path=tmp_path / ("paper-drills.sqlite3" if drill else "trading.sqlite3"),
         broker_env_file=tmp_path / ("broker.drill.env" if drill else "broker.paper.env"),
         api_port=8766 if drill else 8765,
@@ -115,3 +122,42 @@ def test_campaign_readiness_rejects_placeholder_artifacts_and_shared_drill_bound
 
     failed = {check.code for check in report.checks if not check.passed}
     assert failed >= {"campaign.artifacts_pinned", "drill.isolated"}
+
+
+def test_campaign_readiness_accepts_configured_multi_symbol_universe(tmp_path) -> None:
+    symbols = ("AAPL", "MSFT")
+    production = _config(tmp_path, symbols=symbols)
+    drill = _config(tmp_path, drill=True, symbols=symbols)
+    report = _evaluate(tmp_path, production_config=production, drill_config=drill)
+
+    assert report.passed
+    assert list(report.frozen["symbols"]) == ["AAPL", "MSFT"]
+    universe = next(check for check in report.checks if check.code == "campaign.universe_bounds")
+    assert universe.passed
+    assert universe.details["symbol_count"] == 2
+    assert "campaign.single_symbol" not in {check.code for check in report.checks}
+
+
+def test_campaign_readiness_requires_final_artifact_pins_for_every_symbol(tmp_path) -> None:
+    production = _config(tmp_path, symbols=("AAPL", "MSFT"))
+    production = ProductionConfig(
+        symbols=production.symbols,
+        artifact_root=production.artifact_root,
+        promoted_run_ids={
+            "AAPL": "aapl-v1-approved",
+            "MSFT": "replace-with-validation-approved-v1-run-id",
+        },
+        transparent_shadow_run_ids={
+            "AAPL": "aapl-v2-approved",
+            "MSFT": "msft-v2-approved",
+        },
+        database_path=production.database_path,
+        broker_env_file=production.broker_env_file,
+        api_port=production.api_port,
+    )
+    drill = _config(tmp_path, drill=True, symbols=("AAPL", "MSFT"))
+    report = _evaluate(tmp_path, production_config=production, drill_config=drill)
+
+    failed = {check.code for check in report.checks if not check.passed}
+    assert "campaign.artifacts_pinned" in failed
+    assert not report.passed

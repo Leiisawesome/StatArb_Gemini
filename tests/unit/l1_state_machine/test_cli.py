@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from l1_microstructure.cli import _framework_config, main
+from l1_microstructure.cli import _framework_config, _parse_symbol_list, main
 from l1_microstructure.events import MarketEvent
 from l1_microstructure.execution import ExecutionReport
 from l1_microstructure.features import FeatureEngine
@@ -105,6 +105,44 @@ def test_cli_framework_config_selects_an_explicit_trained_runtime_horizon() -> N
 
     with pytest.raises(ValueError, match="configured training horizons"):
         _framework_config(None, runtime_horizon_ms=7_000)
+
+
+def test_parse_symbol_list_normalizes_and_dedupes() -> None:
+    assert _parse_symbol_list("aapl, MSFT, aapl,nvda") == ("AAPL", "MSFT", "NVDA")
+    with pytest.raises(ValueError, match="at least one"):
+        _parse_symbol_list(" , , ")
+
+
+def test_cli_batch_workflow_runs_each_configured_symbol(tmp_path, capsys) -> None:
+    multi_payloads = []
+    for symbol in ("AAPL", "MSFT"):
+        for payload in _payloads():
+            multi_payloads.append({**payload, "sym": symbol})
+    source = FixtureMarketDataSource(multi_payloads)
+
+    with patch("l1_microstructure.cli._historical_source", return_value=source):
+        exit_code = main(
+            [
+                "batch-workflow",
+                "--artifact-root",
+                str(tmp_path / "artifacts"),
+                "--symbols",
+                "AAPL,MSFT",
+                "--trade-date",
+                "2024-03-11",
+                "--transition-threshold",
+                "0.0",
+                "--allow-unexecuted-validation",
+            ]
+        )
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["engine"] == "v1"
+    assert payload["symbols"] == ["AAPL", "MSFT"]
+    assert payload["result_count"] == 2
+    assert payload["failure_count"] == 0
+    assert {item["symbol"] for item in payload["results"]} == {"AAPL", "MSFT"}
 
 
 def test_cli_workflow_accepts_repeated_trade_dates_for_walk_forward_validation(tmp_path, capsys) -> None:

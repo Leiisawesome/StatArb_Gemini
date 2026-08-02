@@ -203,8 +203,10 @@ gate covers deterministic safety behavior; external evidence proves the actual
 broker and workstation environment.
 
 Live mode additionally requires `IBKR_PAPER_TRADING=false` and the exact JSON
-value `"live_risk_acknowledgement": "I_ACCEPT_LIVE_CAPITAL_RISK"`. Begin with
-one symbol and an account-level notional cap before expanding the universe.
+value `"live_risk_acknowledgement": "I_ACCEPT_LIVE_CAPITAL_RISK"`. Begin with a
+small configured universe (1–N symbols, max 25), per-symbol promoted artifacts,
+and conservative `max_symbol_exposure` / `max_gross_exposure` before expanding
+the book.
 
 External smoke tests can contact Massive and submit IBKR paper orders. They run
 only when explicitly requested:

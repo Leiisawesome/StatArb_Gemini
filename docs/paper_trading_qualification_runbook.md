@@ -62,12 +62,32 @@ The examples below use PowerShell from the repository root.
    shell history, configuration, logs, or chat.
 
 3. Copy `config/production.example.json` to the ignored
-   `config/production.json`. For the first campaign, use one symbol, normally
-   `AAPL`, one validation-approved v1 routing run, and one validation-approved
-   v2 shadow run:
+   `config/production.json`. Configure any universe of **1–25** symbols. Every
+   symbol needs its own validation-approved v1 routing run and v2 shadow run.
+   Training remains **per symbol**; production runs all symbols under one
+   portfolio risk envelope (`max_symbol_exposure` per name, `max_gross_exposure`
+   across the book).
 
    ```powershell
    Copy-Item config\production.example.json config\production.json
+   # Repeat list-runs / list-transparent-runs for each symbol, or train a batch:
+   uv run l1-microstructure batch-workflow `
+     --artifact-root var/artifacts `
+     --symbols AAPL,MSFT `
+     --trade-date 2026-07-14 `
+     --trade-date 2026-07-15 `
+     --trade-date 2026-07-16 `
+     --trade-date 2026-07-17 `
+     --trade-date 2026-07-20
+   uv run l1-microstructure batch-transparent-workflow `
+     --artifact-root var/artifacts `
+     --symbols AAPL,MSFT `
+     --trade-date 2026-07-13 `
+     --trade-date 2026-07-14 `
+     --trade-date 2026-07-15 `
+     --trade-date 2026-07-16 `
+     --trade-date 2026-07-17 `
+     --trade-date 2026-07-20
    uv run l1-microstructure list-runs `
      --artifact-root var/artifacts `
      --symbol AAPL `
@@ -78,32 +98,13 @@ The examples below use PowerShell from the repository root.
      --passing-only
    ```
 
-   If either list is empty, create candidates from agreed completed historical
-   sessions, then repeat the passing-only queries. Use at least six dates for
-   transparent v2 so its two default expanding splits each evaluate a complete
-   unseen session after at least four training sessions. A single-date v2 run
-   is diagnostic only. Publishing a failed run does not make it eligible for
-   the campaign:
-
-   ```powershell
-   uv run l1-microstructure workflow `
-     --artifact-root var/artifacts `
-     --symbol AAPL `
-     --trade-date 2026-07-14 `
-     --trade-date 2026-07-15 `
-     --trade-date 2026-07-16 `
-     --trade-date 2026-07-17 `
-     --trade-date 2026-07-20
-   uv run l1-microstructure transparent-workflow `
-     --artifact-root var/artifacts `
-     --symbol AAPL `
-     --trade-date 2026-07-13 `
-     --trade-date 2026-07-14 `
-     --trade-date 2026-07-15 `
-     --trade-date 2026-07-16 `
-     --trade-date 2026-07-17 `
-     --trade-date 2026-07-20
-   ```
+   If a symbol’s list is empty, create candidates from agreed completed historical
+   sessions for that ticker, then repeat the passing-only query. Use at least six
+   dates for transparent v2 so its two default expanding splits each evaluate a
+   complete unseen session after at least four training sessions. A single-date
+   v2 run is diagnostic only. Publishing a failed run does not make it eligible
+   for the campaign. Pin final run IDs for **every** configured symbol before
+   campaign readiness.
 
 4. In `config/production.json`, verify:
 

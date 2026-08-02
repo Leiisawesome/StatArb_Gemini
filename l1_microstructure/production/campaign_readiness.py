@@ -106,9 +106,13 @@ class PaperCampaignReadinessEvaluator:
                 {"failed_checks": [check.code for check in self.preflight.failed_checks]},
             ),
             CampaignReadinessCheck(
-                "campaign.single_symbol",
-                len(self.production.symbols) == 1,
-                {"symbols": list(self.production.symbols)},
+                "campaign.universe_bounds",
+                1 <= len(self.production.symbols) <= 25,
+                {
+                    "symbols": list(self.production.symbols),
+                    "symbol_count": len(self.production.symbols),
+                    "maximum_symbols": 25,
+                },
             ),
             CampaignReadinessCheck(
                 "campaign.artifacts_pinned",
@@ -116,6 +120,7 @@ class PaperCampaignReadinessEvaluator:
                 and set(self.production.promoted_run_ids) == set(self.production.symbols)
                 and set(self.production.transparent_shadow_run_ids) == set(self.production.symbols),
                 {
+                    "symbols": list(self.production.symbols),
                     "v1_run_ids": dict(self.production.promoted_run_ids),
                     "v2_run_ids": dict(self.production.transparent_shadow_run_ids),
                 },
