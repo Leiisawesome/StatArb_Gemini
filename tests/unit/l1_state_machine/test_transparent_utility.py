@@ -207,3 +207,68 @@ def test_spread_only_utility_entrypoint_matches_state_entrypoint() -> None:
     )
 
     assert from_spread == from_state
+
+
+def test_transition_confidence_scales_expected_edge_not_fill() -> None:
+    engine = ExpectedUtilityDecisionEngine(_model())
+    low = engine.decide(
+        (_posterior(3_000, 5.0, std=0.5),),
+        _state(),
+        alignment_probability=0.95,
+        transition_probability=0.2,
+        current_risk_fraction=0.0,
+    )
+    high = engine.decide(
+        (_posterior(3_000, 5.0, std=0.5),),
+        _state(),
+        alignment_probability=0.95,
+        transition_probability=0.95,
+        current_risk_fraction=0.0,
+    )
+
+    assert low.alternatives[0].fill_probability == pytest.approx(
+        high.alternatives[0].fill_probability
+    )
+    assert high.expected_utility_bps > low.expected_utility_bps
+    assert high.action is TradeAction.BUY
+
+
+def test_execution_calibration_adapter_uses_fractional_uncertainty_penalty() -> None:
+    from l1_microstructure.calibration.interfaces import ExecutionCalibrationArtifact
+
+    calibration = ExecutionCalibrationArtifact(
+        symbol="AAPL",
+        fill_probability_intercept=0.5,
+        alignment_weight=1.0,
+        spread_penalty=0.05,
+        slippage_intercept_bps=0.4,
+        spread_slippage_weight=0.0,
+        adverse_selection_weight=0.0,
+        regime_fill_multipliers={"calm_liquidity": 1.0},
+        regime_slippage_multipliers={"calm_liquidity": 1.0},
+        metadata={"method": "unit", "row_count": 10, "transition_row_count": 10},
+    )
+    model = UtilityModel.from_execution_calibration(
+        calibration,
+        (3_000_000_000, 15_000_000_000),
+        train_start_ns=1_000,
+        train_end_ns=2_000,
+        fixed_cost_bps=1.2,
+    )
+    engine = ExpectedUtilityDecisionEngine(model)
+
+    # Strong hierarchical edge: mean well above cost, large predictive std.
+    # Full-std uncertainty (old adapter default) would HOLD; fractional acts.
+    decision = engine.decide_for_spread(
+        (_posterior(15_000_000_000, 8.5, std=12.0),),
+        spread_bps=1.0,
+        alignment_probability=1.0,
+        transition_probability=0.9,
+        current_risk_fraction=0.0,
+        regime="calm_liquidity",
+    )
+
+    assert model.uncertainty_penalty_multiplier == pytest.approx(0.25)
+    assert model.risk_penalty_bps == pytest.approx(1.0)
+    assert decision.action is TradeAction.BUY
+    assert decision.expected_utility_bps > 0.0

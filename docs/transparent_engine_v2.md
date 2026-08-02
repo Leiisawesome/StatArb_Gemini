@@ -36,11 +36,14 @@ bounded so a full-day report remains operationally reviewable.
 Promotion also has absolute actionability gates. By default, a candidate must
 select at least 100 actions, act on at least 0.01% of shared opportunities,
 achieve at least a 52% hit rate on those selected actions, and produce
-non-negative mean net drift per selected action. The full-opportunity net-drift
-comparison remains useful, but cannot be diluted by HOLD observations to make
-an inert or loss-making candidate pass. Validation reports created before these
-decision-level metrics and thresholds existed are intentionally rejected and
-must be regenerated from held-out data.
+non-negative mean net drift per selected action (net of modeled execution cost).
+The full-opportunity net-drift comparison remains useful, but cannot be diluted
+by HOLD observations to make an inert or loss-making candidate pass. Expected
+utility weights forecast drift by transition confidence and applies a fractional
+predictive-std uncertainty penalty so strong hierarchical edges remain
+actionable without disabling the actionability floors. Validation reports
+created before these decision-level metrics and thresholds existed are
+intentionally rejected and must be regenerated from held-out data.
 
 Selected-action net drift subtracts the execution cost used by the utility
 decision for the selected horizon. The directional label threshold remains a

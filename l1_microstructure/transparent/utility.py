@@ -142,8 +142,12 @@ class UtilityModel:
                 for key, value in calibration.regime_slippage_multipliers.items()
             },
             fixed_cost_bps=float(fixed_cost_bps),
-            uncertainty_penalty_multiplier=1.0,
-            risk_penalty_bps=2.0,
+            # Full predictive std as a hard subtract kills sparse microstructure
+            # edges whose mean exceeds cost but whose hierarchical std is large.
+            # A fractional std penalty keeps strong edges actionable while still
+            # vetoing pure-noise posteriors.
+            uncertainty_penalty_multiplier=0.25,
+            risk_penalty_bps=1.0,
             minimum_expected_utility_bps=0.0,
             train_start_ns=int(train_start_ns),
             train_end_ns=int(train_end_ns),
@@ -151,6 +155,7 @@ class UtilityModel:
             metadata={
                 "trainer": "execution_calibration_adapter",
                 "source_method": calibration.metadata.get("method", "unknown"),
+                "uncertainty_penalty_multiplier_policy": "fractional_predictive_std_v1",
             },
         )
 
@@ -160,8 +165,8 @@ class UtilityModelTrainer:
         self,
         *,
         fixed_cost_bps: float = 1.2,
-        uncertainty_penalty_multiplier: float = 1.0,
-        risk_penalty_bps: float = 2.0,
+        uncertainty_penalty_multiplier: float = 0.25,
+        risk_penalty_bps: float = 1.0,
         minimum_expected_utility_bps: float = 0.0,
         learning_rate: float = 0.05,
         iterations: int = 500,
@@ -334,7 +339,15 @@ class ExpectedUtilityDecisionEngine:
             risk_penalty = self.model.risk_penalty_bps * current_risk_fraction
             for action, direction in ((TradeAction.BUY, 1.0), (TradeAction.SELL, -1.0)):
                 directional_drift = direction * posterior.mean_bps
-                utility = fill_probability * (directional_drift - cost) - uncertainty - risk_penalty
+                # Transition confidence scales the drift forecast only. Execution
+                # fill remains alignment/spread-driven so weak detections cannot
+                # inflate fill odds, but they do shrink expected edge vs cost.
+                confidence_weighted_drift = transition_probability * directional_drift
+                utility = (
+                    fill_probability * (confidence_weighted_drift - cost)
+                    - uncertainty
+                    - risk_penalty
+                )
                 alternatives.append(
                     UtilityAlternative(
                         action=action,
